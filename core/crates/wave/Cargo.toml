@@ -1,0 +1,10 @@
+[package]
+name = "svxprobe-wave"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+wellen = { workspace = true }
+anyhow = { workspace = true }

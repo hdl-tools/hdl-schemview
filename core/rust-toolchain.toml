@@ -1,0 +1,4 @@
+# Pin the Rust toolchain for reproducible builds across local + CI.
+[toolchain]
+channel = "1.94"
+components = ["rustfmt", "clippy"]

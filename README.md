@@ -29,14 +29,82 @@ Get this right and cross-probing is lookups, not guesswork.
 
 ## Status
 
-Greenfield. The execution plan lives in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
-Architecture-level decisions are recorded as ADRs in
-**[docs/decisions/](docs/decisions/)**.
+**Phase 0 (setup & integration substrate) is in progress.** The execution plan
+lives in **[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs
+in **[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned
+gate threshold are documented in **[docs/fixtures.md](docs/fixtures.md)**.
 
-The project go/no-go is the **Phase 1 matcher gate**: on a frozen reference
-fixture, **≥ 95% of design-scope signals matched, with every miss attributable to
-a named normalization-rule gap (zero mystery misses)**, against both FST and VCD.
-No UI is built until that gate passes.
+What exists today:
+
+- `elaborate/` — the **pyslang** harness that elaborates SystemVerilog and emits
+  the Node-model JSON (`schema/model.schema.json`).
+- `core/` — the **Rust** workspace: `model` (Node model + indices), `ingest`
+  (deserialize the harness JSON), `wave` (waveform access via **wellen**), and the
+  `svxprobe` spike CLI.
+- `fixtures/picorv32_soc/` — the tier-1 reference fixture (PicoRV32 + a SystemVerilog
+  wrapper exercising package / interface / parameterized-instance / generate), with
+  frozen Verilator **FST + VCD** traces and a golden hierarchy.
+
+The project go/no-go is the **Phase 1 matcher gate**: on the frozen fixture,
+**≥ 95% of design-scope signals matched, with every miss attributable to a named
+normalization-rule gap (zero mystery misses)**, against both FST and VCD. No UI is
+built until that gate passes.
+
+## Development setup
+
+The project is polyglot: a Rust core, a Python (pyslang) elaboration harness, and
+Verilator for generating fixture traces.
+
+### Option A — Nix (most reproducible)
+
+A flake provides a dev shell with a pinned Verilator plus the Rust and Python
+toolchains:
+
+```bash
+nix develop            # full shell: verilator + rust + python + uv + jq
+nix develop .#verilator  # just a pinned Verilator (for trace regen)
+```
+
+### Option B — per-language tools
+
+**Rust core** (toolchain pinned by `core/rust-toolchain.toml`):
+
+```bash
+cd core
+cargo test --all     # builds model/ingest/wave/cli; ingests the golden; loads both traces
+cargo run --bin svxprobe -- ingest ../fixtures/picorv32_soc/golden/hierarchy.json
+cargo run --bin svxprobe -- wave   ../fixtures/picorv32_soc/traces/picorv32_soc.fst
+```
+
+**Python harness** — with [uv](https://docs.astral.sh/uv/) (recommended; locked via
+`elaborate/uv.lock`):
+
+```bash
+cd elaborate
+uv sync                # create .venv from pinned deps
+uv run pytest -q
+uv run svxprobe-elaborate --top picorv32_soc -f ../fixtures/picorv32_soc/picorv32_soc.f -o /tmp/h.json
+```
+
+…or with pip as a fallback:
+
+```bash
+cd elaborate
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e '.[dev]'
+pytest -q
+```
+
+**Verilator** (for regenerating fixture traces) — via Nix (pinned, above) or apt
+(`sudo apt-get install -y verilator`, 5.x):
+
+```bash
+bash fixtures/regen.sh picorv32_soc              # regenerate VCD + FST
+bash fixtures/verify_reproducible.sh picorv32_soc # check committed traces still reproduce
+```
+
+See **[docs/fixtures.md](docs/fixtures.md)** for the two-tier fixture policy and
+the full list of pinned tool versions.
 
 ## License
 

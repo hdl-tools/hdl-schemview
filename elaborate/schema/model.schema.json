@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chuanseng-ng/hdl-schemview/elaborate/schema/model.schema.json",
+  "title": "hdl-schemview elaborated Node model",
+  "description": "Serialized projection of the slang-elaborated hierarchy. This is the integration contract between the pyslang harness (producer) and the Rust core (consumer). Phase 0 emits the structural spine; drivers/loads stay empty until Phase 1.",
+  "type": "object",
+  "required": ["schema_version", "design", "files", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "design": { "type": "string", "description": "Top module name." },
+    "generator": {
+      "type": "object",
+      "description": "Provenance of this serialization.",
+      "properties": {
+        "tool": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "files": {
+      "type": "array",
+      "description": "File table; ranges reference entries by index via the `file` field.",
+      "items": {
+        "type": "object",
+        "required": ["id", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 0 },
+          "path": { "type": "string" }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    }
+  },
+  "$defs": {
+    "location": {
+      "type": "object",
+      "required": ["line", "col", "offset"],
+      "additionalProperties": false,
+      "properties": {
+        "line": { "type": "integer", "minimum": 0 },
+        "col": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "range": {
+      "type": "object",
+      "required": ["file", "start", "end"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "integer", "minimum": 0, "description": "Index into the files table." },
+        "start": { "$ref": "#/$defs/location" },
+        "end": { "$ref": "#/$defs/location" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "name", "path", "parent", "children", "symbol_key"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "kind": {
+          "type": "string",
+          "enum": ["Instance", "Net", "Port", "Var", "ModuleDef", "GenBlock"]
+        },
+        "name": { "type": "string" },
+        "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },
+        "parent": { "type": ["integer", "null"] },
+        "children": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "symbol_key": { "type": "string", "description": "Stable per-symbol key; absorbs generate/param expansion." },
+        "def_range": { "anyOf": [ { "$ref": "#/$defs/range" }, { "type": "null" } ] },
+        "inst_range": { "anyOf": [ { "$ref": "#/$defs/range" }, { "type": "null" } ] },
+        "type": { "type": ["string", "null"], "description": "Type string for signal nodes." },
+        "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
+        "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
+      }
+    }
+  }
+}
