@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/model",
+    "crates/ingest",
+    "crates/wave",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/chuanseng-ng/hdl-schemview"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+# wellen: pure-Rust VCD/FST/GHW reader with lazy per-signal loading.
+wellen = "0.25"
+# rust-lapper: interval tree for the source-range reverse index (src_index).
+rust-lapper = "1.3"
+clap = { version = "4", features = ["derive"] }
+
+# Internal crates
+svxprobe-model = { path = "crates/model" }
+svxprobe-ingest = { path = "crates/ingest" }
+svxprobe-wave = { path = "crates/wave" }

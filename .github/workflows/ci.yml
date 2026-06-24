@@ -1,0 +1,64 @@
+name: CI
+
+# PR gate: fast and Verilator-free. Trace regeneration lives in nightly.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (fmt / clippy / test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      # Tests ingest the committed golden and load the committed FST + VCD traces,
+      # which is the Phase 0 round-trip exit gate.
+      - run: cargo test --all
+
+  python:
+    name: Python harness (lint / test / schema)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync deps
+        working-directory: elaborate
+        run: uv sync --frozen
+      - name: Lint
+        working-directory: elaborate
+        run: uv run ruff check .
+      - name: Test
+        working-directory: elaborate
+        run: uv run pytest -q
+      - name: Validate committed golden against schema
+        working-directory: elaborate
+        run: uv run python -m svxprobe_elaborate.validate ../fixtures/picorv32_soc/golden/hierarchy.json
+      - name: Golden is reproducible from RTL (elaboration is deterministic)
+        run: |
+          uv run --project elaborate svxprobe-elaborate --top picorv32_soc \
+            fixtures/picorv32_soc/rtl/picorv32.v \
+            fixtures/picorv32_soc/rtl/soc_pkg.sv \
+            fixtures/picorv32_soc/rtl/mem_if.sv \
+            fixtures/picorv32_soc/rtl/soc_mem.sv \
+            fixtures/picorv32_soc/rtl/picorv32_soc.sv \
+            -o /tmp/golden_regen.json
+          diff <(jq -S . fixtures/picorv32_soc/golden/hierarchy.json) \
+               <(jq -S . /tmp/golden_regen.json) \
+            || { echo "::error::golden/hierarchy.json is stale; re-run the harness and commit"; exit 1; }

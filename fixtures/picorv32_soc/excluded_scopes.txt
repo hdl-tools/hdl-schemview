@@ -1,0 +1,19 @@
+# Excluded scopes for the picorv32_soc fixture.
+#
+# Waveform-side scope prefixes that are NOT part of the elaborated design and so
+# are excluded from the Phase-1 matcher denominator (the "design-scope signals"
+# the >= 95% / zero-mystery-miss gate is measured against). Each line is a scope
+# path prefix as it appears in the Verilator trace; '#' begins a comment.
+#
+# Rationale: the golden hierarchy is elaborated with top = picorv32_soc, so the
+# testbench wrapper and the simulator's synthetic top are outside the design and
+# must not count as misses.
+
+# Verilator's synthetic top wrapper.
+TOP
+
+# Testbench wrapper (clock/reset/dump driver; top = tb in the trace).
+tb
+
+# Package scope emitted by the simulator; not a design instance.
+soc_pkg

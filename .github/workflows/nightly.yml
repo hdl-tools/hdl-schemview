@@ -1,0 +1,49 @@
+name: Nightly
+
+# Heavier checks that need Verilator and a real production core. Not a PR gate.
+on:
+  schedule:
+    - cron: "17 4 * * *"   # 04:17 UTC daily (off the :00 mark)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro-tier1:
+    name: Tier-1 trace reproducibility (Verilator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Verilator
+        run: sudo apt-get update && sudo apt-get install -y verilator
+      - name: Install toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: core
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      # Regenerates traces with Verilator and checks they are structurally
+      # equivalent to the committed ones (validated locally; see the script).
+      - name: Verify reproducible
+        run: bash fixtures/verify_reproducible.sh picorv32_soc
+
+  stress-tier2:
+    name: Tier-2 stress (real core, experimental)
+    runs-on: ubuntu-latest
+    # Tier-2 is provisioned but not yet hardened end-to-end; do not fail the
+    # nightly on it while it is being brought up. Tracked in docs/fixtures.md.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync harness deps
+        working-directory: elaborate
+        run: uv sync --frozen
+      - name: Fetch pinned real core
+        run: bash fixtures/ibex_soc/fetch.sh
+      - name: Elaborate real core (stress the pyslang harness)
+        run: bash fixtures/ibex_soc/elaborate.sh

@@ -1,0 +1,22 @@
+# Rust
+/core/target/
+target/
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Fixture build artifacts (traces under */traces/ are committed; build dirs are not)
+fixtures/*/build/
+obj_dir/
+
+# Nix
+result
+result-*
+
+# Editor / OS
+.DS_Store
+*.swp

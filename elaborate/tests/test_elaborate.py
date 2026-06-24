@@ -1,0 +1,61 @@
+"""Tests for the elaboration harness against the tier-1 fixture."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from svxprobe_elaborate.elaborate import build_model
+from svxprobe_elaborate.validate import _check_invariants, validate_model
+
+REPO = Path(__file__).resolve().parents[2]
+RTL = REPO / "fixtures" / "picorv32_soc" / "rtl"
+SOURCES = [
+    str(RTL / "picorv32.v"),
+    str(RTL / "soc_pkg.sv"),
+    str(RTL / "mem_if.sv"),
+    str(RTL / "soc_mem.sv"),
+    str(RTL / "picorv32_soc.sv"),
+]
+
+
+@pytest.fixture(scope="module")
+def model() -> dict:
+    return build_model(SOURCES, top="picorv32_soc")
+
+
+def test_design_top(model: dict) -> None:
+    assert model["design"] == "picorv32_soc"
+    assert model["schema_version"] == 1
+
+
+def test_schema_valid(model: dict) -> None:
+    validate_model(model)
+    assert _check_invariants(model) == []
+
+
+def test_exercises_four_constructs(model: dict) -> None:
+    """The fixture exists to stress generate / param / package / interface."""
+    paths = {n["path"] for n in model["nodes"]}
+    kinds = {n["kind"] for n in model["nodes"]}
+
+    # generate-array expansion (the matcher's hardest case)
+    assert "picorv32_soc.g_lane[0]" in paths
+    assert "picorv32_soc.g_lane[1]" in paths
+    assert "GenBlock" in kinds
+
+    # parameterized instances: two core lanes
+    assert "picorv32_soc.g_lane[0].core" in paths
+    assert "picorv32_soc.g_lane[1].core" in paths
+
+    # interface instance per lane
+    assert "picorv32_soc.g_lane[0].bus" in paths
+
+    # package-typed signal
+    assert "picorv32_soc.g_lane[0].lane_state" in paths
+
+
+def test_nodes_have_paths_and_keys(model: dict) -> None:
+    for n in model["nodes"]:
+        assert n["path"], f"node {n['id']} has empty path"
+        assert n["symbol_key"], f"node {n['id']} has empty symbol_key"
