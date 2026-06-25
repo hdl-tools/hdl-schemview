@@ -195,7 +195,7 @@ async function renderSchematic(graph: SchematicGraph) {
         "d",
         west
           ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
-          : `M${edgeX - PIN},${py - 4} L${edgeX - PIN},${py + 4} L${edgeX},${py} Z`,
+          : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
       );
       arrow.onclick = () => selectNode(pid);
       g.appendChild(arrow);
