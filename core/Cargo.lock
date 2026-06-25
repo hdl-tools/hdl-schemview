@@ -411,9 +411,11 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "serde_json",
  "svxprobe-ingest",
  "svxprobe-matcher",
  "svxprobe-model",
+ "svxprobe-schematic",
  "svxprobe-wave",
  "svxprobe-xprobe",
 ]
@@ -442,6 +444,15 @@ version = "0.0.0"
 dependencies = [
  "rust-lapper",
  "serde",
+]
+
+[[package]]
+name = "svxprobe-schematic"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "svxprobe-ingest",
+ "svxprobe-model",
 ]
 
 [[package]]

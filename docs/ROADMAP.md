@@ -214,6 +214,11 @@ return to the indicated loop-back point rather than proceeding.
 
 ### Phase 3 — Schematic view (third projection) · Size: L
 
+> **Status: in progress (3 stacked PRs).** 3a — connectivity (port-connection
+> `edges` in the model) ✅. 3b — the headless `schematic` crate (scope graph,
+> on-demand `expand`, fan-in/out `cone`; `svxprobe graph` CLI) ✅. 3c — the Tauri
+> GUI (three linked panes) ⏳.
+
 - **Goal:** Generate a navigable schematic from the elaborated model and link it
   into the bus.
 - **Tasks:**

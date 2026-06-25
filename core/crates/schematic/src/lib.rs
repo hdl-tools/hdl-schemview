@@ -1,0 +1,269 @@
+//! Schematic extraction (roadmap Phase 3 — the third projection).
+//!
+//! Turns the elaborated model into a layout-agnostic graph the GUI lays out with
+//! ELK. **Identity is free**: every schematic node/port carries its model NodeId,
+//! so clicking a box or wire feeds straight into the cross-probe Selection bus —
+//! no schematic-specific id space.
+//!
+//! Three views are produced, all on demand (never the whole design at once):
+//! * [`scope_graph`] — the boxes (child instances) + wiring inside one scope,
+//! * [`expand`] — the same, one level down into an instance,
+//! * [`cone`] — the fan-in/out of a net (its driving/loading boxes).
+
+use serde::Serialize;
+use svxprobe_model::{Design, Dir, Edge, NodeId, NodeKind};
+
+/// Which border a port sits on (drives ELK port placement).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    West,
+    East,
+}
+
+/// A pin on a box.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchPort {
+    pub id: NodeId,
+    pub name: String,
+    pub side: Side,
+}
+
+/// A box in the schematic (an instance), carrying its model identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchNode {
+    pub id: NodeId,
+    pub kind: NodeKind,
+    pub label: String,
+    pub expandable: bool,
+    pub ports: Vec<SchPort>,
+}
+
+/// A wire between two endpoints (a box or one of its ports), by model NodeId.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchEdge {
+    pub id: u32,
+    pub source: NodeId,
+    pub target: NodeId,
+}
+
+/// A renderable, layout-agnostic schematic graph for one scope or cone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchematicGraph {
+    pub root: String,
+    pub nodes: Vec<SchNode>,
+    pub edges: Vec<SchEdge>,
+}
+
+fn side_of(dir: Dir) -> Side {
+    match dir {
+        Dir::Out => Side::East,
+        _ => Side::West,
+    }
+}
+
+/// The boxes directly inside a scope: child `Instance`s and child `GenBlock`s
+/// (a generate block/array is shown as an expandable group box).
+fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
+    design
+        .node(scope)
+        .map(|n| {
+            n.children
+                .iter()
+                .copied()
+                .filter(|&c| {
+                    matches!(
+                        design.node(c).map(|n| n.kind),
+                        Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The box (from `boxes`) that `node` lives in — its nearest ancestor that is a
+/// box. `None` if `node` is outside all of them.
+fn box_of(
+    design: &Design,
+    node: NodeId,
+    boxes: &std::collections::HashSet<NodeId>,
+) -> Option<NodeId> {
+    let mut cur = node;
+    loop {
+        if boxes.contains(&cur) {
+            return Some(cur);
+        }
+        cur = design.node(cur)?.parent?;
+    }
+}
+
+fn is_kind(design: &Design, id: NodeId, kind: NodeKind) -> bool {
+    design.node(id).map(|n| n.kind) == Some(kind)
+}
+
+/// Last segment of a path (used to label unnamed generate blocks).
+fn last_segment(path: &str) -> &str {
+    path.rsplit('.').next().unwrap_or(path)
+}
+
+/// Build a box node with its ports; port sides come from incident edges.
+fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
+    let n = design.node(bx)?;
+    // Generate blocks have no ports; instances expose their Port children.
+    let ports: Vec<SchPort> = n
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| is_kind(design, c, NodeKind::Port))
+        .map(|pid| {
+            // Side from the first edge incident on this port (default West).
+            let side = design
+                .edges_of(pid)
+                .iter()
+                .find(|e| e.port == pid)
+                .map(|e| side_of(e.dir))
+                .unwrap_or(Side::West);
+            SchPort {
+                id: pid,
+                name: design.node(pid).map(|n| n.name.clone()).unwrap_or_default(),
+                side,
+            }
+        })
+        .collect();
+    let label = if n.name.is_empty() {
+        last_segment(&n.path).to_string()
+    } else {
+        n.name.clone()
+    };
+    Some(SchNode {
+        id: bx,
+        kind: n.kind,
+        label,
+        expandable: !child_boxes(design, bx).is_empty(),
+        ports,
+    })
+}
+
+/// The schematic of one scope: child-instance boxes wired by the connections
+/// whose two ends both live inside the scope. Connections that leave the scope
+/// (e.g. to a top-level clock) are omitted here; use [`cone`] to trace those.
+pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> {
+    let scope = *design.nodes_at_path(scope_path).iter().find(|&&id| {
+        matches!(
+            design.node(id).map(|n| n.kind),
+            Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
+        )
+    })?;
+
+    let boxes = child_boxes(design, scope);
+    let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
+    let nodes: Vec<SchNode> = boxes.iter().filter_map(|&b| make_box(design, b)).collect();
+
+    // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
+    let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
+        let b = box_of(design, node, &box_set)?;
+        // Draw to the specific port if the node is a Port directly under the box;
+        // otherwise anchor to the box.
+        let pin = if is_kind(design, node, NodeKind::Port)
+            && design.node(node).and_then(|n| n.parent) == Some(b)
+        {
+            node
+        } else {
+            b
+        };
+        Some((b, pin))
+    };
+
+    let mut edges = Vec::new();
+    for (i, e) in design.edges().iter().enumerate() {
+        if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
+            if sb != tb {
+                edges.push(SchEdge {
+                    id: i as u32,
+                    source: src,
+                    target: tgt,
+                });
+            }
+        }
+    }
+
+    Some(SchematicGraph {
+        root: scope_path.to_string(),
+        nodes,
+        edges,
+    })
+}
+
+/// Expand an instance: the scope graph one level down inside it.
+pub fn expand(design: &Design, instance: NodeId) -> Option<SchematicGraph> {
+    let path = design.node(instance)?.path.clone();
+    scope_graph(design, &path)
+}
+
+/// Fan-in/out cone of a node (typically a net or port): the boxes directly
+/// connected to it, following edge direction up to `depth` hops.
+pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> SchematicGraph {
+    let mut frontier = vec![start];
+    let mut seen_boxes = std::collections::BTreeSet::new();
+    let mut edges: Vec<SchEdge> = Vec::new();
+    let mut seen_edge_ids = std::collections::BTreeSet::new();
+
+    for _ in 0..depth.max(1) {
+        let mut next = Vec::new();
+        for &node in &frontier {
+            for e in incident_edges(design, node) {
+                // Direction filter: downstream follows 'out' from the node side.
+                let keep = match dir {
+                    Dir::Out => e.dir == Dir::Out,
+                    Dir::In => e.dir == Dir::In,
+                    Dir::Inout => true,
+                };
+                if !keep || !seen_edge_ids.insert(e.id) {
+                    continue;
+                }
+                edges.push(SchEdge {
+                    id: e.id,
+                    source: e.port,
+                    target: e.endpoint,
+                });
+                let other = if e.port == node { e.endpoint } else { e.port };
+                if let Some(parent_inst) = nearest_instance(design, other) {
+                    if seen_boxes.insert(parent_inst) {
+                        next.push(other);
+                    }
+                }
+            }
+        }
+        frontier = next;
+        if frontier.is_empty() {
+            break;
+        }
+    }
+
+    let nodes = seen_boxes
+        .into_iter()
+        .filter_map(|b| make_box(design, b))
+        .collect();
+    let root = design
+        .node(start)
+        .map(|n| n.path.clone())
+        .unwrap_or_default();
+    SchematicGraph { root, nodes, edges }
+}
+
+fn incident_edges(design: &Design, node: NodeId) -> Vec<Edge> {
+    design.edges_of(node).into_iter().copied().collect()
+}
+
+/// The nearest enclosing Instance for a node (the box it belongs to).
+fn nearest_instance(design: &Design, node: NodeId) -> Option<NodeId> {
+    let mut cur = node;
+    loop {
+        let n = design.node(cur)?;
+        if n.kind == NodeKind::Instance {
+            return Some(cur);
+        }
+        cur = n.parent?;
+    }
+}
