@@ -82,7 +82,9 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     }
     const west = n.ports.filter((p) => p.side !== "east");
     const east = n.ports.filter((p) => p.side === "east");
-    const wMax = west.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
+    // Constant-tied inputs show their literal inside the box, before the name.
+    const westLen = (p: SchPort) => pinLabelLen(p) + (p.constant ? p.constant.length + 2 : 0);
+    const wMax = west.reduce((m, p) => Math.max(m, westLen(p)), 0);
     const eMax = east.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
     const titleLen = Math.max(n.label.length, n.module ? n.module.length + 2 : 0);
     // Wide enough for the title and for the west+east pin labels side by side.

@@ -84,7 +84,9 @@ async function renderSchematic(graph: SchematicGraph) {
 
   // 1. Wires (under everything). Collect each net's label to draw last, on top,
   //    attached to the midpoint of the wire's longest (most legible) segment.
+  //    A net name is drawn only once per view (it may fan out over many wires).
   const wireLabels: SVGTextElement[] = [];
+  const seenNets = new Set<string>();
   for (const e of laid.edges ?? []) {
     const segs: [any, any][] = [];
     for (const sec of e.sections ?? []) {
@@ -96,7 +98,8 @@ async function renderSchematic(graph: SchematicGraph) {
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
     }
     const text = e.labels?.[0]?.text;
-    if (text && segs.length) {
+    if (text && segs.length && !seenNets.has(text)) {
+      seenNets.add(text);
       let best = segs[0];
       let bestLen = -1;
       for (const [a, b] of segs) {
@@ -189,32 +192,29 @@ async function renderSchematic(graph: SchematicGraph) {
       g.appendChild(arrow);
 
       if (sp) {
-        const t = document.createElementNS(SVGNS, "text");
-        t.setAttribute("class", "pin-label");
-        t.setAttribute("x", String(west ? px + 11 : px - 11));
-        t.setAttribute("y", String(py + 3));
-        t.setAttribute("text-anchor", west ? "start" : "end");
-        t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
-        t.onclick = () => selectNode(pid);
-        g.appendChild(t);
-
-        // Constant driver: show the literal just outside the input pin.
-        if (sp.constant && west) {
-          const stub = document.createElementNS(SVGNS, "line");
-          stub.setAttribute("class", "const-wire");
-          stub.setAttribute("x1", String(px - 16));
-          stub.setAttribute("y1", String(py));
-          stub.setAttribute("x2", String(px));
-          stub.setAttribute("y2", String(py));
-          g.appendChild(stub);
+        const label = sp.width ? `${sp.name}${sp.width}` : sp.name;
+        let nameX = west ? px + 11 : px - 11;
+        // Constant-tied input: draw the literal *inside* the box before the name
+        // (no external wire), so routed wires can never cross a constant.
+        if (west && sp.constant) {
           const ct = document.createElementNS(SVGNS, "text");
           ct.setAttribute("class", "const-label");
-          ct.setAttribute("x", String(px - 19));
+          ct.setAttribute("x", String(px + 11));
           ct.setAttribute("y", String(py + 3));
-          ct.setAttribute("text-anchor", "end");
+          ct.setAttribute("text-anchor", "start");
           ct.textContent = sp.constant;
+          ct.onclick = () => selectNode(pid);
           g.appendChild(ct);
+          nameX = px + 13 + sp.constant.length * 6.2 + 5;
         }
+        const t = document.createElementNS(SVGNS, "text");
+        t.setAttribute("class", "pin-label");
+        t.setAttribute("x", String(nameX));
+        t.setAttribute("y", String(py + 3));
+        t.setAttribute("text-anchor", west ? "start" : "end");
+        t.textContent = label;
+        t.onclick = () => selectNode(pid);
+        g.appendChild(t);
       }
     }
     root.appendChild(g);
