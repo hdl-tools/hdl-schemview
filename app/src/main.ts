@@ -2,7 +2,7 @@
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
 import { layout, nodeId } from "./elk";
-import type { ProbeResponse, SchematicGraph, ValueChange } from "./types";
+import type { ProbeResponse, SchematicGraph, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -74,6 +74,7 @@ async function renderSchematic(graph: SchematicGraph) {
   svg.setAttribute("width", String(Math.max(laid.width ?? 400, 200)));
   svg.setAttribute("height", String(Math.max(laid.height ?? 300, 150)));
 
+  // Wires first (under everything), then their net labels, then the boxes.
   for (const e of laid.edges ?? []) {
     for (const sec of e.sections ?? []) {
       const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
@@ -82,10 +83,24 @@ async function renderSchematic(graph: SchematicGraph) {
       path.setAttribute("points", pts.map((p: any) => `${p.x},${p.y}`).join(" "));
       svg.appendChild(path);
     }
+    for (const lab of e.labels ?? []) {
+      if (!lab.text) continue;
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("class", "wire-label");
+      t.setAttribute("x", String((lab.x ?? 0) + (lab.width ?? 0) / 2));
+      t.setAttribute("y", String((lab.y ?? 0) + (lab.height ?? 11) - 1));
+      t.setAttribute("text-anchor", "middle");
+      t.textContent = lab.text;
+      svg.appendChild(t);
+    }
   }
 
   for (const c of laid.children ?? []) {
     const id = Number(String(c.id).slice(1));
+    const node = graph.nodes.find((n) => n.id === id);
+    const portById = new Map<number, SchPort>();
+    node?.ports.forEach((p) => portById.set(p.id, p));
+
     const g = document.createElementNS(SVGNS, "g");
     g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
@@ -93,29 +108,66 @@ async function renderSchematic(graph: SchematicGraph) {
     rect.setAttribute("class", "box" + (state.selected === id ? " sel" : ""));
     rect.setAttribute("width", String(c.width));
     rect.setAttribute("height", String(c.height));
-    rect.setAttribute("rx", "5");
-    const node = graph.nodes.find((n) => n.id === id);
+    rect.setAttribute("rx", "4");
     rect.onclick = () => selectNode(id);
     rect.ondblclick = () => {
       if (node?.expandable) setScope(node.path ?? "", node.label);
     };
     g.appendChild(rect);
 
-    const label = document.createElementNS(SVGNS, "text");
-    label.setAttribute("class", "box-label");
-    label.setAttribute("x", String(c.width / 2));
-    label.setAttribute("y", "16");
-    label.setAttribute("text-anchor", "middle");
-    label.textContent = c.labels?.[0]?.text + (node?.expandable ? " ▸" : "");
-    g.appendChild(label);
+    // Title: instance name, with the module type on a second line (like a
+    // schematic block caption), centred in the box.
+    const cx = c.width / 2;
+    const cy = c.height / 2;
+    const name = document.createElementNS(SVGNS, "text");
+    name.setAttribute("class", "box-label");
+    name.setAttribute("x", String(cx));
+    name.setAttribute("y", String(node?.module ? cy - 4 : cy + 4));
+    name.setAttribute("text-anchor", "middle");
+    name.textContent = (c.labels?.[0]?.text ?? "") + (node?.expandable ? " ▸" : "");
+    name.style.pointerEvents = "none";
+    g.appendChild(name);
+    if (node?.module) {
+      const mod = document.createElementNS(SVGNS, "text");
+      mod.setAttribute("class", "box-sublabel");
+      mod.setAttribute("x", String(cx));
+      mod.setAttribute("y", String(cy + 12));
+      mod.setAttribute("text-anchor", "middle");
+      mod.textContent = `(${node.module})`;
+      mod.style.pointerEvents = "none";
+      g.appendChild(mod);
+    }
 
+    // Pins: a direction arrow at each port (in on the west, out on the east)
+    // plus the port name + bit-width, drawn just inside the border.
     for (const p of c.ports ?? []) {
-      const dot = document.createElementNS(SVGNS, "circle");
-      dot.setAttribute("class", "port");
-      dot.setAttribute("cx", String(p.x ?? 0));
-      dot.setAttribute("cy", String(p.y ?? 0));
-      dot.setAttribute("r", "3");
-      g.appendChild(dot);
+      const pid = Number(String(p.id).slice(1));
+      const sp = portById.get(pid);
+      const px = p.x ?? 0;
+      const py = p.y ?? 0;
+      const west = sp ? sp.side !== "east" : px < c.width / 2;
+
+      const arrow = document.createElementNS(SVGNS, "path");
+      arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+      arrow.setAttribute(
+        "d",
+        west
+          ? `M${px - 9},${py - 4} L${px - 9},${py + 4} L${px},${py} Z`
+          : `M${px},${py - 4} L${px},${py + 4} L${px + 9},${py} Z`,
+      );
+      arrow.onclick = () => selectNode(pid);
+      g.appendChild(arrow);
+
+      if (sp) {
+        const t = document.createElementNS(SVGNS, "text");
+        t.setAttribute("class", "pin-label");
+        t.setAttribute("x", String(west ? px + 6 : px - 6));
+        t.setAttribute("y", String(py + 3));
+        t.setAttribute("text-anchor", west ? "start" : "end");
+        t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+        t.onclick = () => selectNode(pid);
+        g.appendChild(t);
+      }
     }
     svg.appendChild(g);
   }
@@ -224,6 +276,28 @@ function renderPicker(resp: ProbeResponse) {
 
 // -- bootstrap -------------------------------------------------------------
 
+// Dark is the default; the toggle flips to a light schematic theme and persists.
+function initTheme() {
+  try {
+    if (localStorage.getItem("theme") === "light") {
+      document.documentElement.dataset.theme = "light";
+    }
+  } catch {
+    /* localStorage may be unavailable; default dark is fine */
+  }
+  $("theme-toggle").addEventListener("click", () => {
+    const root = document.documentElement;
+    const toLight = root.dataset.theme !== "light";
+    if (toLight) root.dataset.theme = "light";
+    else delete root.dataset.theme;
+    try {
+      localStorage.setItem("theme", toLight ? "light" : "dark");
+    } catch {
+      /* ignore persistence failure */
+    }
+  });
+}
+
 function init() {
   ($("model") as HTMLInputElement).value =
     "../../fixtures/picorv32_soc/golden/hierarchy.json";
@@ -231,6 +305,7 @@ function init() {
     "../../fixtures/picorv32_soc/traces/picorv32_soc.fst";
   ($("srcroot") as HTMLInputElement).value = "../..";
   $("load").addEventListener("click", load);
+  initTheme();
 }
 
 document.addEventListener("DOMContentLoaded", init);

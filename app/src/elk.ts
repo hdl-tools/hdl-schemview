@@ -1,8 +1,15 @@
 // Adapter from our SchematicGraph to an ELK graph, plus a layout helper.
 // `toElk` is pure (unit-tested); `layout` runs elkjs.
 import ELK from "elkjs/lib/elk.bundled.js";
-import type { SchematicGraph } from "./types";
+import type { SchematicGraph, SchPort } from "./types";
 
+export interface ElkLabel {
+  text: string;
+  width?: number;
+  height?: number;
+  x?: number;
+  y?: number;
+}
 export interface ElkPort {
   id: string;
   width: number;
@@ -13,7 +20,7 @@ export interface ElkChild {
   id: string;
   width: number;
   height: number;
-  labels: { text: string }[];
+  labels: ElkLabel[];
   ports: ElkPort[];
   layoutOptions: Record<string, string>;
   x?: number;
@@ -23,6 +30,7 @@ export interface ElkEdge {
   id: string;
   sources: string[];
   targets: string[];
+  labels?: ElkLabel[];
 }
 export interface ElkGraph {
   id: string;
@@ -34,20 +42,39 @@ export interface ElkGraph {
 export const nodeId = (id: number) => `n${id}`;
 export const portId = (id: number) => `p${id}`;
 
+// Rough character widths (px) for the fonts used in the schematic, so boxes are
+// sized to fit their (now visible) pin and title text without overlap.
+const PIN_CH = 6.2; // port-name + width label
+const TITLE_CH = 7.5; // instance / (module) title
+const ROW_H = 20; // vertical space per pin row
+
+const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 1 : 0);
+
 /// Pure mapping: SchematicGraph -> ELK graph (no geometry yet).
 export function toElk(graph: SchematicGraph): ElkGraph {
   const portOwner = new Set<number>();
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
 
   const children: ElkChild[] = graph.nodes.map((n) => {
-    const h = Math.max(46, n.ports.length * 16 + 24);
-    const w = Math.max(120, n.label.length * 9 + 48);
+    const west = n.ports.filter((p) => p.side !== "east");
+    const east = n.ports.filter((p) => p.side === "east");
+    const wMax = west.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
+    const eMax = east.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
+    const titleLen = Math.max(n.label.length, n.module ? n.module.length + 2 : 0);
+    // Wide enough for the title and for the west+east pin labels side by side.
+    const w = Math.max(150, titleLen * TITLE_CH + 28, (wMax + eMax) * PIN_CH + 56);
+    const rows = Math.max(west.length, east.length, 1);
+    // Tall enough for the two-line title band plus one row per pin.
+    const h = Math.max(58, 36 + rows * ROW_H);
     return {
       id: nodeId(n.id),
       width: w,
       height: h,
       labels: [{ text: n.label }],
-      layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+      layoutOptions: {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.spacing.portPort": "12",
+      },
       ports: n.ports.map((p) => ({
         id: portId(p.id),
         width: 8,
@@ -63,6 +90,8 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     id: `e${e.id}`,
     sources: [endpoint(e.source)],
     targets: [endpoint(e.target)],
+    // Give ELK the net label so it reserves space and returns a placement.
+    labels: e.net ? [{ text: e.net, width: e.net.length * 5.5, height: 11 }] : undefined,
   }));
 
   return {
@@ -70,8 +99,11 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "60",
-      "elk.spacing.nodeNode": "30",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "90",
+      "elk.spacing.nodeNode": "44",
+      "elk.spacing.edgeNode": "18",
+      "elk.spacing.edgeEdge": "12",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "18",
     },
     children,
     edges,

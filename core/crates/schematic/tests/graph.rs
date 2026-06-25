@@ -32,12 +32,33 @@ fn scope_graph_has_boxes_and_wires() {
         "core pins"
     );
 
+    // Module type is recovered from the defining file's basename (picorv32.v).
+    assert_eq!(core.module.as_deref(), Some("picorv32"), "core module type");
+
+    // A bus pin carries its declared bit-range; a scalar pin has none.
+    let mem_addr = core.ports.iter().find(|p| p.name == "mem_addr").unwrap();
+    assert_eq!(mem_addr.width.as_deref(), Some("[31:0]"), "mem_addr width");
+    let clk = core.ports.iter().find(|p| p.name == "clk").unwrap();
+    assert_eq!(clk.width, None, "scalar pin has no width");
+
     // There is internal wiring, including the memory↔bus connection.
     assert!(!g.edges.is_empty(), "no wires");
     let bus = id(&d, "picorv32_soc.g_lane[0].bus");
     assert!(
         g.edges.iter().any(|e| e.source == bus || e.target == bus),
         "no edge touches the bus instance"
+    );
+
+    // Wires carry the connecting net name, relative to the scope (e.g. bus.valid).
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.net.as_deref().is_some_and(|s| s.starts_with("bus."))),
+        "no wire labeled with a bus net: {:?}",
+        g.edges
+            .iter()
+            .filter_map(|e| e.net.as_deref())
+            .collect::<Vec<_>>()
     );
 }
 
