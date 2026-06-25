@@ -8,6 +8,8 @@ export interface SchPort {
   side: Side;
   /** Bit-range like "[31:0]" for a bus pin, absent for a scalar. */
   width?: string;
+  /** Literal driving this input (e.g. "32'd0"), shown as a constant source. */
+  constant?: string;
 }
 export interface SchNode {
   id: number;

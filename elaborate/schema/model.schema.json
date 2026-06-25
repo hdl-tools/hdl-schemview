@@ -95,6 +95,10 @@
           "enum": ["in", "out", "inout", null],
           "description": "Declared direction for Port nodes (drives schematic pin side); null otherwise."
         },
+        "const": {
+          "type": ["string", "null"],
+          "description": "Literal value tied to a Port input (e.g. \"32'd0\"); null if driven by a net."
+        },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
       }

@@ -31,6 +31,10 @@ pub struct SchPort {
     /// for a scalar. Shown next to the pin label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<String>,
+    /// Literal driving this input (`32'd0`), shown as a constant source; `None`
+    /// if net-driven.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<String>,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -162,9 +166,12 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         .iter()
         .copied()
         .filter(|&c| is_kind(design, c, NodeKind::Port))
-        // Show only wired pins; dangling ports (unconnected outputs like
-        // mem_la_*, pcpi_*) are hidden to keep blocks compact.
-        .filter(|&pid| design.edges_of(pid).iter().any(|e| e.port == pid))
+        // Show wired pins and constant-tied inputs; dangling ports (unconnected
+        // outputs like mem_la_*, pcpi_*) are hidden to keep blocks compact.
+        .filter(|&pid| {
+            design.edges_of(pid).iter().any(|e| e.port == pid)
+                || design.node(pid).is_some_and(|n| n.const_value.is_some())
+        })
         .map(|pid| {
             let node = design.node(pid);
             // Prefer the port's declared direction so even unconnected pins land
@@ -185,6 +192,7 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),
                 side,
                 width: node.and_then(|n| width_of(&n.type_)),
+                constant: node.and_then(|n| n.const_value.clone()),
             }
         })
         .collect();
@@ -225,6 +233,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             name: n.name.clone(),
             side,
             width: width_of(&n.type_),
+            constant: None,
         }],
         module: None,
     })

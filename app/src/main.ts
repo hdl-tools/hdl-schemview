@@ -197,6 +197,24 @@ async function renderSchematic(graph: SchematicGraph) {
         t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
         t.onclick = () => selectNode(pid);
         g.appendChild(t);
+
+        // Constant driver: show the literal just outside the input pin.
+        if (sp.constant && west) {
+          const stub = document.createElementNS(SVGNS, "line");
+          stub.setAttribute("class", "const-wire");
+          stub.setAttribute("x1", String(px - 16));
+          stub.setAttribute("y1", String(py));
+          stub.setAttribute("x2", String(px));
+          stub.setAttribute("y2", String(py));
+          g.appendChild(stub);
+          const ct = document.createElementNS(SVGNS, "text");
+          ct.setAttribute("class", "const-label");
+          ct.setAttribute("x", String(px - 19));
+          ct.setAttribute("y", String(py + 3));
+          ct.setAttribute("text-anchor", "end");
+          ct.textContent = sp.constant;
+          g.appendChild(ct);
+        }
       }
     }
     root.appendChild(g);

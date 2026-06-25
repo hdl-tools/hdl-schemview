@@ -73,6 +73,20 @@ fn scope_graph_has_boxes_and_wires() {
 }
 
 #[test]
+fn constant_tied_inputs_show_their_literal() {
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();
+    let core = g.nodes.iter().find(|n| n.label == "core").unwrap();
+    // irq is tied to 32'd0 — shown (not hidden) with its constant driver.
+    let irq = core
+        .ports
+        .iter()
+        .find(|p| p.name == "irq")
+        .expect("const-tied irq should be shown");
+    assert_eq!(irq.constant.as_deref(), Some("32'd0"), "irq constant");
+}
+
+#[test]
 fn generate_blocks_are_flattened_at_top() {
     let d = design();
     // The generate array is dissolved: both lanes' leaf instances appear at the

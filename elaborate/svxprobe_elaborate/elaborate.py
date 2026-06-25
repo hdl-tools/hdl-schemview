@@ -127,6 +127,7 @@ class Elaborator:
             "inst_range": None,
             "type": None,
             "dir": None,
+            "const": None,
             "drivers": [],
             "loads": [],
         }
@@ -214,6 +215,18 @@ class Elaborator:
                 out.append(path)
         return out
 
+    def _const_str(self, expr: Any) -> Optional[str]:
+        """The literal value of a constant-tied connection (`.irq(32'd0)`), else
+        None. Used to annotate inputs driven by a constant rather than a net."""
+        try:
+            c = expr.constant
+        except Exception:
+            return None
+        if c is None or getattr(c, "bad", False):
+            return None
+        s = str(c)
+        return s if s and s != "None" else None
+
     def _pick_node(self, path: str, prefer: tuple[str, ...]) -> Optional[int]:
         """Resolve a path to a node id, preferring the given kinds in order."""
         ids = self._by_path.get(path)
@@ -252,10 +265,17 @@ class Elaborator:
                 direction = dir_map.get(
                     str(getattr(port, "direction", "")).split(".")[-1], "inout"
                 )
-                for rp in self._expr_refs(expr):
+                refs = self._expr_refs(expr)
+                for rp in refs:
                     end_id = self._pick_node(rp, ("Net", "Var", "Port", "Instance"))
                     if end_id is not None and end_id != port_id:
                         seen_edges.add((port_id, end_id, direction))
+                # Input tied to a literal (no net): record the constant on the
+                # port so the schematic can show its driver (e.g. 32'd0).
+                if not refs and port_id != inst_id:
+                    lit = self._const_str(expr)
+                    if lit is not None and self.nodes[port_id]["kind"] == "Port":
+                        self.nodes[port_id]["const"] = lit
 
         return [
             {"id": i, "port": p, "endpoint": e, "dir": d}

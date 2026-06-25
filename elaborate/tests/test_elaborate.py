@@ -73,6 +73,15 @@ def test_ports_carry_direction(model: dict) -> None:
     assert by["picorv32_soc.g_lane[0].core.eoi"]["dir"] == "out"
 
 
+def test_constant_tied_inputs(model: dict) -> None:
+    """Inputs tied to a literal carry that constant on the Port node."""
+    by = {n["path"]: n for n in model["nodes"] if n["kind"] == "Port"}
+    assert by["picorv32_soc.g_lane[0].core.irq"]["const"] == "32'd0"
+    assert by["picorv32_soc.g_lane[0].core.pcpi_wr"]["const"] == "1'b0"
+    # A net-driven input has no constant.
+    assert by["picorv32_soc.g_lane[0].core.clk"]["const"] is None
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]

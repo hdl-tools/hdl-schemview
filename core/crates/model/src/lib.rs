@@ -75,6 +75,9 @@ pub struct Node {
     /// otherwise.
     #[serde(default)]
     pub dir: Option<Dir>,
+    /// Literal value tied to a `Port` input (e.g. `32'd0`); `None` if net-driven.
+    #[serde(rename = "const", default)]
+    pub const_value: Option<String>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -266,6 +269,7 @@ mod tests {
             inst_range: None,
             type_: None,
             dir: None,
+            const_value: None,
             drivers: vec![],
             loads: vec![],
         }
