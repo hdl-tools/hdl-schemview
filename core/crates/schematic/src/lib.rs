@@ -27,6 +27,10 @@ pub struct SchPort {
     pub id: NodeId,
     pub name: String,
     pub side: Side,
+    /// Bit-range of the pin (`[31:0]`) parsed from its declared type, or `None`
+    /// for a scalar. Shown next to the pin label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<String>,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -38,6 +42,10 @@ pub struct SchNode {
     pub path: String,
     pub expandable: bool,
     pub ports: Vec<SchPort>,
+    /// Module/definition type of an instance (e.g. `picorv32`), recovered from
+    /// the basename of its defining source file. `None` for non-instances.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
 }
 
 /// A wire between two endpoints (a box or one of its ports), by model NodeId.
@@ -46,6 +54,10 @@ pub struct SchEdge {
     pub id: u32,
     pub source: NodeId,
     pub target: NodeId,
+    /// Name of the connecting net/signal relative to the scope (e.g. `bus.valid`
+    /// or `core_trap`), used to label the wire. `None` if unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net: Option<String>,
 }
 
 /// A renderable, layout-agnostic schematic graph for one scope or cone.
@@ -108,6 +120,37 @@ fn last_segment(path: &str) -> &str {
     path.rsplit('.').next().unwrap_or(path)
 }
 
+/// Path relative to `scope` (`scope.a.b` → `a.b`); falls back to the last
+/// segment, then the whole path. Used to label wires with their net name.
+fn relative_to(path: &str, scope: &str) -> String {
+    path.strip_prefix(scope)
+        .and_then(|s| s.strip_prefix('.'))
+        .map(str::to_string)
+        .unwrap_or_else(|| last_segment(path).to_string())
+}
+
+/// The module/definition type of an instance, taken from the basename (no
+/// extension) of the file that defines it (`…/picorv32.v` → `picorv32`). This is
+/// a best-effort recovery until the harness emits the real definition name.
+fn module_of(design: &Design, node: &svxprobe_model::Node) -> Option<String> {
+    if node.kind != NodeKind::Instance {
+        return None;
+    }
+    let file = node.def_range?.file;
+    let path = &design.doc.files.iter().find(|f| f.id == file)?.path;
+    let base = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    Some(base.rsplit_once('.').map(|(s, _)| s).unwrap_or(base).to_string())
+}
+
+/// The declared bit-range of a port (`logic[31:0]` → `[31:0]`), or `None` for a
+/// scalar. Used to annotate pins.
+fn width_of(type_: &Option<String>) -> Option<String> {
+    let t = type_.as_ref()?;
+    let lo = t.find('[')?;
+    let hi = t[lo..].find(']')? + lo;
+    Some(t[lo..=hi].to_string())
+}
+
 /// Build a box node with its ports; port sides come from incident edges.
 fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
     let n = design.node(bx)?;
@@ -125,10 +168,12 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
                 .find(|e| e.port == pid)
                 .map(|e| side_of(e.dir))
                 .unwrap_or(Side::West);
+            let node = design.node(pid);
             SchPort {
                 id: pid,
-                name: design.node(pid).map(|n| n.name.clone()).unwrap_or_default(),
+                name: node.map(|n| n.name.clone()).unwrap_or_default(),
                 side,
+                width: node.and_then(|n| width_of(&n.type_)),
             }
         })
         .collect();
@@ -144,6 +189,7 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         path: n.path.clone(),
         expandable: !child_boxes(design, bx).is_empty(),
         ports,
+        module: module_of(design, n),
     })
 }
 
@@ -181,10 +227,14 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     for (i, e) in design.edges().iter().enumerate() {
         if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
             if sb != tb {
+                let net = design
+                    .node(e.endpoint)
+                    .map(|n| relative_to(&n.path, scope_path));
                 edges.push(SchEdge {
                     id: i as u32,
                     source: src,
                     target: tgt,
+                    net,
                 });
             }
         }
@@ -224,10 +274,14 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
                 if !keep || !seen_edge_ids.insert(e.id) {
                     continue;
                 }
+                let net = design
+                    .node(e.endpoint)
+                    .map(|n| last_segment(&n.path).to_string());
                 edges.push(SchEdge {
                     id: e.id,
                     source: e.port,
                     target: e.endpoint,
+                    net,
                 });
                 let other = if e.port == node { e.endpoint } else { e.port };
                 if let Some(parent_inst) = nearest_instance(design, other) {

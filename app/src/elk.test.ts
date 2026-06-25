@@ -11,15 +11,16 @@ const graph: SchematicGraph = {
       label: "core",
       path: "top.scope.core",
       expandable: true,
+      module: "picorv32",
       ports: [
         { id: 10, name: "clk", side: "west" },
-        { id: 11, name: "out", side: "east" },
+        { id: 11, name: "out", side: "east", width: "[31:0]" },
       ],
     },
     { id: 2, kind: "Instance", label: "mem", path: "top.scope.mem", expandable: false, ports: [] },
   ],
   edges: [
-    { id: 0, source: 11, target: 2 }, // port -> box
+    { id: 0, source: 11, target: 2, net: "bus.out" }, // port -> box
   ],
 };
 
@@ -38,5 +39,37 @@ describe("toElk", () => {
     const elk = toElk(graph);
     expect(elk.edges[0].sources).toEqual([portId(11)]); // 11 is a port
     expect(elk.edges[0].targets).toEqual([nodeId(2)]); // 2 is a box (no port)
+  });
+
+  it("carries the net name as an edge label", () => {
+    const elk = toElk(graph);
+    expect(elk.edges[0].labels?.[0]?.text).toBe("bus.out");
+  });
+
+  it("grows a box to fit many long pin labels", () => {
+    const big: SchematicGraph = {
+      root: "s",
+      nodes: [
+        {
+          id: 1,
+          kind: "Instance",
+          label: "core",
+          path: "s.core",
+          expandable: false,
+          module: "picorv32",
+          ports: Array.from({ length: 8 }, (_, i) => ({
+            id: 100 + i,
+            name: `mem_la_wstrb_${i}`,
+            side: (i % 2 ? "east" : "west") as "east" | "west",
+            width: "[31:0]",
+          })),
+        },
+      ],
+      edges: [],
+    };
+    const c = toElk(big).children[0];
+    // Far past the 150×58 minimum once real pin labels must fit.
+    expect(c.width).toBeGreaterThan(150);
+    expect(c.height).toBeGreaterThan(58);
   });
 });

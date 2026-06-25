@@ -6,6 +6,8 @@ export interface SchPort {
   id: number;
   name: string;
   side: Side;
+  /** Bit-range like "[31:0]" for a bus pin, absent for a scalar. */
+  width?: string;
 }
 export interface SchNode {
   id: number;
@@ -14,11 +16,15 @@ export interface SchNode {
   path: string;
   expandable: boolean;
   ports: SchPort[];
+  /** Module/definition type of an instance (e.g. "picorv32"). */
+  module?: string;
 }
 export interface SchEdge {
   id: number;
   source: number;
   target: number;
+  /** Connecting net name, relative to the scope (e.g. "bus.valid"). */
+  net?: string;
 }
 export interface SchematicGraph {
   root: string;
