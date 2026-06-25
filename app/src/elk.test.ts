@@ -30,9 +30,12 @@ describe("toElk", () => {
     expect(elk.children.map((c) => c.id)).toEqual([nodeId(1), nodeId(2)]);
     const core = elk.children[0];
     expect(core.labels[0].text).toBe("core");
-    expect(core.layoutOptions["elk.portConstraints"]).toBe("FIXED_SIDE");
+    // Pins are placed explicitly so we can inset them below the box top edge.
+    expect(core.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
     const sides = core.ports.map((p) => p.layoutOptions["elk.port.side"]);
     expect(sides).toEqual(["WEST", "EAST"]);
+    // The top pin is shifted down one row pitch (not flush with the top edge).
+    expect(core.ports[0].y).toBe(4 + 18);
   });
 
   it("resolves an edge endpoint to a port when one exists, else the box", () => {
