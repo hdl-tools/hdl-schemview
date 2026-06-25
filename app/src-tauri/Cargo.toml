@@ -1,0 +1,24 @@
+[package]
+name = "hdl-schemview-app"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+description = "hdl-schemview desktop app (Tauri shell over svxprobe-gui)"
+
+# Standalone crate (not part of the core workspace) so the core CI — which has no
+# webkit — never tries to build it. All real logic lives in svxprobe-gui, which
+# IS in the core workspace and is CI-tested.
+[lib]
+name = "hdl_schemview_app_lib"
+crate-type = ["lib", "cdylib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+svxprobe-gui = { path = "../../core/crates/gui" }
+svxprobe-wave = { path = "../../core/crates/wave" }
+svxprobe-schematic = { path = "../../core/crates/schematic" }

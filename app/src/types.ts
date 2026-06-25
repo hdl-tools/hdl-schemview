@@ -1,0 +1,57 @@
+// DTOs mirroring svxprobe-gui / svxprobe-schematic serialized shapes.
+
+export type Side = "west" | "east";
+
+export interface SchPort {
+  id: number;
+  name: string;
+  side: Side;
+}
+export interface SchNode {
+  id: number;
+  kind: string;
+  label: string;
+  path: string;
+  expandable: boolean;
+  ports: SchPort[];
+}
+export interface SchEdge {
+  id: number;
+  source: number;
+  target: number;
+}
+export interface SchematicGraph {
+  root: string;
+  nodes: SchNode[];
+  edges: SchEdge[];
+}
+
+export interface NodeRef {
+  id: number;
+  path: string;
+  kind: string;
+}
+export interface SourceLoc {
+  file: number;
+  path: string;
+  line: number;
+  col: number;
+  offset: number;
+  end_offset: number;
+}
+export interface WaveLink {
+  in_trace: boolean;
+  var_ref: number;
+  signal_ref: number;
+  full_name: string;
+}
+export interface ProbeResponse {
+  anchor: NodeRef;
+  source: SourceLoc | null;
+  wave: WaveLink;
+  alternatives: NodeRef[];
+}
+export interface ValueChange {
+  time: number;
+  value: string;
+}

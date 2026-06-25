@@ -29,11 +29,12 @@ Get this right and cross-probing is lookups, not guesswork.
 
 ## Status
 
-**Phase 1 gate PASSED (project is GO); Phase 2 source ↔ waveform cross-probe
-is done (headless).** The execution plan lives in
-**[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs in
-**[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned gate
-threshold are documented in **[docs/fixtures.md](docs/fixtures.md)**.
+**Phases 0–3 done — all three views are linked in a desktop GUI.** The Phase 1
+matcher gate passed (project GO); Phase 2 linked source ↔ waveform; Phase 3 adds
+the schematic and a **Tauri desktop app** ([`app/`](app/)) with three linked panes.
+The execution plan lives in **[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture
+decisions are ADRs in **[docs/decisions/](docs/decisions/)**; the reference
+fixtures and the pinned gate threshold are in **[docs/fixtures.md](docs/fixtures.md)**.
 
 What exists today:
 
@@ -42,7 +43,10 @@ What exists today:
 - `core/` — the **Rust** workspace: `model` (Node model + indices), `ingest`
   (deserialize the harness JSON), `wave` (waveform access via **wellen**),
   `matcher` (the canonical-path matcher + hit-rate report), `xprobe` (the
-  source ↔ waveform cross-probe engine), and the `svxprobe` CLI.
+  source ↔ waveform cross-probe engine), `schematic` (scope/cone graph extractor),
+  `gui` (the desktop app's session logic), and the `svxprobe` CLI.
+- `app/` — the **Tauri** desktop app: three linked panes (schematic via elkjs,
+  source, waveform canvas) over the cross-probe engine. See [`app/README.md`](app/README.md).
 - `fixtures/picorv32_soc/` — the tier-1 reference fixture (PicoRV32 + a SystemVerilog
   wrapper exercising package / interface / parameterized-instance / generate), with
   frozen Verilator **FST + VCD** traces and a golden hierarchy.

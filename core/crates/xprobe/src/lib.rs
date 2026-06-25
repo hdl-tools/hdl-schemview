@@ -101,6 +101,11 @@ impl CrossProbe {
         self.context
     }
 
+    /// The trace variable for a wellen var-ref (name + signal-ref for loading).
+    pub fn wave_var(&self, var_ref: u32) -> Option<&WaveVar> {
+        self.var_by_ref.get(&var_ref)
+    }
+
     fn path_of(&self, id: NodeId) -> &str {
         self.design.node(id).map(|n| n.path.as_str()).unwrap_or("")
     }

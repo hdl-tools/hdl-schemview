@@ -1,0 +1,19 @@
+[package]
+name = "svxprobe-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The GUI session logic, free of any UI-toolkit dependency so it builds and
+# tests in CI (no webkit). The Tauri shell (app/src-tauri) is a thin wrapper.
+
+[dependencies]
+svxprobe-model = { workspace = true }
+svxprobe-ingest = { workspace = true }
+svxprobe-wave = { workspace = true }
+svxprobe-xprobe = { workspace = true }
+svxprobe-matcher = { workspace = true }
+svxprobe-schematic = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>hdl-schemview</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header id="toolbar">
+      <input id="model" placeholder="model JSON path" />
+      <input id="trace" placeholder="trace path" />
+      <input id="srcroot" placeholder="source root" />
+      <button id="load">Load</button>
+      <span id="status"></span>
+    </header>
+    <div id="breadcrumb"></div>
+    <main id="panes">
+      <section id="schematic-pane" class="pane">
+        <h2>Schematic</h2>
+        <div id="schematic"></div>
+      </section>
+      <section id="right">
+        <section id="source-pane" class="pane">
+          <h2>Source <span id="source-path"></span></h2>
+          <div id="source"></div>
+        </section>
+        <section id="wave-pane" class="pane">
+          <h2>Waveform <span id="wave-name"></span></h2>
+          <canvas id="wave" width="600" height="160"></canvas>
+        </section>
+      </section>
+    </main>
+    <div id="picker"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
