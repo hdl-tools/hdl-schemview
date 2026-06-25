@@ -53,6 +53,24 @@ enum Cmd {
         #[arg(long)]
         show_unmatched: bool,
     },
+    /// Extract a schematic graph for a scope (or a net's fan-in/out cone).
+    Graph {
+        model: String,
+        /// Scope canonical path (e.g. picorv32_soc.g_lane[0]).
+        scope: String,
+        /// Instead of the scope graph, extract the cone of this net path.
+        #[arg(long)]
+        cone: Option<String>,
+        /// Cone direction.
+        #[arg(long, default_value = "inout")]
+        dir: String,
+        /// Cone depth.
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+        /// Emit the graph as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Cross-probe: resolve one view's selection and show the other two.
     Probe {
         model: String,
@@ -92,6 +110,14 @@ fn main() -> Result<()> {
             anchor,
             show_unmatched,
         } => match_cmd(&model, &trace, threshold, excluded, anchor, show_unmatched),
+        Cmd::Graph {
+            model,
+            scope,
+            cone,
+            dir,
+            depth,
+            json,
+        } => graph_cmd(&model, &scope, cone, &dir, depth, json),
         Cmd::Probe {
             model,
             trace,
@@ -218,6 +244,63 @@ fn match_cmd(
     );
     if !pass {
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn graph_cmd(
+    model: &str,
+    scope: &str,
+    cone: Option<String>,
+    dir: &str,
+    depth: usize,
+    json: bool,
+) -> Result<()> {
+    use svxprobe_model::Dir;
+    let design = svxprobe_ingest::from_path(model)?;
+
+    let graph = if let Some(net) = cone {
+        let start = *design
+            .nodes_at_path(&net)
+            .first()
+            .with_context(|| format!("net path not found: {net}"))?;
+        let d = match dir {
+            "in" => Dir::In,
+            "out" => Dir::Out,
+            _ => Dir::Inout,
+        };
+        svxprobe_schematic::cone(&design, start, d, depth)
+    } else {
+        svxprobe_schematic::scope_graph(&design, scope)
+            .with_context(|| format!("scope not found: {scope}"))?
+    };
+
+    if json {
+        pln!("{}", serde_json::to_string_pretty(&graph)?);
+        return Ok(());
+    }
+
+    pln!("scope:  {}", graph.root);
+    pln!("boxes:  {}", graph.nodes.len());
+    for n in &graph.nodes {
+        pln!(
+            "  [{}] {} ({:?}, {} ports){}",
+            n.id,
+            n.label,
+            n.kind,
+            n.ports.len(),
+            if n.expandable { " +" } else { "" },
+        );
+    }
+    pln!("wires:  {}", graph.edges.len());
+    for e in &graph.edges {
+        let p = |id| {
+            design
+                .node(id)
+                .map(|n: &svxprobe_model::Node| n.path.as_str())
+                .unwrap_or("?")
+        };
+        pln!("  {} -> {}", p(e.source), p(e.target));
     }
     Ok(())
 }

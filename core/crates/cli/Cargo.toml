@@ -15,5 +15,7 @@ svxprobe-ingest = { workspace = true }
 svxprobe-wave = { workspace = true }
 svxprobe-matcher = { workspace = true }
 svxprobe-xprobe = { workspace = true }
+svxprobe-schematic = { workspace = true }
+serde_json = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
