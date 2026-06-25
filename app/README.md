@@ -48,8 +48,32 @@ directory — use absolute paths if needed.)
 - Frontend build: `npm run build` (tsc + vite).
 - Backend logic: `cargo test -p svxprobe-gui` (in `core/`).
 
+## Windows notes
+
+- **Toolchain:** Rust MSVC (`rustup default stable-msvc`) + the "Desktop
+  development with C++" workload, plus the WebView2 runtime (preinstalled on
+  Win 11).
+- **`cargo` can't reach crates.io** with
+  `CRYPT_E_NO_REVOCATION_CHECK (0x80092012)` (schannel can't check certificate
+  revocation behind a corporate proxy/VPN): set `check-revoke = false` under
+  `[http]` in `%USERPROFILE%\.cargo\config.toml`, or
+  `setx CARGO_HTTP_CHECK_REVOKE false` then reopen the shell.
+- **Icons:** the app ships a full icon set incl. `icons/icon.ico`, which Windows
+  `tauri-build` embeds as a resource. To regenerate from a source image:
+  `npm run tauri icon path/to/icon.png`.
+
+## CI
+
+The **App** workflow (`.github/workflows/app.yml`) builds the desktop app on a
+matrix of **Ubuntu + Windows** for any PR/push that touches `app/**` or
+`core/crates/**` (and on demand via *Run workflow*). The Windows leg exercises the
+`tauri-build` Windows Resource/icon embed. **macOS is not CI-validated** — the
+`.icns` is generated and the `cargo build` works locally, but no macOS runner is
+in the matrix (it bills at 10× minutes on a private repo).
+
+The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
+`svxprobe-gui` logic it wraps is what that gate covers.
+
 ## Headless note
 
-This app needs a display. The core workspace CI does **not** build it (no webkit);
-the `svxprobe-gui` logic it wraps is what CI covers. A nightly job builds the app
-against webkit. Locally it boots under `xvfb-run` for smoke testing.
+This app needs a display. Locally it boots under `xvfb-run` for smoke testing.
