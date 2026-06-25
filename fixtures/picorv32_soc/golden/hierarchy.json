@@ -18006,5 +18006,163 @@
       "drivers": [],
       "loads": []
     }
+  ],
+  "edges": [
+    {
+      "id": 0,
+      "port": 15,
+      "endpoint": 5,
+      "dir": "in"
+    },
+    {
+      "id": 1,
+      "port": 52,
+      "endpoint": 5,
+      "dir": "in"
+    },
+    {
+      "id": 2,
+      "port": 54,
+      "endpoint": 7,
+      "dir": "in"
+    },
+    {
+      "id": 3,
+      "port": 56,
+      "endpoint": 9,
+      "dir": "out"
+    },
+    {
+      "id": 4,
+      "port": 58,
+      "endpoint": 17,
+      "dir": "out"
+    },
+    {
+      "id": 5,
+      "port": 60,
+      "endpoint": 18,
+      "dir": "out"
+    },
+    {
+      "id": 6,
+      "port": 62,
+      "endpoint": 19,
+      "dir": "in"
+    },
+    {
+      "id": 7,
+      "port": 64,
+      "endpoint": 20,
+      "dir": "out"
+    },
+    {
+      "id": 8,
+      "port": 66,
+      "endpoint": 21,
+      "dir": "out"
+    },
+    {
+      "id": 9,
+      "port": 68,
+      "endpoint": 22,
+      "dir": "out"
+    },
+    {
+      "id": 10,
+      "port": 70,
+      "endpoint": 23,
+      "dir": "in"
+    },
+    {
+      "id": 11,
+      "port": 329,
+      "endpoint": 13,
+      "dir": "inout"
+    },
+    {
+      "id": 12,
+      "port": 332,
+      "endpoint": 7,
+      "dir": "in"
+    },
+    {
+      "id": 13,
+      "port": 341,
+      "endpoint": 5,
+      "dir": "in"
+    },
+    {
+      "id": 14,
+      "port": 378,
+      "endpoint": 5,
+      "dir": "in"
+    },
+    {
+      "id": 15,
+      "port": 380,
+      "endpoint": 7,
+      "dir": "in"
+    },
+    {
+      "id": 16,
+      "port": 382,
+      "endpoint": 9,
+      "dir": "out"
+    },
+    {
+      "id": 17,
+      "port": 384,
+      "endpoint": 343,
+      "dir": "out"
+    },
+    {
+      "id": 18,
+      "port": 386,
+      "endpoint": 344,
+      "dir": "out"
+    },
+    {
+      "id": 19,
+      "port": 388,
+      "endpoint": 345,
+      "dir": "in"
+    },
+    {
+      "id": 20,
+      "port": 390,
+      "endpoint": 346,
+      "dir": "out"
+    },
+    {
+      "id": 21,
+      "port": 392,
+      "endpoint": 347,
+      "dir": "out"
+    },
+    {
+      "id": 22,
+      "port": 394,
+      "endpoint": 348,
+      "dir": "out"
+    },
+    {
+      "id": 23,
+      "port": 396,
+      "endpoint": 349,
+      "dir": "in"
+    },
+    {
+      "id": 24,
+      "port": 655,
+      "endpoint": 339,
+      "dir": "inout"
+    },
+    {
+      "id": 25,
+      "port": 658,
+      "endpoint": 7,
+      "dir": "in"
+    }
   ]
 }
