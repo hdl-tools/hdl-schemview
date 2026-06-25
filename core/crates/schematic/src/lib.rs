@@ -166,14 +166,20 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         .copied()
         .filter(|&c| is_kind(design, c, NodeKind::Port))
         .map(|pid| {
-            // Side from the first edge incident on this port (default West).
-            let side = design
-                .edges_of(pid)
-                .iter()
-                .find(|e| e.port == pid)
-                .map(|e| side_of(e.dir))
-                .unwrap_or(Side::West);
             let node = design.node(pid);
+            // Prefer the port's declared direction so even unconnected pins land
+            // on the correct side; fall back to an incident edge, then West.
+            let side = node
+                .and_then(|n| n.dir)
+                .or_else(|| {
+                    design
+                        .edges_of(pid)
+                        .iter()
+                        .find(|e| e.port == pid)
+                        .map(|e| e.dir)
+                })
+                .map(side_of)
+                .unwrap_or(Side::West);
             SchPort {
                 id: pid,
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),

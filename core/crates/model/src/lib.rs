@@ -71,6 +71,10 @@ pub struct Node {
     pub inst_range: Option<Range>,
     #[serde(rename = "type", default)]
     pub type_: Option<String>,
+    /// Declared direction for `Port` nodes (drives schematic pin side); `None`
+    /// otherwise.
+    #[serde(default)]
+    pub dir: Option<Dir>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -261,6 +265,7 @@ mod tests {
             def_range: range,
             inst_range: None,
             type_: None,
+            dir: None,
             drivers: vec![],
             loads: vec![],
         }

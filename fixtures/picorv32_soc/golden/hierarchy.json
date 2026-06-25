@@ -58,6 +58,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -84,6 +85,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -110,6 +112,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -136,6 +139,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -162,6 +166,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -188,6 +193,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -214,6 +220,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -240,6 +247,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -266,6 +274,7 @@
       },
       "inst_range": null,
       "type": "logic[1:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -292,6 +301,7 @@
       },
       "inst_range": null,
       "type": "logic[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -321,6 +331,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -353,6 +364,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -379,6 +391,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -428,6 +441,7 @@
         }
       },
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -454,6 +468,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -480,6 +495,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -506,6 +522,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -532,6 +549,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -558,6 +576,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -584,6 +603,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -610,6 +630,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -636,6 +657,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -662,6 +684,7 @@
       },
       "inst_range": null,
       "type": "logic[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -688,6 +711,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -714,6 +738,7 @@
       },
       "inst_range": null,
       "type": "soc_pkg::lane_state_e",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1056,6 +1081,7 @@
         }
       },
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1082,6 +1108,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1108,6 +1135,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1134,6 +1162,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1160,6 +1189,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1186,6 +1216,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1212,6 +1243,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1238,6 +1270,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1264,6 +1297,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1290,6 +1324,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1316,6 +1351,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1342,6 +1378,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1368,6 +1405,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1394,6 +1432,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1420,6 +1459,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1446,6 +1486,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1472,6 +1513,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1498,6 +1540,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1524,6 +1567,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1550,6 +1594,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1576,6 +1621,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1602,6 +1648,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1628,6 +1675,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1654,6 +1702,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1680,6 +1729,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1706,6 +1756,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1732,6 +1783,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1758,6 +1810,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -1784,6 +1837,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1810,6 +1864,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -1836,6 +1891,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1862,6 +1918,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -1888,6 +1945,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1914,6 +1972,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -1940,6 +1999,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -1966,6 +2026,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -1992,6 +2053,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2018,6 +2080,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2044,6 +2107,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2070,6 +2134,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2096,6 +2161,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2122,6 +2188,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2148,6 +2215,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2174,6 +2242,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2200,6 +2269,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2226,6 +2296,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2252,6 +2323,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2278,6 +2350,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2304,6 +2377,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2330,6 +2404,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2356,6 +2431,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2382,6 +2458,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2408,6 +2485,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2434,6 +2512,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2460,6 +2539,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2486,6 +2566,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2512,6 +2593,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2538,6 +2620,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2564,6 +2647,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2590,6 +2674,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2616,6 +2701,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2642,6 +2728,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2668,6 +2755,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2694,6 +2782,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -2720,6 +2809,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2746,6 +2836,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2772,6 +2863,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2798,6 +2890,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2824,6 +2917,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2850,6 +2944,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2876,6 +2971,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2902,6 +2998,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2928,6 +3025,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -2954,6 +3052,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -2980,6 +3079,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3006,6 +3106,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -3032,6 +3133,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3058,6 +3160,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -3084,6 +3187,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3110,6 +3214,7 @@
       },
       "inst_range": null,
       "type": "reg[35:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -3136,6 +3241,7 @@
       },
       "inst_range": null,
       "type": "reg[35:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3162,6 +3268,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3188,6 +3295,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3214,6 +3322,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3240,6 +3349,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3266,6 +3376,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3292,6 +3403,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3318,6 +3430,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3344,6 +3457,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3370,6 +3484,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3396,6 +3511,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3422,6 +3538,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3448,6 +3565,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3474,6 +3592,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3500,6 +3619,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3526,6 +3646,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3552,6 +3673,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3578,6 +3700,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3604,6 +3727,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3630,6 +3754,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3656,6 +3781,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3682,6 +3808,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3708,6 +3835,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3734,6 +3862,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3760,6 +3889,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3786,6 +3916,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3812,6 +3943,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3838,6 +3970,7 @@
       },
       "inst_range": null,
       "type": "logic[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3864,6 +3997,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3890,6 +4024,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3916,6 +4051,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3942,6 +4078,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3968,6 +4105,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -3994,6 +4132,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4020,6 +4159,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4046,6 +4186,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]$[0:31]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4072,6 +4213,7 @@
       },
       "inst_range": null,
       "type": "integer",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4098,6 +4240,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4124,6 +4267,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4150,6 +4294,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4176,6 +4321,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4202,6 +4348,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4228,6 +4375,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4254,6 +4402,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4280,6 +4429,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4306,6 +4456,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4332,6 +4483,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4358,6 +4510,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4384,6 +4537,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4410,6 +4564,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4436,6 +4591,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4462,6 +4618,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4488,6 +4645,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4514,6 +4672,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4540,6 +4699,7 @@
       },
       "inst_range": null,
       "type": "reg[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4566,6 +4726,7 @@
       },
       "inst_range": null,
       "type": "reg[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4592,6 +4753,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4618,6 +4780,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4644,6 +4807,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4670,6 +4834,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4696,6 +4861,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4722,6 +4888,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4748,6 +4915,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4774,6 +4942,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4800,6 +4969,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4826,6 +4996,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4852,6 +5023,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4878,6 +5050,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4904,6 +5077,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4930,6 +5104,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4956,6 +5131,7 @@
       },
       "inst_range": null,
       "type": "reg[15:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -4982,6 +5158,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5008,6 +5185,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5034,6 +5212,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5060,6 +5239,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5086,6 +5266,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5112,6 +5293,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5138,6 +5320,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5164,6 +5347,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5190,6 +5374,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5216,6 +5401,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5242,6 +5428,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5268,6 +5455,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5294,6 +5482,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5320,6 +5509,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5346,6 +5536,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5372,6 +5563,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5398,6 +5590,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5424,6 +5617,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5450,6 +5644,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5476,6 +5671,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5502,6 +5698,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5528,6 +5725,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5554,6 +5752,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5580,6 +5779,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5606,6 +5806,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5632,6 +5833,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5658,6 +5860,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5684,6 +5887,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5710,6 +5914,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5736,6 +5941,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5762,6 +5968,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5788,6 +5995,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5814,6 +6022,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5840,6 +6049,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5866,6 +6076,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5892,6 +6103,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5918,6 +6130,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5944,6 +6157,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5970,6 +6184,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -5996,6 +6211,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6022,6 +6238,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6048,6 +6265,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6074,6 +6292,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6100,6 +6319,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6126,6 +6346,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6152,6 +6373,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6178,6 +6400,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6204,6 +6427,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6230,6 +6454,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6256,6 +6481,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6282,6 +6508,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6308,6 +6535,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6334,6 +6562,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6360,6 +6589,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6386,6 +6616,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6412,6 +6643,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6438,6 +6670,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6464,6 +6697,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6490,6 +6724,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6516,6 +6751,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6542,6 +6778,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6568,6 +6805,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6594,6 +6832,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6620,6 +6859,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6646,6 +6886,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6672,6 +6913,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6698,6 +6940,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6724,6 +6967,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6750,6 +6994,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6776,6 +7021,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6802,6 +7048,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6828,6 +7075,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6854,6 +7102,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6880,6 +7129,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6906,6 +7156,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6932,6 +7183,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6958,6 +7210,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -6984,6 +7237,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7010,6 +7264,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7036,6 +7291,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7062,6 +7318,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7088,6 +7345,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7114,6 +7372,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7140,6 +7399,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7166,6 +7426,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7192,6 +7453,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7218,6 +7480,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7244,6 +7507,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7270,6 +7534,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7296,6 +7561,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7322,6 +7588,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7348,6 +7615,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7374,6 +7642,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7400,6 +7669,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7426,6 +7696,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7452,6 +7723,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7478,6 +7750,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7504,6 +7777,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7530,6 +7804,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7556,6 +7831,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7582,6 +7858,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7608,6 +7885,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7634,6 +7912,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7660,6 +7939,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7686,6 +7966,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7712,6 +7993,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7738,6 +8020,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7764,6 +8047,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7790,6 +8074,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7816,6 +8101,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7842,6 +8128,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7868,6 +8155,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7894,6 +8182,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7920,6 +8209,7 @@
       },
       "inst_range": null,
       "type": "reg[7:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7946,6 +8236,7 @@
       },
       "inst_range": null,
       "type": "reg[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7972,6 +8263,7 @@
       },
       "inst_range": null,
       "type": "reg[127:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -7998,6 +8290,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8024,6 +8317,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8050,6 +8344,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8076,6 +8371,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8102,6 +8398,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8128,6 +8425,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8154,6 +8452,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8180,6 +8479,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8206,6 +8506,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8232,6 +8533,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8258,6 +8560,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8284,6 +8587,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8310,6 +8614,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8336,6 +8641,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8362,6 +8668,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8388,6 +8695,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8414,6 +8722,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8440,6 +8749,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8466,6 +8776,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8492,6 +8803,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8518,6 +8830,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8544,6 +8857,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8570,6 +8884,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8596,6 +8911,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8622,6 +8938,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8648,6 +8965,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8674,6 +8992,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8700,6 +9019,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8726,6 +9046,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8752,6 +9073,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8778,6 +9100,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8804,6 +9127,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8830,6 +9154,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8856,6 +9181,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8882,6 +9208,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8908,6 +9235,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8934,6 +9262,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -8980,6 +9309,7 @@
         }
       },
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9006,6 +9336,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9032,6 +9363,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9058,6 +9390,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -9084,6 +9417,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9110,6 +9444,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9136,6 +9471,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]$[0:511]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9162,6 +9498,7 @@
       },
       "inst_range": null,
       "type": "logic[8:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9194,6 +9531,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9220,6 +9558,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9269,6 +9608,7 @@
         }
       },
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9295,6 +9635,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9321,6 +9662,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -9347,6 +9689,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9373,6 +9716,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9399,6 +9743,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9425,6 +9770,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9451,6 +9797,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9477,6 +9824,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9503,6 +9851,7 @@
       },
       "inst_range": null,
       "type": "logic[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9529,6 +9878,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9555,6 +9905,7 @@
       },
       "inst_range": null,
       "type": "soc_pkg::lane_state_e",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9897,6 +10248,7 @@
         }
       },
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9923,6 +10275,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9949,6 +10302,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -9975,6 +10329,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10001,6 +10356,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10027,6 +10383,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10053,6 +10410,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10079,6 +10437,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10105,6 +10464,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10131,6 +10491,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10157,6 +10518,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10183,6 +10545,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10209,6 +10572,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10235,6 +10599,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10261,6 +10626,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10287,6 +10653,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10313,6 +10680,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10339,6 +10707,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10365,6 +10734,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10391,6 +10761,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10417,6 +10788,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10443,6 +10815,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10469,6 +10842,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10495,6 +10869,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10521,6 +10896,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10547,6 +10923,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10573,6 +10950,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10599,6 +10977,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -10625,6 +11004,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10651,6 +11031,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -10677,6 +11058,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10703,6 +11085,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -10729,6 +11112,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10755,6 +11139,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -10781,6 +11166,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10807,6 +11193,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -10833,6 +11220,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10859,6 +11247,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -10885,6 +11274,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10911,6 +11301,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -10937,6 +11328,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -10963,6 +11355,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -10989,6 +11382,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11015,6 +11409,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11041,6 +11436,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11067,6 +11463,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -11093,6 +11490,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11119,6 +11517,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11145,6 +11544,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11171,6 +11571,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11197,6 +11598,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11223,6 +11625,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11249,6 +11652,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11275,6 +11679,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11301,6 +11706,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11327,6 +11733,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11353,6 +11760,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11379,6 +11787,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11405,6 +11814,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11431,6 +11841,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11457,6 +11868,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11483,6 +11895,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11509,6 +11922,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11535,6 +11949,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11561,6 +11976,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11587,6 +12003,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -11613,6 +12030,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11639,6 +12057,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -11665,6 +12084,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11691,6 +12111,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -11717,6 +12138,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11743,6 +12165,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -11769,6 +12192,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11795,6 +12219,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -11821,6 +12246,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11847,6 +12273,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11873,6 +12300,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11899,6 +12327,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11925,6 +12354,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -11951,6 +12381,7 @@
       },
       "inst_range": null,
       "type": "reg[35:0]",
+      "dir": "out",
       "drivers": [],
       "loads": []
     },
@@ -11977,6 +12408,7 @@
       },
       "inst_range": null,
       "type": "reg[35:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12003,6 +12435,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12029,6 +12462,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12055,6 +12489,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12081,6 +12516,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12107,6 +12543,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12133,6 +12570,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12159,6 +12597,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12185,6 +12624,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12211,6 +12651,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12237,6 +12678,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12263,6 +12705,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12289,6 +12732,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12315,6 +12759,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12341,6 +12786,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12367,6 +12813,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12393,6 +12840,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12419,6 +12867,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12445,6 +12894,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12471,6 +12921,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12497,6 +12948,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12523,6 +12975,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12549,6 +13002,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12575,6 +13029,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12601,6 +13056,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12627,6 +13083,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12653,6 +13110,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12679,6 +13137,7 @@
       },
       "inst_range": null,
       "type": "logic[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12705,6 +13164,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12731,6 +13191,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12757,6 +13218,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12783,6 +13245,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12809,6 +13272,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12835,6 +13299,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12861,6 +13326,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12887,6 +13353,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]$[0:31]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12913,6 +13380,7 @@
       },
       "inst_range": null,
       "type": "integer",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12939,6 +13407,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12965,6 +13434,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -12991,6 +13461,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13017,6 +13488,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13043,6 +13515,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13069,6 +13542,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13095,6 +13569,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13121,6 +13596,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13147,6 +13623,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13173,6 +13650,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13199,6 +13677,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13225,6 +13704,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13251,6 +13731,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13277,6 +13758,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13303,6 +13785,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13329,6 +13812,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13355,6 +13839,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13381,6 +13866,7 @@
       },
       "inst_range": null,
       "type": "reg[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13407,6 +13893,7 @@
       },
       "inst_range": null,
       "type": "reg[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13433,6 +13920,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13459,6 +13947,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13485,6 +13974,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13511,6 +14001,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13537,6 +14028,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13563,6 +14055,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13589,6 +14082,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13615,6 +14109,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13641,6 +14136,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13667,6 +14163,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13693,6 +14190,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13719,6 +14217,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13745,6 +14244,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13771,6 +14271,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13797,6 +14298,7 @@
       },
       "inst_range": null,
       "type": "reg[15:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13823,6 +14325,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13849,6 +14352,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13875,6 +14379,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13901,6 +14406,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13927,6 +14433,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13953,6 +14460,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -13979,6 +14487,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14005,6 +14514,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14031,6 +14541,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14057,6 +14568,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14083,6 +14595,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14109,6 +14622,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14135,6 +14649,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14161,6 +14676,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14187,6 +14703,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14213,6 +14730,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14239,6 +14757,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14265,6 +14784,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14291,6 +14811,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14317,6 +14838,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14343,6 +14865,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14369,6 +14892,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14395,6 +14919,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14421,6 +14946,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14447,6 +14973,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14473,6 +15000,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14499,6 +15027,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14525,6 +15054,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14551,6 +15081,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14577,6 +15108,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14603,6 +15135,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14629,6 +15162,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14655,6 +15189,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14681,6 +15216,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14707,6 +15243,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14733,6 +15270,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14759,6 +15297,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14785,6 +15324,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14811,6 +15351,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14837,6 +15378,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14863,6 +15405,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14889,6 +15432,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14915,6 +15459,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14941,6 +15486,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14967,6 +15513,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -14993,6 +15540,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15019,6 +15567,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15045,6 +15594,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15071,6 +15621,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15097,6 +15648,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15123,6 +15675,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15149,6 +15702,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15175,6 +15729,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15201,6 +15756,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15227,6 +15783,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15253,6 +15810,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15279,6 +15837,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15305,6 +15864,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15331,6 +15891,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15357,6 +15918,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15383,6 +15945,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15409,6 +15972,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15435,6 +15999,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15461,6 +16026,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15487,6 +16053,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15513,6 +16080,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15539,6 +16107,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15565,6 +16134,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15591,6 +16161,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15617,6 +16188,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15643,6 +16215,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15669,6 +16242,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15695,6 +16269,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15721,6 +16296,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15747,6 +16323,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15773,6 +16350,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15799,6 +16377,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15825,6 +16404,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15851,6 +16431,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15877,6 +16458,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15903,6 +16485,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15929,6 +16512,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15955,6 +16539,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -15981,6 +16566,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16007,6 +16593,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16033,6 +16620,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16059,6 +16647,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16085,6 +16674,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16111,6 +16701,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16137,6 +16728,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16163,6 +16755,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16189,6 +16782,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16215,6 +16809,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16241,6 +16836,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16267,6 +16863,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16293,6 +16890,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16319,6 +16917,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16345,6 +16944,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16371,6 +16971,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16397,6 +16998,7 @@
       },
       "inst_range": null,
       "type": "reg[63:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16423,6 +17025,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16449,6 +17052,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16475,6 +17079,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16501,6 +17106,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16527,6 +17133,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16553,6 +17160,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16579,6 +17187,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16605,6 +17214,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16631,6 +17241,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16657,6 +17268,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16683,6 +17295,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16709,6 +17322,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16735,6 +17349,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16761,6 +17376,7 @@
       },
       "inst_range": null,
       "type": "reg[7:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16787,6 +17403,7 @@
       },
       "inst_range": null,
       "type": "reg[1:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16813,6 +17430,7 @@
       },
       "inst_range": null,
       "type": "reg[127:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16839,6 +17457,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16865,6 +17484,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16891,6 +17511,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16917,6 +17538,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16943,6 +17565,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16969,6 +17592,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -16995,6 +17619,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17021,6 +17646,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17047,6 +17673,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17073,6 +17700,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17099,6 +17727,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17125,6 +17754,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17151,6 +17781,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17177,6 +17808,7 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17203,6 +17835,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17229,6 +17862,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17255,6 +17889,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17281,6 +17916,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17307,6 +17943,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17333,6 +17970,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17359,6 +17997,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17385,6 +18024,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17411,6 +18051,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17437,6 +18078,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17463,6 +18105,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17489,6 +18132,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17515,6 +18159,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17541,6 +18186,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17567,6 +18213,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17593,6 +18240,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17619,6 +18267,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17645,6 +18294,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17671,6 +18321,7 @@
       },
       "inst_range": null,
       "type": "reg",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17697,6 +18348,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17723,6 +18375,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17749,6 +18402,7 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17775,6 +18429,7 @@
       },
       "inst_range": null,
       "type": "reg[4:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17821,6 +18476,7 @@
         }
       },
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17847,6 +18503,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17873,6 +18530,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17899,6 +18557,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": "in",
       "drivers": [],
       "loads": []
     },
@@ -17925,6 +18584,7 @@
       },
       "inst_range": null,
       "type": "logic",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17951,6 +18611,7 @@
       },
       "inst_range": null,
       "type": null,
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -17977,6 +18638,7 @@
       },
       "inst_range": null,
       "type": "logic[31:0]$[0:511]",
+      "dir": null,
       "drivers": [],
       "loads": []
     },
@@ -18003,6 +18665,7 @@
       },
       "inst_range": null,
       "type": "logic[8:0]",
+      "dir": null,
       "drivers": [],
       "loads": []
     }

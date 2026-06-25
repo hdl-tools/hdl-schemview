@@ -126,6 +126,7 @@ class Elaborator:
             "def_range": None,
             "inst_range": None,
             "type": None,
+            "dir": None,
             "drivers": [],
             "loads": [],
         }
@@ -143,6 +144,11 @@ class Elaborator:
                 t = getattr(sym, "type", None)
                 if t is not None:
                     node["type"] = str(t)
+            if kind == "Port":
+                # Declared direction, so even unconnected pins land on the right
+                # side of the schematic (inputs left, outputs right).
+                d = str(getattr(sym, "direction", "")).split(".")[-1]
+                node["dir"] = {"In": "in", "Out": "out", "InOut": "inout"}.get(d)
         self.nodes.append(node)
         if parent is not None:
             self.nodes[parent]["children"].append(nid)

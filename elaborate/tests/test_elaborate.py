@@ -61,6 +61,18 @@ def test_nodes_have_paths_and_keys(model: dict) -> None:
         assert n["symbol_key"], f"node {n['id']} has empty symbol_key"
 
 
+def test_ports_carry_direction(model: dict) -> None:
+    """Every Port node has a declared direction; non-ports leave it null."""
+    ports = [n for n in model["nodes"] if n["kind"] == "Port"]
+    assert ports, "no ports emitted"
+    for n in ports:
+        assert n["dir"] in ("in", "out", "inout"), f"port {n['path']} dir={n['dir']}"
+    # A known input and output on the core.
+    by = {(n["path"]): n for n in model["nodes"] if n["kind"] == "Port"}
+    assert by["picorv32_soc.g_lane[0].core.clk"]["dir"] == "in"
+    assert by["picorv32_soc.g_lane[0].core.eoi"]["dir"] == "out"
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]

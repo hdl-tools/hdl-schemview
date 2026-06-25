@@ -90,6 +90,11 @@
         "def_range": { "anyOf": [ { "$ref": "#/$defs/range" }, { "type": "null" } ] },
         "inst_range": { "anyOf": [ { "$ref": "#/$defs/range" }, { "type": "null" } ] },
         "type": { "type": ["string", "null"], "description": "Type string for signal nodes." },
+        "dir": {
+          "type": ["string", "null"],
+          "enum": ["in", "out", "inout", null],
+          "description": "Declared direction for Port nodes (drives schematic pin side); null otherwise."
+        },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
       }

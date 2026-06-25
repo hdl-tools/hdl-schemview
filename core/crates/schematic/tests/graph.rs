@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use svxprobe_model::{Design, Dir, NodeId};
-use svxprobe_schematic::{cone, scope_graph};
+use svxprobe_schematic::{cone, scope_graph, Side};
 
 fn design() -> Design {
     let golden = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -40,6 +40,12 @@ fn scope_graph_has_boxes_and_wires() {
     assert_eq!(mem_addr.width.as_deref(), Some("[31:0]"), "mem_addr width");
     let clk = core.ports.iter().find(|p| p.name == "clk").unwrap();
     assert_eq!(clk.width, None, "scalar pin has no width");
+
+    // Pin side follows the *declared* direction, so even an unconnected output
+    // (eoi) lands on the east and an input (clk) on the west.
+    assert_eq!(clk.side, Side::West, "input clk on the west");
+    let eoi = core.ports.iter().find(|p| p.name == "eoi").unwrap();
+    assert_eq!(eoi.side, Side::East, "unconnected output eoi on the east");
 
     // There is internal wiring, including the memory↔bus connection.
     assert!(!g.edges.is_empty(), "no wires");
