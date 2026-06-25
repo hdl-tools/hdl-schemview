@@ -8,8 +8,6 @@ export interface SchPort {
   side: Side;
   /** Bit-range like "[31:0]" for a bus pin, absent for a scalar. */
   width?: string;
-  /** Literal driving this input (e.g. "32'd0"), shown as a constant source. */
-  constant?: string;
 }
 export interface SchNode {
   id: number;
@@ -20,6 +18,8 @@ export interface SchNode {
   ports: SchPort[];
   /** Module/definition type of an instance (e.g. "picorv32"). */
   module?: string;
+  /** Literal of a constant-source node (e.g. "32'd0"); drives one tied input. */
+  constant?: string;
 }
 export interface SchEdge {
   id: number;

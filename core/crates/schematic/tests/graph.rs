@@ -77,13 +77,28 @@ fn constant_tied_inputs_show_their_literal() {
     let d = design();
     let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();
     let core = g.nodes.iter().find(|n| n.label == "core").unwrap();
-    // irq is tied to 32'd0 — shown (not hidden) with its constant driver.
+    // irq (tied to 32'd0) is still shown as a pin...
     let irq = core
         .ports
         .iter()
         .find(|p| p.name == "irq")
         .expect("const-tied irq should be shown");
-    assert_eq!(irq.constant.as_deref(), Some("32'd0"), "irq constant");
+    // ...driven by a constant-source node (32'd0) wired into it from outside.
+    let cnode = g
+        .nodes
+        .iter()
+        .find(|n| {
+            n.constant.as_deref() == Some("32'd0")
+                && g.edges
+                    .iter()
+                    .any(|e| e.source == n.id && e.target == irq.id)
+        })
+        .expect("a 32'd0 constant source wired to irq");
+    assert_eq!(
+        cnode.kind,
+        svxprobe_model::NodeKind::Port,
+        "const node kind"
+    );
 }
 
 #[test]

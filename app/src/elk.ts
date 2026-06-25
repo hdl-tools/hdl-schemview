@@ -60,18 +60,21 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     // already sided toward the design.
     if (n.kind === "Port") {
       const lab = n.ports[0] ? pinLabelLen(n.ports[0]) : n.label.length;
-      // Cluster all input pins in a dedicated first column and outputs in a
-      // dedicated last column, so I/O is grouped and easy to find.
+      // Boundary I/O pins cluster at the frame (first/last column); a constant
+      // tie-off instead sits in the layer just left of the box it drives.
       const input = n.ports[0]?.side === "east";
+      const layoutOptions: Record<string, string> = { "elk.portConstraints": "FIXED_SIDE" };
+      if (!n.constant) {
+        layoutOptions["elk.layered.layering.layerConstraint"] = input
+          ? "FIRST_SEPARATE"
+          : "LAST_SEPARATE";
+      }
       return {
         id: nodeId(n.id),
         width: Math.max(40, lab * PIN_CH + 24),
         height: 26,
         labels: [{ text: n.label }],
-        layoutOptions: {
-          "elk.portConstraints": "FIXED_SIDE",
-          "elk.layered.layering.layerConstraint": input ? "FIRST_SEPARATE" : "LAST_SEPARATE",
-        },
+        layoutOptions,
         ports: n.ports.map((p) => ({
           id: portId(p.id),
           width: 6,
@@ -82,9 +85,7 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     }
     const west = n.ports.filter((p) => p.side !== "east");
     const east = n.ports.filter((p) => p.side === "east");
-    // Constant-tied inputs show their literal inside the box, before the name.
-    const westLen = (p: SchPort) => pinLabelLen(p) + (p.constant ? p.constant.length + 2 : 0);
-    const wMax = west.reduce((m, p) => Math.max(m, westLen(p)), 0);
+    const wMax = west.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
     const eMax = east.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
     const titleLen = Math.max(n.label.length, n.module ? n.module.length + 2 : 0);
     // Wide enough for the title and for the west+east pin labels side by side.

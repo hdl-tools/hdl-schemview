@@ -192,27 +192,12 @@ async function renderSchematic(graph: SchematicGraph) {
       g.appendChild(arrow);
 
       if (sp) {
-        const label = sp.width ? `${sp.name}${sp.width}` : sp.name;
-        let nameX = west ? px + 11 : px - 11;
-        // Constant-tied input: draw the literal *inside* the box before the name
-        // (no external wire), so routed wires can never cross a constant.
-        if (west && sp.constant) {
-          const ct = document.createElementNS(SVGNS, "text");
-          ct.setAttribute("class", "const-label");
-          ct.setAttribute("x", String(px + 11));
-          ct.setAttribute("y", String(py + 3));
-          ct.setAttribute("text-anchor", "start");
-          ct.textContent = sp.constant;
-          ct.onclick = () => selectNode(pid);
-          g.appendChild(ct);
-          nameX = px + 13 + sp.constant.length * 6.2 + 5;
-        }
         const t = document.createElementNS(SVGNS, "text");
         t.setAttribute("class", "pin-label");
-        t.setAttribute("x", String(nameX));
+        t.setAttribute("x", String(west ? px + 11 : px - 11));
         t.setAttribute("y", String(py + 3));
         t.setAttribute("text-anchor", west ? "start" : "end");
-        t.textContent = label;
+        t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
         t.onclick = () => selectNode(pid);
         g.appendChild(t);
       }
@@ -235,6 +220,9 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   const px = p?.x ?? 0;
   const py = p?.y ?? 0;
   const input = sp?.side === "east"; // east-facing pin ⇒ input on the west frame
+  // A constant tie-off is a synthetic node (no model id) — render its literal and
+  // make it inert; a real boundary I/O pin cross-probes on click.
+  const isConst = !!node.constant;
   const g = document.createElementNS(SVGNS, "g");
   g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
@@ -246,16 +234,16 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
       ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
       : `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`,
   );
-  arrow.onclick = () => selectNode(id);
+  if (!isConst) arrow.onclick = () => selectNode(id);
   g.appendChild(arrow);
 
   const t = document.createElementNS(SVGNS, "text");
-  t.setAttribute("class", "pin-label");
+  t.setAttribute("class", isConst ? "const-label" : "pin-label");
   t.setAttribute("x", String(input ? px - 12 : px + 12));
   t.setAttribute("y", String(py + 3));
   t.setAttribute("text-anchor", input ? "end" : "start");
   t.textContent = sp?.width ? `${sp.name}${sp.width}` : (sp?.name ?? node.label);
-  t.onclick = () => selectNode(id);
+  if (!isConst) t.onclick = () => selectNode(id);
   g.appendChild(t);
 
   parent.appendChild(g);

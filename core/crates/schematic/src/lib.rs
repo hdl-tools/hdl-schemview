@@ -31,10 +31,6 @@ pub struct SchPort {
     /// for a scalar. Shown next to the pin label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<String>,
-    /// Literal driving this input (`32'd0`), shown as a constant source; `None`
-    /// if net-driven.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub constant: Option<String>,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -50,7 +46,15 @@ pub struct SchNode {
     /// the basename of its defining source file. `None` for non-instances.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
+    /// Literal of a constant-source node (`32'd0`); `None` for normal nodes. Such
+    /// a node sits outside the design and drives a single tied input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<String>,
 }
+
+/// Synthetic id base for constant-source nodes (keyed by the driven port id), so
+/// they never collide with real model node/port ids.
+const CONST_ID_BASE: NodeId = 1 << 28;
 
 /// A wire between two endpoints (a box or one of its ports), by model NodeId.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -192,7 +196,6 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),
                 side,
                 width: node.and_then(|n| width_of(&n.type_)),
-                constant: node.and_then(|n| n.const_value.clone()),
             }
         })
         .collect();
@@ -209,7 +212,31 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         expandable: !child_boxes(design, bx).is_empty(),
         ports,
         module: module_of(design, n),
+        constant: None,
     })
+}
+
+/// A constant-source node driving one tied input `port` with literal `lit`. It
+/// lays out (via the boundary-pin path) as a small source left of the consumer,
+/// wired to the input — so ELK routes other wires around it (no crossings).
+fn make_const_node(lit: &str, port: NodeId) -> SchNode {
+    let id = CONST_ID_BASE + port;
+    SchNode {
+        id,
+        kind: NodeKind::Port,
+        label: lit.to_string(),
+        path: String::new(),
+        expandable: false,
+        // East-facing pin: drives rightward into the design.
+        ports: vec![SchPort {
+            id,
+            name: lit.to_string(),
+            side: Side::East,
+            width: None,
+        }],
+        module: None,
+        constant: Some(lit.to_string()),
+    }
 }
 
 /// A boundary I/O pin for one of the scope's own ports. Rendered as a frame pin
@@ -233,9 +260,9 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             name: n.name.clone(),
             side,
             width: width_of(&n.type_),
-            constant: None,
         }],
         module: None,
+        constant: None,
     })
 }
 
@@ -320,6 +347,29 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                     target: tgt,
                     net,
                 });
+            }
+        }
+    }
+
+    // Constant tie-offs: a small source node outside each box, wired to every
+    // input the model records as driven by a literal. ELK lays these out left of
+    // the consumer and routes other wires around them.
+    let mut next_edge = design.edges().len() as u32;
+    for &b in &boxes {
+        let Some(bn) = design.node(b) else { continue };
+        for &pid in &bn.children {
+            if !is_kind(design, pid, NodeKind::Port) {
+                continue;
+            }
+            if let Some(lit) = design.node(pid).and_then(|n| n.const_value.clone()) {
+                nodes.push(make_const_node(&lit, pid));
+                edges.push(SchEdge {
+                    id: next_edge,
+                    source: CONST_ID_BASE + pid,
+                    target: pid,
+                    net: None,
+                });
+                next_edge += 1;
             }
         }
     }
