@@ -1,0 +1,63 @@
+name: App
+
+# Cross-platform build of the Tauri desktop app. Path-scoped so it only runs on
+# PRs/pushes that touch the app or the crates it wraps (the repo is private, and
+# the Windows runner bills at 2x minutes). The Windows leg exercises the
+# tauri-build Windows Resource/icon embed — the thing a Linux box can't validate.
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "core/crates/**", ".github/workflows/app.yml"]
+  pull_request:
+    paths: ["app/**", "core/crates/**", ".github/workflows/app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Desktop app build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash is present on the Windows runner, so the same run blocks work
+        # on both OSes (no PowerShell line-continuation differences).
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux needs webkit/gtk; Windows ships WebView2 + Rust-MSVC preinstalled.
+      - name: Install Tauri Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: core
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Frontend (install / test / build)
+        working-directory: app
+        run: |
+          npm install
+          npm test
+          npm run build
+
+      - name: Tauri shell (compile — exercises the Windows resource/icon embed)
+        working-directory: app/src-tauri
+        run: cargo build

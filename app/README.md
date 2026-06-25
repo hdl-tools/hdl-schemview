@@ -62,8 +62,18 @@ directory — use absolute paths if needed.)
   `tauri-build` embeds as a resource. To regenerate from a source image:
   `npm run tauri icon path/to/icon.png`.
 
+## CI
+
+The **App** workflow (`.github/workflows/app.yml`) builds the desktop app on a
+matrix of **Ubuntu + Windows** for any PR/push that touches `app/**` or
+`core/crates/**` (and on demand via *Run workflow*). The Windows leg exercises the
+`tauri-build` Windows Resource/icon embed. **macOS is not CI-validated** — the
+`.icns` is generated and the `cargo build` works locally, but no macOS runner is
+in the matrix (it bills at 10× minutes on a private repo).
+
+The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
+`svxprobe-gui` logic it wraps is what that gate covers.
+
 ## Headless note
 
-This app needs a display. The core workspace CI does **not** build it (no webkit);
-the `svxprobe-gui` logic it wraps is what CI covers. A nightly job builds the app
-against webkit. Locally it boots under `xvfb-run` for smoke testing.
+This app needs a display. Locally it boots under `xvfb-run` for smoke testing.
