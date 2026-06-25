@@ -43,7 +43,7 @@ picorv32_soc/
   rtl/        picorv32.v (vendored, ISC) + soc_pkg.sv + mem_if.sv + soc_mem.sv + picorv32_soc.sv
   tb/         tb_picorv32_soc.sv (deterministic) + gen_firmware.py (tiny RV32I assembler)
   traces/     picorv32_soc.vcd, picorv32_soc.fst   (frozen, committed)
-  golden/     hierarchy.json   (elaborated spine; 562 nodes; reproducible from RTL)
+  golden/     hierarchy.json   (elaborated spine incl. parameters; reproducible from RTL)
   excluded_scopes.txt          (TOP, tb, soc_pkg)
 ```
 

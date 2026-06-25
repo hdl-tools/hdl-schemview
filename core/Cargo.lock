@@ -412,6 +412,7 @@ dependencies = [
  "anyhow",
  "clap",
  "svxprobe-ingest",
+ "svxprobe-matcher",
  "svxprobe-model",
  "svxprobe-wave",
 ]
@@ -423,6 +424,15 @@ dependencies = [
  "anyhow",
  "serde_json",
  "svxprobe-model",
+]
+
+[[package]]
+name = "svxprobe-matcher"
+version = "0.0.0"
+dependencies = [
+ "svxprobe-ingest",
+ "svxprobe-model",
+ "svxprobe-wave",
 ]
 
 [[package]]

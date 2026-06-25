@@ -148,6 +148,11 @@ return to the indicated loop-back point rather than proceeding.
 
 ### Phase 1 — Foundation + feasibility spike (GO/NO-GO) · Size: M
 
+> **Status: GATE PASSED.** The matcher (`core/crates/matcher`) clears the gate on
+> the frozen tier-1 fixture — **100% of design-scope signals matched, 0 unmatched,
+> 0 mystery, on both FST and VCD** — with the DUT anchor auto-detected. Enforced in
+> CI via `svxprobe match`. GO.
+
 - **Goal:** Build the elaboration spine and data model, ingest a real waveform,
   and **prove the cross-probe matcher works** before investing in UI.
 - **Tasks:**

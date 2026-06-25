@@ -25,9 +25,24 @@ jobs:
           workspaces: core
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
-      # Tests ingest the committed golden and load the committed FST + VCD traces,
-      # which is the Phase 0 round-trip exit gate.
+      # Tests ingest the committed golden, load the committed FST + VCD traces
+      # (Phase 0 round-trip), and run the Phase 1 matcher gate on both formats.
       - run: cargo test --all
+      # Phase 1 go/no-go gate, enforced as a hard PR gate on both committed
+      # traces (no Verilator needed). `svxprobe match` exits non-zero below 95%
+      # or on any mystery miss.
+      - name: Cross-probe gate (FST)
+        run: >-
+          cargo run --quiet --bin svxprobe -- match
+          ../fixtures/picorv32_soc/golden/hierarchy.json
+          ../fixtures/picorv32_soc/traces/picorv32_soc.fst
+          --excluded ../fixtures/picorv32_soc/excluded_scopes.txt
+      - name: Cross-probe gate (VCD)
+        run: >-
+          cargo run --quiet --bin svxprobe -- match
+          ../fixtures/picorv32_soc/golden/hierarchy.json
+          ../fixtures/picorv32_soc/traces/picorv32_soc.vcd
+          --excluded ../fixtures/picorv32_soc/excluded_scopes.txt
 
   python:
     name: Python harness (lint / test / schema)

@@ -29,26 +29,34 @@ Get this right and cross-probing is lookups, not guesswork.
 
 ## Status
 
-**Phase 0 (setup & integration substrate) is in progress.** The execution plan
-lives in **[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs
-in **[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned
-gate threshold are documented in **[docs/fixtures.md](docs/fixtures.md)**.
+**Phase 1 gate PASSED — the project is GO.** The execution plan lives in
+**[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs in
+**[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned gate
+threshold are documented in **[docs/fixtures.md](docs/fixtures.md)**.
 
 What exists today:
 
 - `elaborate/` — the **pyslang** harness that elaborates SystemVerilog and emits
-  the Node-model JSON (`schema/model.schema.json`).
+  the Node-model JSON (`schema/model.schema.json`), including parameters.
 - `core/` — the **Rust** workspace: `model` (Node model + indices), `ingest`
-  (deserialize the harness JSON), `wave` (waveform access via **wellen**), and the
-  `svxprobe` spike CLI.
+  (deserialize the harness JSON), `wave` (waveform access via **wellen**),
+  `matcher` (the canonical-path matcher + hit-rate report), and the `svxprobe` CLI.
 - `fixtures/picorv32_soc/` — the tier-1 reference fixture (PicoRV32 + a SystemVerilog
   wrapper exercising package / interface / parameterized-instance / generate), with
   frozen Verilator **FST + VCD** traces and a golden hierarchy.
 
-The project go/no-go is the **Phase 1 matcher gate**: on the frozen fixture,
-**≥ 95% of design-scope signals matched, with every miss attributable to a named
-normalization-rule gap (zero mystery misses)**, against both FST and VCD. No UI is
-built until that gate passes.
+The project go/no-go was the **Phase 1 matcher gate**: on the frozen fixture,
+≥ 95% of design-scope signals matched with zero mystery misses, against both FST
+and VCD. The matcher clears it at **100% on both formats** (DUT anchor
+auto-detected), enforced in CI:
+
+```bash
+cd core
+cargo run --bin svxprobe -- match \
+    ../fixtures/picorv32_soc/golden/hierarchy.json \
+    ../fixtures/picorv32_soc/traces/picorv32_soc.fst \
+    --excluded ../fixtures/picorv32_soc/excluded_scopes.txt
+```
 
 ## Development setup
 
