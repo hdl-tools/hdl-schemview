@@ -55,7 +55,10 @@ fn scope_graph_has_boxes_and_wires() {
             .iter()
             .any(|e| e.net.as_deref().is_some_and(|s| s.starts_with("bus."))),
         "no wire labeled with a bus net: {:?}",
-        g.edges.iter().filter_map(|e| e.net.as_deref()).collect::<Vec<_>>()
+        g.edges
+            .iter()
+            .filter_map(|e| e.net.as_deref())
+            .collect::<Vec<_>>()
     );
 }
 

@@ -139,7 +139,12 @@ fn module_of(design: &Design, node: &svxprobe_model::Node) -> Option<String> {
     let file = node.def_range?.file;
     let path = &design.doc.files.iter().find(|f| f.id == file)?.path;
     let base = path.rsplit(['/', '\\']).next().unwrap_or(path);
-    Some(base.rsplit_once('.').map(|(s, _)| s).unwrap_or(base).to_string())
+    Some(
+        base.rsplit_once('.')
+            .map(|(s, _)| s)
+            .unwrap_or(base)
+            .to_string(),
+    )
 }
 
 /// The declared bit-range of a port (`logic[31:0]` → `[31:0]`), or `None` for a
