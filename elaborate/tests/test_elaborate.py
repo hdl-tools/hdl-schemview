@@ -61,6 +61,45 @@ def test_nodes_have_paths_and_keys(model: dict) -> None:
         assert n["symbol_key"], f"node {n['id']} has empty symbol_key"
 
 
+def test_ports_carry_direction(model: dict) -> None:
+    """Every Port node has a declared direction; non-ports leave it null."""
+    ports = [n for n in model["nodes"] if n["kind"] == "Port"]
+    assert ports, "no ports emitted"
+    for n in ports:
+        assert n["dir"] in ("in", "out", "inout"), f"port {n['path']} dir={n['dir']}"
+    # A known input and output on the core.
+    by = {(n["path"]): n for n in model["nodes"] if n["kind"] == "Port"}
+    assert by["picorv32_soc.g_lane[0].core.clk"]["dir"] == "in"
+    assert by["picorv32_soc.g_lane[0].core.eoi"]["dir"] == "out"
+
+
+def test_constant_tied_inputs(model: dict) -> None:
+    """Inputs tied to a literal carry that constant on the Port node."""
+    by = {n["path"]: n for n in model["nodes"] if n["kind"] == "Port"}
+    assert by["picorv32_soc.g_lane[0].core.irq"]["const"] == "32'd0"
+    assert by["picorv32_soc.g_lane[0].core.pcpi_wr"]["const"] == "1'b0"
+    # A net-driven input has no constant.
+    assert by["picorv32_soc.g_lane[0].core.clk"]["const"] is None
+
+
+def test_inferred_ff(model: dict) -> None:
+    """An always_ff becomes an FF node wired to its clock and assigned output."""
+    by = {n["id"]: n for n in model["nodes"]}
+    ffs = [n for n in model["nodes"] if n["kind"] == "FF"]
+    assert ffs, "no FF nodes emitted"
+
+    def sigs(ff_id: int, direction: str) -> set[str]:
+        return {
+            by[e["endpoint"]]["name"]
+            for e in model["edges"]
+            if e["port"] == ff_id and e["dir"] == direction
+        }
+
+    lane = [f for f in ffs if "lane_state" in sigs(f["id"], "out")]
+    assert lane, "no lane_state register"
+    assert "clk" in sigs(lane[0]["id"], "in"), "FF not clocked"
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]

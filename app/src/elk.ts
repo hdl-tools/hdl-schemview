@@ -1,7 +1,7 @@
 // Adapter from our SchematicGraph to an ELK graph, plus a layout helper.
 // `toElk` is pure (unit-tested); `layout` runs elkjs.
 import ELK from "elkjs/lib/elk.bundled.js";
-import type { SchematicGraph, SchPort } from "./types";
+import type { SchematicGraph, SchNode, SchPort } from "./types";
 
 export interface ElkLabel {
   text: string;
@@ -15,6 +15,8 @@ export interface ElkPort {
   width: number;
   height: number;
   layoutOptions: Record<string, string>;
+  x?: number;
+  y?: number;
 }
 export interface ElkChild {
   id: string;
@@ -46,16 +48,100 @@ export const portId = (id: number) => `p${id}`;
 // sized to fit their (now visible) pin and title text without overlap.
 const PIN_CH = 6.2; // port-name + width label
 const TITLE_CH = 7.5; // instance / (module) title
-const ROW_H = 20; // vertical space per pin row
+const ROW_H = 18; // vertical space per pin row
 
 const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 1 : 0);
+
+// --- inferred FF symbol ----------------------------------------------------
+export type FfRole = "clk" | "reset" | "q" | "data";
+// Classify an FF pin by side + (conventional) name: Q on the east, clock/reset
+// by name, everything else a condition.
+export function ffRole(p: SchPort): FfRole {
+  if (p.side === "east") return "q";
+  if (/(^|_)(clk|clock)/i.test(p.name)) return "clk";
+  if (/(^|_)(rst|reset)/i.test(p.name)) return "reset";
+  return "data";
+}
+export const FF_H = 46;
+export const ffWidth = (dataCount: number) => Math.max(56, (dataCount + 1) * 20 + 24);
+
+// A fixed-size FF: clock flush bottom-left, reset next, conditions spread along
+// the bottom, Q on the right centre (FIXED_POS so the renderer can match glyphs).
+function ffChild(n: SchNode): ElkChild {
+  const by = (r: FfRole) => n.ports.filter((p) => ffRole(p) === r);
+  const data = by("data");
+  const W = ffWidth(data.length);
+  const south = (id: number, x: number): ElkPort => ({
+    id: portId(id),
+    width: 6,
+    height: 6,
+    x,
+    y: FF_H,
+    layoutOptions: { "elk.port.side": "SOUTH" },
+  });
+  const ports: ElkPort[] = [];
+  for (const p of by("q"))
+    ports.push({
+      id: portId(p.id),
+      width: 6,
+      height: 6,
+      x: W,
+      y: FF_H / 2,
+      layoutOptions: { "elk.port.side": "EAST" },
+    });
+  for (const p of by("clk")) ports.push(south(p.id, 11));
+  for (const p of by("reset")) ports.push(south(p.id, 25));
+  const x0 = 40;
+  const x1 = W - 12;
+  data.forEach((p, i) =>
+    ports.push(south(p.id, data.length > 1 ? x0 + ((x1 - x0) * i) / (data.length - 1) : (x0 + x1) / 2)),
+  );
+  return {
+    id: nodeId(n.id),
+    width: W,
+    height: FF_H,
+    labels: [{ text: "FF" }],
+    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    ports,
+  };
+}
 
 /// Pure mapping: SchematicGraph -> ELK graph (no geometry yet).
 export function toElk(graph: SchematicGraph): ElkGraph {
   const portOwner = new Set<number>();
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
 
-  const children: ElkChild[] = graph.nodes.map((n) => {
+  const children: ElkChild[] = graph.nodes.map((n): ElkChild => {
+    // Inferred register: a fixed-size FF symbol with explicitly-placed pins —
+    // clock + reset + conditions along the bottom, Q on the right centre.
+    if (n.kind === "FF") return ffChild(n);
+    // Boundary I/O pin: a small node sized to its label, with its single port
+    // already sided toward the design.
+    if (n.kind === "Port") {
+      const lab = n.ports[0] ? pinLabelLen(n.ports[0]) : n.label.length;
+      // Boundary I/O pins cluster at the frame (first/last column); a constant
+      // tie-off instead sits in the layer just left of the box it drives.
+      const input = n.ports[0]?.side === "east";
+      const layoutOptions: Record<string, string> = { "elk.portConstraints": "FIXED_SIDE" };
+      if (!n.constant) {
+        layoutOptions["elk.layered.layering.layerConstraint"] = input
+          ? "FIRST_SEPARATE"
+          : "LAST_SEPARATE";
+      }
+      return {
+        id: nodeId(n.id),
+        width: Math.max(40, lab * PIN_CH + 24),
+        height: 26,
+        labels: [{ text: n.label }],
+        layoutOptions,
+        ports: n.ports.map((p) => ({
+          id: portId(p.id),
+          width: 6,
+          height: 6,
+          layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
+        })),
+      };
+    }
     const west = n.ports.filter((p) => p.side !== "east");
     const east = n.ports.filter((p) => p.side === "east");
     const wMax = west.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
@@ -73,7 +159,11 @@ export function toElk(graph: SchematicGraph): ElkGraph {
       labels: [{ text: n.label }],
       layoutOptions: {
         "elk.portConstraints": "FIXED_SIDE",
-        "elk.spacing.portPort": "12",
+        "elk.spacing.portPort": "10",
+        // Pack pins at the top of each side so they cluster (no justify-spread
+        // when one side has fewer pins than the other).
+        "elk.portAlignment.west": "BEGIN",
+        "elk.portAlignment.east": "BEGIN",
       },
       ports: n.ports.map((p) => ({
         id: portId(p.id),
@@ -99,11 +189,12 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "90",
-      "elk.spacing.nodeNode": "44",
-      "elk.spacing.edgeNode": "18",
-      "elk.spacing.edgeEdge": "12",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "18",
+      // Compact spacing so blocks and pins stay close together (less hunting).
+      "elk.layered.spacing.nodeNodeBetweenLayers": "55",
+      "elk.spacing.nodeNode": "18",
+      "elk.spacing.edgeNode": "12",
+      "elk.spacing.edgeEdge": "8",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "12",
     },
     children,
     edges,

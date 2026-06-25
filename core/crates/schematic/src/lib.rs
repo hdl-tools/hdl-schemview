@@ -46,7 +46,18 @@ pub struct SchNode {
     /// the basename of its defining source file. `None` for non-instances.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
+    /// Literal of a constant-source node (`32'd0`); `None` for normal nodes. Such
+    /// a node sits outside the design and drives a single tied input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<String>,
 }
+
+/// Synthetic id base for constant-source nodes (keyed by the driven port id), so
+/// they never collide with real model node/port ids.
+const CONST_ID_BASE: NodeId = 1 << 28;
+
+/// Synthetic id base for an FF's synthesized pins (keyed by the wired signal id).
+const FF_PIN_BASE: NodeId = 1 << 29;
 
 /// A wire between two endpoints (a box or one of its ports), by model NodeId.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -75,24 +86,21 @@ fn side_of(dir: Dir) -> Side {
     }
 }
 
-/// The boxes directly inside a scope: child `Instance`s and child `GenBlock`s
-/// (a generate block/array is shown as an expandable group box).
+/// The boxes shown inside a scope: child `Instance`s, with `GenBlock`s dissolved
+/// — their leaf instances are pulled up so e.g. both `g_lane[*].core` sit
+/// together at the top instead of behind a generate-array group box.
 fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
-    design
-        .node(scope)
-        .map(|n| {
-            n.children
-                .iter()
-                .copied()
-                .filter(|&c| {
-                    matches!(
-                        design.node(c).map(|n| n.kind),
-                        Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut out = Vec::new();
+    if let Some(n) = design.node(scope) {
+        for &c in &n.children {
+            match design.node(c).map(|x| x.kind) {
+                Some(NodeKind::Instance) | Some(NodeKind::Ff) => out.push(c),
+                Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
+                _ => {}
+            }
+        }
+    }
+    out
 }
 
 /// The box (from `boxes`) that `node` lives in — its nearest ancestor that is a
@@ -165,15 +173,27 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         .iter()
         .copied()
         .filter(|&c| is_kind(design, c, NodeKind::Port))
+        // Show wired pins and constant-tied inputs; dangling ports (unconnected
+        // outputs like mem_la_*, pcpi_*) are hidden to keep blocks compact.
+        .filter(|&pid| {
+            design.edges_of(pid).iter().any(|e| e.port == pid)
+                || design.node(pid).is_some_and(|n| n.const_value.is_some())
+        })
         .map(|pid| {
-            // Side from the first edge incident on this port (default West).
-            let side = design
-                .edges_of(pid)
-                .iter()
-                .find(|e| e.port == pid)
-                .map(|e| side_of(e.dir))
-                .unwrap_or(Side::West);
             let node = design.node(pid);
+            // Prefer the port's declared direction so even unconnected pins land
+            // on the correct side; fall back to an incident edge, then West.
+            let side = node
+                .and_then(|n| n.dir)
+                .or_else(|| {
+                    design
+                        .edges_of(pid)
+                        .iter()
+                        .find(|e| e.port == pid)
+                        .map(|e| e.dir)
+                })
+                .map(side_of)
+                .unwrap_or(Side::West);
             SchPort {
                 id: pid,
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),
@@ -195,6 +215,92 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         expandable: !child_boxes(design, bx).is_empty(),
         ports,
         module: module_of(design, n),
+        constant: None,
+    })
+}
+
+/// A constant-source node driving one tied input `port` with literal `lit`. It
+/// lays out (via the boundary-pin path) as a small source left of the consumer,
+/// wired to the input — so ELK routes other wires around it (no crossings).
+fn make_const_node(lit: &str, port: NodeId) -> SchNode {
+    let id = CONST_ID_BASE + port;
+    SchNode {
+        id,
+        kind: NodeKind::Port,
+        label: lit.to_string(),
+        path: String::new(),
+        expandable: false,
+        // East-facing pin: drives rightward into the design.
+        ports: vec![SchPort {
+            id,
+            name: lit.to_string(),
+            side: Side::East,
+            width: None,
+        }],
+        module: None,
+        constant: Some(lit.to_string()),
+    }
+}
+
+/// An inferred register box. The FF has no model `Port` children, so synthesize a
+/// pin per wired signal (clock/data on the west, Q on the east) from its edges;
+/// pin ids are `FF_PIN_BASE + signal` so wires can target them.
+fn make_ff_box(design: &Design, ff: NodeId) -> Option<SchNode> {
+    let n = design.node(ff)?;
+    let ports: Vec<SchPort> = design
+        .edges_of(ff)
+        .iter()
+        .filter(|e| e.port == ff)
+        .map(|e| {
+            let sig = design.node(e.endpoint);
+            SchPort {
+                id: FF_PIN_BASE + e.endpoint,
+                name: sig.map(|s| s.name.clone()).unwrap_or_default(),
+                side: side_of(e.dir),
+                width: sig.and_then(|s| width_of(&s.type_)),
+            }
+        })
+        .collect();
+    Some(SchNode {
+        id: ff,
+        kind: NodeKind::Ff,
+        label: if n.name.is_empty() {
+            "FF".into()
+        } else {
+            n.name.clone()
+        },
+        path: n.path.clone(),
+        expandable: false,
+        ports,
+        module: None,
+        constant: None,
+    })
+}
+
+/// A boundary I/O pin for one of the scope's own ports. Rendered as a frame pin
+/// (no box). Its single pin faces the design — inputs enter from the west frame
+/// (pin on the east), outputs leave at the east frame (pin on the west) — so the
+/// layered layout places inputs on the left and outputs on the right.
+fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
+    let n = design.node(port)?;
+    let side = match n.dir {
+        Some(Dir::Out) => Side::West,
+        _ => Side::East,
+    };
+    Some(SchNode {
+        id: port,
+        kind: NodeKind::Port,
+        label: n.name.clone(),
+        path: n.path.clone(),
+        expandable: false,
+        ports: vec![SchPort {
+            id: port,
+            name: n.name.clone(),
+            side,
+            width: width_of(&n.type_),
+        }],
+        module: None,
+        constant: None,
     })
 }
 
@@ -211,10 +317,54 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
 
     let boxes = child_boxes(design, scope);
     let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
-    let nodes: Vec<SchNode> = boxes.iter().filter_map(|&b| make_box(design, b)).collect();
+    let mut nodes: Vec<SchNode> = boxes
+        .iter()
+        .filter_map(|&b| {
+            if is_kind(design, b, NodeKind::Ff) {
+                make_ff_box(design, b)
+            } else {
+                make_box(design, b)
+            }
+        })
+        .collect();
+
+    // Boundary I/O: the scope's *own* ports, drawn as frame pins (inputs left,
+    // outputs right). An edge that reaches such a port — or its same-path backing
+    // net/var — anchors to that pin so the connection is visible.
+    let own_ports: Vec<NodeId> = design
+        .node(scope)
+        .map(|n| {
+            n.children
+                .iter()
+                .copied()
+                .filter(|&c| is_kind(design, c, NodeKind::Port))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut boundary_of: std::collections::HashMap<NodeId, NodeId> =
+        std::collections::HashMap::new();
+    if let Some(scope_node) = design.node(scope) {
+        for &p in &own_ports {
+            boundary_of.insert(p, p);
+            let ppath = design.node(p).map(|n| n.path.as_str());
+            for &sib in &scope_node.children {
+                if sib != p && design.node(sib).map(|n| n.path.as_str()) == ppath {
+                    boundary_of.insert(sib, p);
+                }
+            }
+        }
+    }
+    nodes.extend(
+        own_ports
+            .iter()
+            .filter_map(|&p| make_boundary_pin(design, p)),
+    );
 
     // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
     let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
+        if let Some(&bp) = boundary_of.get(&node) {
+            return Some((bp, bp));
+        }
         let b = box_of(design, node, &box_set)?;
         // Draw to the specific port if the node is a Port directly under the box;
         // otherwise anchor to the box.
@@ -229,9 +379,21 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     };
 
     let mut edges = Vec::new();
+    let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for (i, e) in design.edges().iter().enumerate() {
-        if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
-            if sb != tb {
+        // An FF wires through its synthesized pin (FF_PIN_BASE + signal); other
+        // edges resolve both ends to in-scope boxes/pins.
+        let src_res = if is_kind(design, e.port, NodeKind::Ff) {
+            box_set
+                .contains(&e.port)
+                .then_some((e.port, FF_PIN_BASE + e.endpoint))
+        } else {
+            resolve(e.port)
+        };
+        if let (Some((sb, src)), Some((tb, tgt))) = (src_res, resolve(e.endpoint)) {
+            // Collapse parallel connections that land on the same two anchors
+            // (e.g. both lanes' clk meeting one boundary pin).
+            if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {
                 let net = design
                     .node(e.endpoint)
                     .map(|n| relative_to(&n.path, scope_path));
@@ -241,6 +403,29 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                     target: tgt,
                     net,
                 });
+            }
+        }
+    }
+
+    // Constant tie-offs: a small source node outside each box, wired to every
+    // input the model records as driven by a literal. ELK lays these out left of
+    // the consumer and routes other wires around them.
+    let mut next_edge = design.edges().len() as u32;
+    for &b in &boxes {
+        let Some(bn) = design.node(b) else { continue };
+        for &pid in &bn.children {
+            if !is_kind(design, pid, NodeKind::Port) {
+                continue;
+            }
+            if let Some(lit) = design.node(pid).and_then(|n| n.const_value.clone()) {
+                nodes.push(make_const_node(&lit, pid));
+                edges.push(SchEdge {
+                    id: next_edge,
+                    source: CONST_ID_BASE + pid,
+                    target: pid,
+                    net: None,
+                });
+                next_edge += 1;
             }
         }
     }

@@ -29,6 +29,9 @@ pub enum NodeKind {
     Param,
     ModuleDef,
     GenBlock,
+    /// Inferred sequential register (an `always_ff` block).
+    #[serde(rename = "FF")]
+    Ff,
 }
 
 /// A point in a source file.
@@ -71,6 +74,13 @@ pub struct Node {
     pub inst_range: Option<Range>,
     #[serde(rename = "type", default)]
     pub type_: Option<String>,
+    /// Declared direction for `Port` nodes (drives schematic pin side); `None`
+    /// otherwise.
+    #[serde(default)]
+    pub dir: Option<Dir>,
+    /// Literal value tied to a `Port` input (e.g. `32'd0`); `None` if net-driven.
+    #[serde(rename = "const", default)]
+    pub const_value: Option<String>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -261,6 +271,8 @@ mod tests {
             def_range: range,
             inst_range: None,
             type_: None,
+            dir: None,
+            const_value: None,
             drivers: vec![],
             loads: vec![],
         }

@@ -18,6 +18,8 @@ export interface SchNode {
   ports: SchPort[];
   /** Module/definition type of an instance (e.g. "picorv32"). */
   module?: string;
+  /** Literal of a constant-source node (e.g. "32'd0"); drives one tied input. */
+  constant?: string;
 }
 export interface SchEdge {
   id: number;

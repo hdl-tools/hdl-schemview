@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use svxprobe_model::{Design, Dir, NodeId};
-use svxprobe_schematic::{cone, scope_graph};
+use svxprobe_schematic::{cone, scope_graph, Side};
 
 fn design() -> Design {
     let golden = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -41,6 +41,16 @@ fn scope_graph_has_boxes_and_wires() {
     let clk = core.ports.iter().find(|p| p.name == "clk").unwrap();
     assert_eq!(clk.width, None, "scalar pin has no width");
 
+    // Pin side follows the declared direction: input clk west, output east.
+    assert_eq!(clk.side, Side::West, "input clk on the west");
+    let mv = core.ports.iter().find(|p| p.name == "mem_valid").unwrap();
+    assert_eq!(mv.side, Side::East, "output mem_valid on the east");
+    // Unconnected ports are hidden to keep blocks compact.
+    assert!(
+        core.ports.iter().all(|p| p.name != "eoi"),
+        "dangling output eoi should be hidden"
+    );
+
     // There is internal wiring, including the memory↔bus connection.
     assert!(!g.edges.is_empty(), "no wires");
     let bus = id(&d, "picorv32_soc.g_lane[0].bus");
@@ -63,27 +73,55 @@ fn scope_graph_has_boxes_and_wires() {
 }
 
 #[test]
-fn generate_blocks_are_expandable_boxes() {
+fn constant_tied_inputs_show_their_literal() {
     let d = design();
-    // Top scope: the generate array is a single expandable group box.
-    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
-    let g_lane = top
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();
+    let core = g.nodes.iter().find(|n| n.label == "core").unwrap();
+    // irq (tied to 32'd0) is still shown as a pin...
+    let irq = core
+        .ports
+        .iter()
+        .find(|p| p.name == "irq")
+        .expect("const-tied irq should be shown");
+    // ...driven by a constant-source node (32'd0) wired into it from outside.
+    let cnode = g
         .nodes
         .iter()
-        .find(|n| n.label == "g_lane")
-        .expect("g_lane box at top");
-    assert!(g_lane.expandable, "generate array should be expandable");
+        .find(|n| {
+            n.constant.as_deref() == Some("32'd0")
+                && g.edges
+                    .iter()
+                    .any(|e| e.source == n.id && e.target == irq.id)
+        })
+        .expect("a 32'd0 constant source wired to irq");
+    assert_eq!(
+        cnode.kind,
+        svxprobe_model::NodeKind::Port,
+        "const node kind"
+    );
+}
 
-    // Expanding it reveals the two lane blocks, themselves expandable.
-    let lanes = svxprobe_schematic::expand(&d, g_lane.id).unwrap();
-    assert_eq!(lanes.nodes.len(), 2, "two lanes");
-    assert!(lanes.nodes.iter().all(|n| n.expandable), "lanes expandable");
-
-    // Expanding a lane reveals the leaf instances.
-    let lane0 = lanes.nodes.iter().find(|n| n.label == "g_lane[0]").unwrap();
-    let inside = svxprobe_schematic::expand(&d, lane0.id).unwrap();
-    let labels: Vec<&str> = inside.nodes.iter().map(|n| n.label.as_str()).collect();
-    assert!(labels.contains(&"core") && labels.contains(&"memory") && labels.contains(&"bus"));
+#[test]
+fn generate_blocks_are_flattened_at_top() {
+    let d = design();
+    // The generate array is dissolved: both lanes' leaf instances appear at the
+    // top, not a single g_lane group box.
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+    let labels: Vec<&str> = top.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        !labels.contains(&"g_lane"),
+        "g_lane should be flattened: {labels:?}"
+    );
+    assert_eq!(
+        top.nodes.iter().filter(|n| n.label == "core").count(),
+        2,
+        "both lane cores shown: {labels:?}"
+    );
+    assert_eq!(
+        top.nodes.iter().filter(|n| n.label == "memory").count(),
+        2,
+        "both lane memories shown: {labels:?}"
+    );
 }
 
 #[test]
@@ -93,6 +131,70 @@ fn expand_matches_scope_graph() {
     let via_expand = svxprobe_schematic::expand(&d, g0).unwrap();
     let via_scope = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();
     assert_eq!(via_expand, via_scope);
+}
+
+#[test]
+fn top_scope_has_boundary_io_pins() {
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+
+    // The design's own ports appear as boundary pins (NodeKind::Port boxes).
+    let pin = |name: &str| {
+        top.nodes
+            .iter()
+            .find(|n| n.kind == svxprobe_model::NodeKind::Port && n.label == name)
+    };
+    let clk = pin("clk").expect("clk boundary pin");
+    let trap = pin("core_trap").expect("core_trap boundary pin");
+
+    // Inputs face the design from the west frame (pin on the east); outputs the
+    // reverse — so the layout puts inputs left, outputs right.
+    assert_eq!(clk.ports[0].side, Side::East, "input clk pin faces east");
+    assert_eq!(
+        trap.ports[0].side,
+        Side::West,
+        "output core_trap pin faces west"
+    );
+
+    // The boundary pins are actually wired into the design.
+    assert!(
+        top.edges
+            .iter()
+            .any(|e| e.source == clk.id || e.target == clk.id),
+        "clk boundary pin is not connected"
+    );
+}
+
+#[test]
+fn inferred_ff_is_a_box_with_clock_and_output() {
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+    let ffs: Vec<_> = top
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .collect();
+    assert_eq!(ffs.len(), 2, "one lane_state FF per lane");
+    let ff = ffs[0];
+    let clk = ff
+        .ports
+        .iter()
+        .find(|p| p.name == "clk")
+        .expect("FF clock pin");
+    assert_eq!(clk.side, Side::West, "clock on the west");
+    let q = ff
+        .ports
+        .iter()
+        .find(|p| p.name == "lane_state")
+        .expect("FF output pin");
+    assert_eq!(q.side, Side::East, "Q on the east");
+    // The FF clock pin is wired into the design (to the boundary clk).
+    assert!(
+        top.edges
+            .iter()
+            .any(|e| e.source == clk.id || e.target == clk.id),
+        "FF clock is not wired"
+    );
 }
 
 #[test]

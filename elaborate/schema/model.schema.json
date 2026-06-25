@@ -80,7 +80,7 @@
         "id": { "type": "integer", "minimum": 0 },
         "kind": {
           "type": "string",
-          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock"]
+          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF"]
         },
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },
@@ -90,6 +90,15 @@
         "def_range": { "anyOf": [ { "$ref": "#/$defs/range" }, { "type": "null" } ] },
         "inst_range": { "anyOf": [ { "$ref": "#/$defs/range" }, { "type": "null" } ] },
         "type": { "type": ["string", "null"], "description": "Type string for signal nodes." },
+        "dir": {
+          "type": ["string", "null"],
+          "enum": ["in", "out", "inout", null],
+          "description": "Declared direction for Port nodes (drives schematic pin side); null otherwise."
+        },
+        "const": {
+          "type": ["string", "null"],
+          "description": "Literal value tied to a Port input (e.g. \"32'd0\"); null if driven by a net."
+        },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
       }

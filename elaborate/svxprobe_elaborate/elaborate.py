@@ -73,6 +73,8 @@ class Elaborator:
         self.files: list[dict[str, Any]] = []
         # (instance node id, InstanceSymbol) collected for edge extraction.
         self.instances: list[tuple[int, Any]] = []
+        # (FF node id, ProceduralBlockSymbol) for inferred-register extraction.
+        self.ff_blocks: list[tuple[int, Any]] = []
 
     # -- source-range helpers ------------------------------------------------
     def _file_id(self, path: str) -> int:
@@ -126,6 +128,8 @@ class Elaborator:
             "def_range": None,
             "inst_range": None,
             "type": None,
+            "dir": None,
+            "const": None,
             "drivers": [],
             "loads": [],
         }
@@ -143,10 +147,83 @@ class Elaborator:
                 t = getattr(sym, "type", None)
                 if t is not None:
                     node["type"] = str(t)
+            if kind == "Port":
+                # Declared direction, so even unconnected pins land on the right
+                # side of the schematic (inputs left, outputs right).
+                d = str(getattr(sym, "direction", "")).split(".")[-1]
+                node["dir"] = {"In": "in", "Out": "out", "InOut": "inout"}.get(d)
         self.nodes.append(node)
         if parent is not None:
             self.nodes[parent]["children"].append(nid)
         return nid
+
+    def _add_ff(self, sym: Any, parent: Optional[int]) -> int:
+        """Emit an inferred-register (FF) node. Procedural blocks are unnamed and
+        have no hierarchical path, so synthesize one."""
+        nid = self._add(sym, "FF", parent)
+        n = self.nodes[nid]
+        n["name"] = "FF"
+        base = self.nodes[parent]["path"] if parent is not None else ""
+        n["path"] = f"{base}.$ff{nid}"
+        n["symbol_key"] = n["path"]
+        return nid
+
+    @staticmethod
+    def _value_refs(node: Any) -> set[str]:
+        """Hierarchical paths of every value symbol referenced in an AST subtree."""
+        out: set[str] = set()
+
+        def cb(n: Any) -> None:
+            k = _kind_name(n)
+            if "NamedValue" in k or "HierarchicalValue" in k:
+                p = getattr(getattr(n, "symbol", None), "hierarchicalPath", None)
+                if p:
+                    out.add(p)
+
+        try:
+            node.visit(cb)
+        except Exception:
+            pass
+        return out
+
+    def _ff_edges(self, ff_id: int, sym: Any, seen: set) -> None:
+        """Wire an FF: clock + data signals in, assigned (Q) signals out."""
+        body = getattr(sym, "body", None)
+        clock = self._value_refs(getattr(body, "timing", None))
+        assigned: set[str] = set()
+
+        def cb(n: Any) -> None:
+            if "Assignment" in _kind_name(n):
+                left = getattr(n, "left", None)
+                if left is not None:
+                    assigned.update(self._value_refs(left))
+
+        try:
+            sym.visit(cb)
+        except Exception:
+            pass
+        data = self._value_refs(sym) - assigned - clock
+
+        def wire(paths: set, direction: str) -> list[int]:
+            ids = []
+            for p in sorted(paths):
+                nid = self._pick_node(p, ("Net", "Var", "Port"))
+                # Only wire real signals — drop genvars/params/enum constants.
+                if (
+                    nid is not None
+                    and nid != ff_id
+                    and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
+                ):
+                    seen.add((ff_id, nid, direction))
+                    ids.append(nid)
+            return ids
+
+        clk_ids = wire(clock, "in")
+        wire(data, "in")
+        wire(assigned, "out")
+        # Tell the renderer which pin is the clock (draws the FF clock notch).
+        if clk_ids:
+            self.nodes[ff_id]["type"] = self.nodes[clk_ids[0]]["name"]
 
     def _members(self, sym: Any):
         body = getattr(sym, "body", None)
@@ -159,6 +236,15 @@ class Elaborator:
     def _walk(self, sym: Any, parent: Optional[int]) -> None:
         kname = _kind_name(sym)
         kind = _KIND_MAP.get(kname)
+
+        # An inferred sequential register (`always_ff`) becomes an FF spine node;
+        # its clock/data/Q wiring is recovered later in `_ff_edges`.
+        if kname == "ProceduralBlock" and str(
+            getattr(sym, "procedureKind", "")
+        ).endswith("AlwaysFF"):
+            ff_id = self._add_ff(sym, parent)
+            self.ff_blocks.append((ff_id, sym))
+            return
 
         # Skip the auto-generated internal variable backing a port (the Port node
         # already represents that signal), to avoid duplicate same-path nodes.
@@ -208,6 +294,18 @@ class Elaborator:
                 out.append(path)
         return out
 
+    def _const_str(self, expr: Any) -> Optional[str]:
+        """The literal value of a constant-tied connection (`.irq(32'd0)`), else
+        None. Used to annotate inputs driven by a constant rather than a net."""
+        try:
+            c = expr.constant
+        except Exception:
+            return None
+        if c is None or getattr(c, "bad", False):
+            return None
+        s = str(c)
+        return s if s and s != "None" else None
+
     def _pick_node(self, path: str, prefer: tuple[str, ...]) -> Optional[int]:
         """Resolve a path to a node id, preferring the given kinds in order."""
         ids = self._by_path.get(path)
@@ -246,10 +344,20 @@ class Elaborator:
                 direction = dir_map.get(
                     str(getattr(port, "direction", "")).split(".")[-1], "inout"
                 )
-                for rp in self._expr_refs(expr):
+                refs = self._expr_refs(expr)
+                for rp in refs:
                     end_id = self._pick_node(rp, ("Net", "Var", "Port", "Instance"))
                     if end_id is not None and end_id != port_id:
                         seen_edges.add((port_id, end_id, direction))
+                # Input tied to a literal (no net): record the constant on the
+                # port so the schematic can show its driver (e.g. 32'd0).
+                if not refs and port_id != inst_id:
+                    lit = self._const_str(expr)
+                    if lit is not None and self.nodes[port_id]["kind"] == "Port":
+                        self.nodes[port_id]["const"] = lit
+
+        for ff_id, ff_sym in self.ff_blocks:
+            self._ff_edges(ff_id, ff_sym, seen_edges)
 
         return [
             {"id": i, "port": p, "endpoint": e, "dir": d}

@@ -1,8 +1,8 @@
 // hdl-schemview frontend: three panes (schematic / source / waveform) linked by
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
-import { layout, nodeId } from "./elk";
-import type { ProbeResponse, SchematicGraph, SchPort, ValueChange } from "./types";
+import { ffRole, layout, nodeId } from "./elk";
+import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -62,6 +62,9 @@ function renderBreadcrumb() {
 
 // -- schematic -------------------------------------------------------------
 
+// Current zoom factor; persists across re-renders so selection/expansion keeps it.
+const zoom = { k: 1 };
+
 async function renderSchematic(graph: SchematicGraph) {
   const host = $("schematic");
   host.innerHTML = "";
@@ -70,34 +73,68 @@ async function renderSchematic(graph: SchematicGraph) {
     return;
   }
   const laid: any = await layout(graph);
+  const baseW = Math.max(laid.width ?? 400, 200);
+  const baseH = Math.max(laid.height ?? 300, 150);
   const svg = document.createElementNS(SVGNS, "svg");
-  svg.setAttribute("width", String(Math.max(laid.width ?? 400, 200)));
-  svg.setAttribute("height", String(Math.max(laid.height ?? 300, 150)));
+  svg.dataset.baseW = String(baseW);
+  svg.dataset.baseH = String(baseH);
+  // All content lives in one <g> so a single transform zooms everything.
+  const root = document.createElementNS(SVGNS, "g");
+  svg.appendChild(root);
 
-  // Wires first (under everything), then their net labels, then the boxes.
+  // 1. Wires (under everything). Collect each net's label to draw last, on top,
+  //    attached to the midpoint of the wire's longest (most legible) segment.
+  //    A net name is drawn only once per view (it may fan out over many wires).
+  const wireLabels: SVGTextElement[] = [];
+  const seenNets = new Set<string>();
   for (const e of laid.edges ?? []) {
+    const segs: [any, any][] = [];
     for (const sec of e.sections ?? []) {
       const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
       const path = document.createElementNS(SVGNS, "polyline");
       path.setAttribute("class", "wire");
       path.setAttribute("points", pts.map((p: any) => `${p.x},${p.y}`).join(" "));
-      svg.appendChild(path);
+      root.appendChild(path);
+      for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
     }
-    for (const lab of e.labels ?? []) {
-      if (!lab.text) continue;
+    const text = e.labels?.[0]?.text;
+    if (text && segs.length && !seenNets.has(text)) {
+      seenNets.add(text);
+      let best = segs[0];
+      let bestLen = -1;
+      for (const [a, b] of segs) {
+        const len = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+        if (len > bestLen) [bestLen, best] = [len, [a, b]];
+      }
+      const [a, b] = best;
+      const horizontal = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y);
       const t = document.createElementNS(SVGNS, "text");
       t.setAttribute("class", "wire-label");
-      t.setAttribute("x", String((lab.x ?? 0) + (lab.width ?? 0) / 2));
-      t.setAttribute("y", String((lab.y ?? 0) + (lab.height ?? 11) - 1));
+      t.setAttribute("x", String((a.x + b.x) / 2));
+      t.setAttribute("y", String((a.y + b.y) / 2 + (horizontal ? -3 : 0)));
       t.setAttribute("text-anchor", "middle");
-      t.textContent = lab.text;
-      svg.appendChild(t);
+      if (!horizontal) t.setAttribute("dominant-baseline", "middle");
+      t.textContent = text;
+      wireLabels.push(t);
     }
   }
 
+  // 2. Boxes.
   for (const c of laid.children ?? []) {
     const id = Number(String(c.id).slice(1));
     const node = graph.nodes.find((n) => n.id === id);
+
+    // Boundary I/O pin (the scope's own port): a frame pin + label, not a box.
+    if (node?.kind === "Port") {
+      renderBoundaryPin(root, c, node, id);
+      continue;
+    }
+    // Inferred register: a generic flip-flop symbol.
+    if (node?.kind === "FF") {
+      renderFF(root, c, node, id);
+      continue;
+    }
+
     const portById = new Map<number, SchPort>();
     node?.ports.forEach((p) => portById.set(p.id, p));
 
@@ -138,8 +175,9 @@ async function renderSchematic(graph: SchematicGraph) {
       g.appendChild(mod);
     }
 
-    // Pins: a direction arrow at each port (in on the west, out on the east)
-    // plus the port name + bit-width, drawn just inside the border.
+    // Pins: a direction arrow drawn *just inside* the border so the wire lands
+    // exactly on the boundary (in on the west, out on the east), plus the port
+    // name + bit-width clear of the arrow.
     for (const p of c.ports ?? []) {
       const pid = Number(String(p.id).slice(1));
       const sp = portById.get(pid);
@@ -152,8 +190,8 @@ async function renderSchematic(graph: SchematicGraph) {
       arrow.setAttribute(
         "d",
         west
-          ? `M${px - 9},${py - 4} L${px - 9},${py + 4} L${px},${py} Z`
-          : `M${px},${py - 4} L${px},${py + 4} L${px + 9},${py} Z`,
+          ? `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`
+          : `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`,
       );
       arrow.onclick = () => selectNode(pid);
       g.appendChild(arrow);
@@ -161,7 +199,7 @@ async function renderSchematic(graph: SchematicGraph) {
       if (sp) {
         const t = document.createElementNS(SVGNS, "text");
         t.setAttribute("class", "pin-label");
-        t.setAttribute("x", String(west ? px + 6 : px - 6));
+        t.setAttribute("x", String(west ? px + 11 : px - 11));
         t.setAttribute("y", String(py + 3));
         t.setAttribute("text-anchor", west ? "start" : "end");
         t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
@@ -169,9 +207,150 @@ async function renderSchematic(graph: SchematicGraph) {
         g.appendChild(t);
       }
     }
-    svg.appendChild(g);
+    root.appendChild(g);
   }
+
+  // 3. Net labels last, so they stay legible over wires and box edges.
+  for (const t of wireLabels) root.appendChild(t);
+
   host.appendChild(svg);
+  applyZoom(svg);
+}
+
+// A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
+// the port name on the outboard side (inputs on the left, outputs on the right).
+function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const sp = node.ports[0];
+  const p = c.ports?.[0];
+  const px = p?.x ?? 0;
+  const py = p?.y ?? 0;
+  const input = sp?.side === "east"; // east-facing pin ⇒ input on the west frame
+  // A constant tie-off is a synthetic node (no model id) — render its literal and
+  // make it inert; a real boundary I/O pin cross-probes on click.
+  const isConst = !!node.constant;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const arrow = document.createElementNS(SVGNS, "path");
+  arrow.setAttribute("class", "pin " + (input ? "pin-in" : "pin-out"));
+  arrow.setAttribute(
+    "d",
+    input
+      ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
+      : `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`,
+  );
+  if (!isConst) arrow.onclick = () => selectNode(id);
+  g.appendChild(arrow);
+
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", isConst ? "const-label" : "pin-label");
+  t.setAttribute("x", String(input ? px - 12 : px + 12));
+  t.setAttribute("y", String(py + 3));
+  t.setAttribute("text-anchor", input ? "end" : "start");
+  t.textContent = sp?.width ? `${sp.name}${sp.width}` : (sp?.name ?? node.label);
+  if (!isConst) t.onclick = () => selectNode(id);
+  g.appendChild(t);
+
+  parent.appendChild(g);
+}
+
+// An inferred register, drawn as a generic flip-flop: a plain square labelled
+// "FF" with a clock wedge (clk, inner bottom-left), an active-low bubble (reset,
+// outer bottom), conditions along the bottom, and Q at the right centre. Pin
+// positions come from ELK (FIXED_POS in `ffChild`); here we add the glyphs.
+function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const rect = document.createElementNS(SVGNS, "rect");
+  rect.setAttribute("class", "box ff" + (state.selected === id ? " sel" : ""));
+  rect.setAttribute("width", String(W));
+  rect.setAttribute("height", String(H));
+  rect.setAttribute("rx", "3");
+  rect.onclick = () => selectNode(id);
+  g.appendChild(rect);
+
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "box-label");
+  t.setAttribute("x", String(W / 2));
+  t.setAttribute("y", String(H / 2 + 1));
+  t.setAttribute("text-anchor", "middle");
+  t.style.pointerEvents = "none";
+  t.textContent = "FF";
+  g.appendChild(t);
+
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const sp = portById.get(Number(String(p.id).slice(1)));
+    if (!sp) continue;
+    const px = p.x ?? 0;
+    const role = ffRole(sp);
+    if (role === "clk") {
+      // Clock-edge wedge, flush to the bottom-left, pointing up into the box.
+      const tri = document.createElementNS(SVGNS, "path");
+      tri.setAttribute("class", "ff-clk");
+      tri.setAttribute("d", `M${px - 6},${H} L${px + 6},${H} L${px},${H - 10} Z`);
+      g.appendChild(tri);
+    } else if (role === "reset") {
+      // Active-low reset bubble just below the bottom edge.
+      const circ = document.createElementNS(SVGNS, "circle");
+      circ.setAttribute("class", "ff-rst");
+      circ.setAttribute("cx", String(px));
+      circ.setAttribute("cy", String(H + 3));
+      circ.setAttribute("r", "3");
+      g.appendChild(circ);
+    }
+  }
+  parent.appendChild(g);
+}
+
+// Resize the SVG and scale its content to the current zoom factor (no relayout).
+function applyZoom(svg: SVGSVGElement) {
+  const bw = Number(svg.dataset.baseW) || 400;
+  const bh = Number(svg.dataset.baseH) || 300;
+  svg.setAttribute("width", String(Math.round(bw * zoom.k)));
+  svg.setAttribute("height", String(Math.round(bh * zoom.k)));
+  (svg.firstElementChild as SVGGElement)?.setAttribute("transform", `scale(${zoom.k})`);
+  const pct = $("zoom-reset");
+  if (pct) pct.textContent = `${Math.round(zoom.k * 100)}%`;
+}
+
+// Zoom around a focal point (keeps that document point under the cursor).
+function setZoom(k: number, focus?: { x: number; y: number }) {
+  const host = $("schematic");
+  const svg = host.querySelector("svg");
+  if (!svg) return;
+  const prev = zoom.k;
+  zoom.k = Math.min(6, Math.max(0.2, k));
+  const rect = host.getBoundingClientRect();
+  const fx = focus ? focus.x - rect.left : host.clientWidth / 2;
+  const fy = focus ? focus.y - rect.top : host.clientHeight / 2;
+  const ox = host.scrollLeft + fx;
+  const oy = host.scrollTop + fy;
+  applyZoom(svg as SVGSVGElement);
+  const ratio = zoom.k / prev;
+  host.scrollLeft = ox * ratio - fx;
+  host.scrollTop = oy * ratio - fy;
+}
+
+// Ctrl/⌘ + wheel zooms toward the cursor; plain wheel keeps scrolling.
+function setupZoom() {
+  const host = $("schematic");
+  host.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      ev.preventDefault();
+      setZoom(zoom.k * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), { x: ev.clientX, y: ev.clientY });
+    },
+    { passive: false },
+  );
+  $("zoom-in").addEventListener("click", () => setZoom(zoom.k * 1.25));
+  $("zoom-out").addEventListener("click", () => setZoom(zoom.k / 1.25));
+  $("zoom-reset").addEventListener("click", () => setZoom(1));
 }
 
 // `node.path` isn't in the layout; look it up from the graph by id.
@@ -306,6 +485,7 @@ function init() {
   ($("srcroot") as HTMLInputElement).value = "../..";
   $("load").addEventListener("click", load);
   initTheme();
+  setupZoom();
 }
 
 document.addEventListener("DOMContentLoaded", init);
