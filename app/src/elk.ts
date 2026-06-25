@@ -46,7 +46,7 @@ export const portId = (id: number) => `p${id}`;
 // sized to fit their (now visible) pin and title text without overlap.
 const PIN_CH = 6.2; // port-name + width label
 const TITLE_CH = 7.5; // instance / (module) title
-const ROW_H = 20; // vertical space per pin row
+const ROW_H = 18; // vertical space per pin row
 
 const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 1 : 0);
 
@@ -60,12 +60,18 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     // already sided toward the design.
     if (n.kind === "Port") {
       const lab = n.ports[0] ? pinLabelLen(n.ports[0]) : n.label.length;
+      // Cluster all input pins in a dedicated first column and outputs in a
+      // dedicated last column, so I/O is grouped and easy to find.
+      const input = n.ports[0]?.side === "east";
       return {
         id: nodeId(n.id),
         width: Math.max(40, lab * PIN_CH + 24),
         height: 26,
         labels: [{ text: n.label }],
-        layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+        layoutOptions: {
+          "elk.portConstraints": "FIXED_SIDE",
+          "elk.layered.layering.layerConstraint": input ? "FIRST_SEPARATE" : "LAST_SEPARATE",
+        },
         ports: n.ports.map((p) => ({
           id: portId(p.id),
           width: 6,
@@ -91,7 +97,11 @@ export function toElk(graph: SchematicGraph): ElkGraph {
       labels: [{ text: n.label }],
       layoutOptions: {
         "elk.portConstraints": "FIXED_SIDE",
-        "elk.spacing.portPort": "12",
+        "elk.spacing.portPort": "10",
+        // Pack pins at the top of each side so they cluster (no justify-spread
+        // when one side has fewer pins than the other).
+        "elk.portAlignment.west": "BEGIN",
+        "elk.portAlignment.east": "BEGIN",
       },
       ports: n.ports.map((p) => ({
         id: portId(p.id),
@@ -117,11 +127,12 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "90",
-      "elk.spacing.nodeNode": "44",
-      "elk.spacing.edgeNode": "18",
-      "elk.spacing.edgeEdge": "12",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "18",
+      // Compact spacing so blocks and pins stay close together (less hunting).
+      "elk.layered.spacing.nodeNodeBetweenLayers": "55",
+      "elk.spacing.nodeNode": "18",
+      "elk.spacing.edgeNode": "12",
+      "elk.spacing.edgeEdge": "8",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "12",
     },
     children,
     edges,
