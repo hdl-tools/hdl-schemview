@@ -214,10 +214,12 @@ return to the indicated loop-back point rather than proceeding.
 
 ### Phase 3 — Schematic view (third projection) · Size: L
 
-> **Status: in progress (3 stacked PRs).** 3a — connectivity (port-connection
-> `edges` in the model) ✅. 3b — the headless `schematic` crate (scope graph,
-> on-demand `expand`, fan-in/out `cone`; `svxprobe graph` CLI) ✅. 3c — the Tauri
-> GUI (three linked panes) ⏳.
+> **Status: DONE (3 stacked PRs).** 3a — connectivity (port-connection `edges`
+> in the model) ✅. 3b — the headless `schematic` crate (scope graph, on-demand
+> `expand`, fan-in/out `cone`; `svxprobe graph` CLI) ✅. 3c — the **Tauri desktop
+> app** (`app/`): three linked panes (schematic via elkjs, source, waveform
+> canvas) over `svxprobe-gui`; click a box → source + waveform follow; expand;
+> picker; cone ✅. Standalone (native webview; no Chromium/Playwright at runtime).
 
 - **Goal:** Generate a navigable schematic from the elaborated model and link it
   into the bus.

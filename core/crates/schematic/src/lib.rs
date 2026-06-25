@@ -35,6 +35,7 @@ pub struct SchNode {
     pub id: NodeId,
     pub kind: NodeKind,
     pub label: String,
+    pub path: String,
     pub expandable: bool,
     pub ports: Vec<SchPort>,
 }
@@ -140,6 +141,7 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         id: bx,
         kind: n.kind,
         label,
+        path: n.path.clone(),
         expandable: !child_boxes(design, bx).is_empty(),
         ports,
     })

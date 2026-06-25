@@ -421,6 +421,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "svxprobe-gui"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "svxprobe-ingest",
+ "svxprobe-matcher",
+ "svxprobe-model",
+ "svxprobe-schematic",
+ "svxprobe-wave",
+ "svxprobe-xprobe",
+]
+
+[[package]]
 name = "svxprobe-ingest"
 version = "0.0.0"
 dependencies = [
@@ -460,6 +474,7 @@ name = "svxprobe-wave"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "serde",
  "wellen",
 ]
 

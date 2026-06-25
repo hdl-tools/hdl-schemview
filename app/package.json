@@ -1,0 +1,23 @@
+{
+  "name": "hdl-schemview-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "elkjs": "^0.9.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "^5.6",
+    "vite": "^5.4",
+    "vitest": "^2.1"
+  }
+}

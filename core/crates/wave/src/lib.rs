@@ -6,7 +6,14 @@
 
 use anyhow::{Context, Result};
 use wellen::simple::Waveform;
-use wellen::{Hierarchy, LoadOptions, VarType};
+use wellen::{Hierarchy, LoadOptions, SignalRef, VarType};
+
+/// A single value change: simulation time and the value as a string.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ValueChange {
+    pub time: u64,
+    pub value: String,
+}
 
 /// A loaded waveform header (hierarchy known; signal bodies lazy).
 pub struct LoadedWave {
@@ -88,6 +95,29 @@ impl LoadedWave {
     /// Direct access to the wellen hierarchy (for callers that need more).
     pub fn hierarchy(&self) -> &Hierarchy {
         self.wave.hierarchy()
+    }
+
+    /// Load a signal (by its wellen signal-ref index) and return its value
+    /// changes over the whole trace as (time, value-string) pairs. Lazy: only
+    /// the requested signal is materialized.
+    pub fn signal_values(&mut self, signal_ref: u32) -> Vec<ValueChange> {
+        let Some(sr) = SignalRef::from_index(signal_ref as usize) else {
+            return Vec::new();
+        };
+        self.wave.load_signals(&[sr]);
+        let times = self.wave.time_table().to_vec();
+        match self.wave.get_signal(sr) {
+            Some(sig) => sig
+                .iter_changes()
+                .filter_map(|(idx, val)| {
+                    times.get(idx as usize).map(|&t| ValueChange {
+                        time: t,
+                        value: val.to_string(),
+                    })
+                })
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     pub fn summary(&self) -> WaveSummary {

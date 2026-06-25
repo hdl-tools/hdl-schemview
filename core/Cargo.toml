@@ -7,6 +7,7 @@ members = [
     "crates/matcher",
     "crates/xprobe",
     "crates/schematic",
+    "crates/gui",
     "crates/cli",
 ]
 
@@ -33,3 +34,4 @@ svxprobe-wave = { path = "crates/wave" }
 svxprobe-matcher = { path = "crates/matcher" }
 svxprobe-xprobe = { path = "crates/xprobe" }
 svxprobe-schematic = { path = "crates/schematic" }
+svxprobe-gui = { path = "crates/gui" }
