@@ -71,6 +71,8 @@ class Elaborator:
         self.nodes: list[dict[str, Any]] = []
         self._file_ids: dict[str, int] = {}
         self.files: list[dict[str, Any]] = []
+        # (instance node id, InstanceSymbol) collected for edge extraction.
+        self.instances: list[tuple[int, Any]] = []
 
     # -- source-range helpers ------------------------------------------------
     def _file_id(self, path: str) -> int:
@@ -166,6 +168,8 @@ class Elaborator:
         my_id = parent
         if kind is not None:
             my_id = self._add(sym, kind, parent)
+            if kind == "Instance":
+                self.instances.append((my_id, sym))
 
         members = self._members(sym)
         if members is None:
@@ -178,16 +182,92 @@ class Elaborator:
         for child in iterator:
             self._walk(child, my_id if kind is not None else parent)
 
+    # -- connectivity --------------------------------------------------------
+    def _expr_refs(self, expr: Any) -> list[str]:
+        """Canonical paths of the symbol(s) a port-connection expression refers to.
+
+        Uses slang's blessed resolution — the expression's `symbol` and
+        `getSymbolReference()` — which covers named/hierarchical values, member
+        access (interface signals), and simple assignment/select connections.
+        Compound expressions (concat/slice mixes) are not decomposed; such a
+        connection yields no edge rather than a non-deterministic guess.
+        """
+        out: list[str] = []
+        if expr is None:
+            return out
+        path = getattr(getattr(expr, "symbol", None), "hierarchicalPath", None)
+        if path:
+            out.append(path)
+        getref = getattr(expr, "getSymbolReference", None)
+        if callable(getref):
+            try:
+                path = getattr(getref(), "hierarchicalPath", None)
+            except Exception:
+                path = None
+            if path:
+                out.append(path)
+        return out
+
+    def _pick_node(self, path: str, prefer: tuple[str, ...]) -> Optional[int]:
+        """Resolve a path to a node id, preferring the given kinds in order."""
+        ids = self._by_path.get(path)
+        if not ids:
+            return None
+        for want in prefer:
+            for nid, kind in ids:
+                if kind == want:
+                    return nid
+        return ids[0][0]
+
+    def _edges(self) -> list[dict[str, Any]]:
+        # path -> [(id, kind)] for resolving connection endpoints.
+        self._by_path: dict[str, list[tuple[int, str]]] = {}
+        for n in self.nodes:
+            self._by_path.setdefault(n["path"], []).append((n["id"], n["kind"]))
+
+        dir_map = {"In": "in", "Out": "out", "InOut": "inout"}
+        # Collect as a set keyed by (port, endpoint, dir), then sort, so the
+        # output is canonical regardless of pyslang container iteration order.
+        seen_edges: set[tuple[int, int, str]] = set()
+        for inst_id, sym in self.instances:
+            conns = getattr(sym, "portConnections", None)
+            if conns is None:
+                continue
+            for c in conns:
+                port = getattr(c, "port", None)
+                expr = getattr(c, "expression", None)
+                if port is None or expr is None:
+                    continue
+                port_path = getattr(port, "hierarchicalPath", None)
+                port_id = self._pick_node(port_path, ("Port", "Var", "Net")) if port_path else None
+                # Interface ports have no leaf node; anchor the wire to the box.
+                if port_id is None:
+                    port_id = inst_id
+                direction = dir_map.get(
+                    str(getattr(port, "direction", "")).split(".")[-1], "inout"
+                )
+                for rp in self._expr_refs(expr):
+                    end_id = self._pick_node(rp, ("Net", "Var", "Port", "Instance"))
+                    if end_id is not None and end_id != port_id:
+                        seen_edges.add((port_id, end_id, direction))
+
+        return [
+            {"id": i, "port": p, "endpoint": e, "dir": d}
+            for i, (p, e, d) in enumerate(sorted(seen_edges))
+        ]
+
     def build(self) -> dict[str, Any]:
         root = self.comp.getRoot()
         for top in root.topInstances:
             self._walk(top, None)
+        edges = self._edges()
         return {
             "schema_version": SCHEMA_VERSION,
             "design": root.topInstances[0].name if root.topInstances else "",
             "generator": {"tool": "pyslang", "version": pyslang.__version__},
             "files": self.files,
             "nodes": self.nodes,
+            "edges": edges,
         }
 
 

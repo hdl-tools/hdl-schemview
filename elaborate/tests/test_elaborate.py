@@ -59,3 +59,29 @@ def test_nodes_have_paths_and_keys(model: dict) -> None:
     for n in model["nodes"]:
         assert n["path"], f"node {n['id']} has empty path"
         assert n["symbol_key"], f"node {n['id']} has empty symbol_key"
+
+
+def test_connectivity_edges(model: dict) -> None:
+    """Port connections are emitted as edges with valid endpoints."""
+    edges = model["edges"]
+    assert edges, "no edges emitted"
+    byid = {n["id"]: n for n in model["nodes"]}
+    ids = set(byid)
+    for e in edges:
+        assert e["port"] in ids and e["endpoint"] in ids, "edge endpoint out of range"
+        assert e["dir"] in ("in", "out", "inout")
+
+    def has_edge(port_path: str, endpoint_path: str) -> bool:
+        return any(
+            byid[e["port"]]["path"] == port_path
+            and byid[e["endpoint"]]["path"] == endpoint_path
+            for e in edges
+        )
+
+    # A core input pin wired to the top clock, and an output to the bus.
+    assert has_edge("picorv32_soc.g_lane[0].core.clk", "picorv32_soc.clk")
+    assert has_edge(
+        "picorv32_soc.g_lane[0].core.mem_valid", "picorv32_soc.g_lane[0].bus.valid"
+    )
+    # The memory's interface port anchors to its box, wired to the bus instance.
+    assert has_edge("picorv32_soc.g_lane[0].memory", "picorv32_soc.g_lane[0].bus")

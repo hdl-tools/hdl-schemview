@@ -86,6 +86,25 @@ pub struct Generator {
     pub version: String,
 }
 
+/// Connection direction, from the module port's perspective.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dir {
+    In,
+    Out,
+    Inout,
+}
+
+/// A port-connection edge: a module `port` wired to an external `endpoint`
+/// (net / var / port / interface instance).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Edge {
+    pub id: u32,
+    pub port: NodeId,
+    pub endpoint: NodeId,
+    pub dir: Dir,
+}
+
 /// The deserialized Node-model document (matches `model.schema.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
@@ -95,6 +114,8 @@ pub struct Document {
     pub generator: Generator,
     pub files: Vec<FileEntry>,
     pub nodes: Vec<Node>,
+    #[serde(default)]
+    pub edges: Vec<Edge>,
 }
 
 /// Opaque reference to a signal in a loaded waveform. Populated in Phase 1.
@@ -135,6 +156,8 @@ pub struct Design {
     path_index: HashMap<String, Vec<NodeId>>,
     /// Per-file interval tree over source offsets → node ids.
     src_index: HashMap<u32, Lapper<usize, NodeId>>,
+    /// Node id → indices into `doc.edges` incident on that node (port or endpoint).
+    conn_index: HashMap<NodeId, Vec<u32>>,
     pub wave_index: WaveIndex,
 }
 
@@ -166,10 +189,19 @@ impl Design {
             .map(|(f, ivs)| (f, Lapper::new(ivs)))
             .collect();
 
+        let mut conn_index: HashMap<NodeId, Vec<u32>> = HashMap::new();
+        for (i, e) in doc.edges.iter().enumerate() {
+            conn_index.entry(e.port).or_default().push(i as u32);
+            if e.endpoint != e.port {
+                conn_index.entry(e.endpoint).or_default().push(i as u32);
+            }
+        }
+
         Design {
             doc,
             path_index,
             src_index,
+            conn_index,
             wave_index: WaveIndex::default(),
         }
     }
@@ -197,6 +229,19 @@ impl Design {
 
     pub fn path_count(&self) -> usize {
         self.path_index.len()
+    }
+
+    /// All connection edges (port ↔ endpoint) in the design.
+    pub fn edges(&self) -> &[Edge] {
+        &self.doc.edges
+    }
+
+    /// Edges incident on `node` (as either a port or an endpoint).
+    pub fn edges_of(&self, node: NodeId) -> Vec<&Edge> {
+        match self.conn_index.get(&node) {
+            Some(ids) => ids.iter().map(|&i| &self.doc.edges[i as usize]).collect(),
+            None => Vec::new(),
+        }
     }
 }
 
@@ -251,6 +296,7 @@ mod tests {
                 node(0, "t", NodeKind::Instance, Some(rng(0, 0, 10))),
                 node(1, "t.a", NodeKind::Var, Some(rng(0, 4, 8))),
             ],
+            edges: vec![],
         };
         let d = Design::from_document(doc);
         assert_eq!(d.nodes_at_path("t.a"), &[1]);
@@ -260,5 +306,34 @@ mod tests {
         assert_eq!(hit, vec![0, 1]);
         // offset 9 is only inside t
         assert_eq!(d.nodes_at_source(0, 9), vec![0]);
+    }
+
+    #[test]
+    fn conn_index_links_both_endpoints() {
+        let doc = Document {
+            schema_version: 1,
+            design: "t".into(),
+            generator: Generator::default(),
+            files: vec![FileEntry {
+                id: 0,
+                path: "t.sv".into(),
+            }],
+            nodes: vec![
+                node(0, "t", NodeKind::Instance, None),
+                node(1, "t.p", NodeKind::Port, None),
+                node(2, "t.n", NodeKind::Net, None),
+            ],
+            edges: vec![Edge {
+                id: 0,
+                port: 1,
+                endpoint: 2,
+                dir: Dir::Out,
+            }],
+        };
+        let d = Design::from_document(doc);
+        assert_eq!(d.edges().len(), 1);
+        assert_eq!(d.edges_of(1).len(), 1);
+        assert_eq!(d.edges_of(2)[0].dir, Dir::Out);
+        assert!(d.edges_of(0).is_empty());
     }
 }

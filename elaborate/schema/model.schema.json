@@ -34,6 +34,21 @@
     "nodes": {
       "type": "array",
       "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Port-connection edges: a module port wired to an external endpoint (net/var/port/interface). Direction is the port's.",
+      "items": {
+        "type": "object",
+        "required": ["id", "port", "endpoint", "dir"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 0 },
+          "port": { "type": "integer", "minimum": 0, "description": "NodeId of the module port." },
+          "endpoint": { "type": "integer", "minimum": 0, "description": "NodeId of the connected endpoint." },
+          "dir": { "type": "string", "enum": ["in", "out", "inout"] }
+        }
+      }
     }
   },
   "$defs": {

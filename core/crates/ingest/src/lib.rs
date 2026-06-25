@@ -39,6 +39,13 @@ fn validate(doc: &Document) -> Result<()> {
             anyhow::ensure!(c < n, "node {} has out-of-range child {}", node.id, c);
         }
     }
+    for e in &doc.edges {
+        anyhow::ensure!(
+            e.port < n && e.endpoint < n,
+            "edge {} references out-of-range node",
+            e.id
+        );
+    }
     Ok(())
 }
 
