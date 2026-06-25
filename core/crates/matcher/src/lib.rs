@@ -98,7 +98,10 @@ pub fn run_match(design: &mut Design, signals: &[WaveVar], opts: &MatchOptions) 
         unmatched_samples: Vec::new(),
         mystery_samples: Vec::new(),
     };
-    let mut to_index: Vec<(NodeId, u32)> = Vec::new();
+    // (node, var_ref, is_alias). is_alias is used to order index inserts so a
+    // node's *direct* signal wins over an interface-alias view (cosmetic: a
+    // node → wave lookup then returns the canonical signal name).
+    let mut to_index: Vec<(NodeId, u32, bool)> = Vec::new();
 
     for s in signals {
         match classify(&cfg, &s.full_name) {
@@ -115,12 +118,12 @@ pub fn run_match(design: &mut Design, signals: &[WaveVar], opts: &MatchOptions) 
                 if let Some(nid) = direct_signal {
                     report.matched_direct += 1;
                     record_rules(&mut report.rule_counts, &trail);
-                    to_index.push((nid, s.var_ref));
+                    to_index.push((nid, s.var_ref, false));
                 } else if let Some(nid) = alias_signal {
                     trail.push(Rule::InterfaceAlias);
                     report.matched_alias += 1;
                     record_rules(&mut report.rule_counts, &trail);
-                    to_index.push((nid, s.var_ref));
+                    to_index.push((nid, s.var_ref, true));
                 } else if s.is_parameter
                     || is_parameter_path(design, &candidate)
                     || alias
@@ -154,7 +157,9 @@ pub fn run_match(design: &mut Design, signals: &[WaveVar], opts: &MatchOptions) 
     // Denominator = in-design signals that are not parameters.
     report.denominator = report.matched() + report.unmatched;
 
-    for (nid, var_ref) in to_index {
+    // Insert aliases first so a node's direct signal wins the by-node mapping.
+    to_index.sort_by_key(|&(_, _, is_alias)| !is_alias);
+    for (nid, var_ref, _) in to_index {
         design.wave_index.insert(nid, WaveSignalRef(var_ref as u64));
     }
     report

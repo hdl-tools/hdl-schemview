@@ -8,11 +8,13 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use svxprobe_matcher::{run_match, MatchOptions};
-use svxprobe_model::NodeKind;
+use svxprobe_model::{Design, NodeKind};
+use svxprobe_xprobe::{CrossProbe, Resolution, WaveTarget};
 
 /// Write a line to stdout, ignoring a broken pipe (e.g. when piped to `head`).
 macro_rules! pln {
@@ -51,6 +53,31 @@ enum Cmd {
         #[arg(long)]
         show_unmatched: bool,
     },
+    /// Cross-probe: resolve one view's selection and show the other two.
+    Probe {
+        model: String,
+        trace: String,
+        #[arg(long)]
+        excluded: Option<String>,
+        /// A waveform signal's full (trace) name.
+        #[arg(long, group = "target")]
+        signal: Option<String>,
+        /// A node's canonical path (e.g. picorv32_soc.g_lane[0].bus.valid).
+        #[arg(long, group = "target")]
+        node: Option<String>,
+        /// A source position FILE:LINE[:COL] (FILE matched against the model's files).
+        #[arg(long, group = "target")]
+        source: Option<String>,
+        /// A source position FILE:OFFSET (byte offset; FILE = path or numeric id).
+        #[arg(long, group = "target")]
+        offset: Option<String>,
+        /// Active hierarchy scope (canonical path) to disambiguate a source click.
+        #[arg(long)]
+        context: Option<String>,
+        /// Root directory for resolving source files read by --source.
+        #[arg(long, default_value = ".")]
+        src_root: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -65,6 +92,27 @@ fn main() -> Result<()> {
             anchor,
             show_unmatched,
         } => match_cmd(&model, &trace, threshold, excluded, anchor, show_unmatched),
+        Cmd::Probe {
+            model,
+            trace,
+            excluded,
+            signal,
+            node,
+            source,
+            offset,
+            context,
+            src_root,
+        } => probe_cmd(ProbeArgs {
+            model,
+            trace,
+            excluded,
+            signal,
+            node,
+            source,
+            offset,
+            context,
+            src_root,
+        }),
     }
 }
 
@@ -172,6 +220,164 @@ fn match_cmd(
         std::process::exit(1);
     }
     Ok(())
+}
+
+struct ProbeArgs {
+    model: String,
+    trace: String,
+    excluded: Option<String>,
+    signal: Option<String>,
+    node: Option<String>,
+    source: Option<String>,
+    offset: Option<String>,
+    context: Option<String>,
+    src_root: String,
+}
+
+fn probe_cmd(a: ProbeArgs) -> Result<()> {
+    let design = svxprobe_ingest::from_path(&a.model)?;
+    let wave = svxprobe_wave::LoadedWave::open(&a.trace)?;
+    let opts = MatchOptions {
+        excluded_scopes: match &a.excluded {
+            Some(p) => read_excluded(p)?,
+            None => Vec::new(),
+        },
+        anchor: None,
+    };
+    let mut cp = CrossProbe::build(design, &wave, &opts);
+
+    if let Some(ctx) = &a.context {
+        match cp.design().nodes_at_path(ctx).first().copied() {
+            Some(id) => cp.set_context(id),
+            None => pln!("warning: context path not found: {ctx}"),
+        }
+    }
+
+    let resolution = if let Some(s) = &a.signal {
+        cp.from_signal(s)
+    } else if let Some(p) = &a.node {
+        cp.from_node_path(p)
+    } else if let Some(spec) = &a.source {
+        let (file, off) = resolve_source(cp.design(), spec, &a.src_root)?;
+        cp.from_source(file, off)
+    } else if let Some(spec) = &a.offset {
+        let (file, off) = parse_offset(cp.design(), spec)?;
+        cp.from_source(file, off)
+    } else {
+        anyhow::bail!("give one of --signal / --node / --source / --offset");
+    };
+
+    match resolution {
+        Some(r) => {
+            print_resolution(&cp, &r);
+            Ok(())
+        }
+        None => {
+            pln!("no cross-probe target found");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_resolution(cp: &CrossProbe, r: &Resolution) {
+    let d = cp.design();
+    let anchor = &r.selection;
+    let node = d.node(anchor.anchor);
+    pln!(
+        "selection: {}  [{:?}]",
+        node.map(|n| n.path.as_str()).unwrap_or("?"),
+        node.map(|n| n.kind),
+    );
+
+    // Source projection.
+    let src = cp.to_source(anchor);
+    match src.def.or(src.inst) {
+        Some(rng) => {
+            let file = d
+                .doc
+                .files
+                .iter()
+                .find(|f| f.id == rng.file)
+                .map(|f| f.path.as_str())
+                .unwrap_or("?");
+            pln!(
+                "  source:  {}:{}:{}  (offset {})",
+                file,
+                rng.start.line,
+                rng.start.col,
+                rng.start.offset,
+            );
+        }
+        None => pln!("  source:  (no range)"),
+    }
+
+    // Waveform projection.
+    match cp.to_wave(anchor) {
+        WaveTarget::Linked { full_name, .. } => pln!("  wave:    {full_name}"),
+        WaveTarget::NotInTrace => pln!("  wave:    (not in trace)"),
+    }
+
+    // Picker.
+    if !r.alternatives.is_empty() {
+        pln!("alternatives (picker):");
+        for &alt in &r.alternatives {
+            pln!(
+                "  - {}",
+                d.node(alt).map(|n| n.path.as_str()).unwrap_or("?")
+            );
+        }
+    }
+}
+
+/// Resolve a `FILE:LINE[:COL]` spec to (file id, byte offset), reading the file
+/// from `src_root` to convert line:col.
+fn resolve_source(design: &Design, spec: &str, src_root: &str) -> Result<(u32, usize)> {
+    let parts: Vec<&str> = spec.split(':').collect();
+    anyhow::ensure!(parts.len() >= 2, "expected FILE:LINE[:COL], got {spec}");
+    let (id, path) = file_entry(design, parts[0])?;
+    let line: usize = parts[1].parse().context("LINE not a number")?;
+    let col: usize = parts.get(2).map(|c| c.parse()).transpose()?.unwrap_or(1);
+
+    let full = Path::new(src_root).join(&path);
+    let text = std::fs::read_to_string(&full)
+        .with_context(|| format!("reading source {} (try --src-root)", full.display()))?;
+    let mut offset = 0usize;
+    for (i, l) in text.split_inclusive('\n').enumerate() {
+        if i + 1 == line {
+            return Ok((id, offset + col.saturating_sub(1)));
+        }
+        offset += l.len();
+    }
+    anyhow::bail!("line {line} past end of {}", full.display())
+}
+
+/// Parse a `FILE:OFFSET` spec (FILE = path or numeric id).
+fn parse_offset(design: &Design, spec: &str) -> Result<(u32, usize)> {
+    let (file, off) = spec.rsplit_once(':').context("expected FILE:OFFSET")?;
+    let off: usize = off.parse().context("OFFSET not a number")?;
+    let id = match file.parse::<u32>() {
+        Ok(id) => id,
+        Err(_) => file_entry(design, file)?.0,
+    };
+    Ok((id, off))
+}
+
+/// Find a file in the model by exact path, basename, or suffix.
+fn file_entry(design: &Design, name: &str) -> Result<(u32, String)> {
+    design
+        .doc
+        .files
+        .iter()
+        .find(|f| {
+            f.path == name
+                || f.path.ends_with(&format!("/{name}"))
+                || Path::new(&f.path)
+                    .file_name()
+                    .map(|b| b == name)
+                    .unwrap_or(false)
+        })
+        .map(|f| (f.id, f.path.clone()))
+        .with_context(|| format!("no source file matching '{name}' in the model"))
 }
 
 /// Parse an excluded-scopes file: one scope name per line; `#`/`//` comments and

@@ -190,6 +190,11 @@ return to the indicated loop-back point rather than proceeding.
 
 ### Phase 2 — Cross-probe core: source ↔ waveform · Size: M
 
+> **Status: DONE (headless).** `core/crates/xprobe` links source ↔ waveform
+> through one `Selection` channel: bidirectional resolution, generate ambiguity
+> disambiguated by context with a picker, and loud `NotInTrace`. Driven by
+> `svxprobe probe`; tested on both FST and VCD. A GUI is deferred to later phases.
+
 - **Goal:** Two of three views, fully linked. No schematic yet.
 - **Tasks:**
   1. **Event bus:** one `Selection { nodes[], anchor }` event routed between

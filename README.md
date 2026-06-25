@@ -29,7 +29,8 @@ Get this right and cross-probing is lookups, not guesswork.
 
 ## Status
 
-**Phase 1 gate PASSED — the project is GO.** The execution plan lives in
+**Phase 1 gate PASSED (project is GO); Phase 2 source ↔ waveform cross-probe
+is done (headless).** The execution plan lives in
 **[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs in
 **[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned gate
 threshold are documented in **[docs/fixtures.md](docs/fixtures.md)**.
@@ -40,7 +41,8 @@ What exists today:
   the Node-model JSON (`schema/model.schema.json`), including parameters.
 - `core/` — the **Rust** workspace: `model` (Node model + indices), `ingest`
   (deserialize the harness JSON), `wave` (waveform access via **wellen**),
-  `matcher` (the canonical-path matcher + hit-rate report), and the `svxprobe` CLI.
+  `matcher` (the canonical-path matcher + hit-rate report), `xprobe` (the
+  source ↔ waveform cross-probe engine), and the `svxprobe` CLI.
 - `fixtures/picorv32_soc/` — the tier-1 reference fixture (PicoRV32 + a SystemVerilog
   wrapper exercising package / interface / parameterized-instance / generate), with
   frozen Verilator **FST + VCD** traces and a golden hierarchy.
@@ -56,6 +58,20 @@ cargo run --bin svxprobe -- match \
     ../fixtures/picorv32_soc/golden/hierarchy.json \
     ../fixtures/picorv32_soc/traces/picorv32_soc.fst \
     --excluded ../fixtures/picorv32_soc/excluded_scopes.txt
+```
+
+**Cross-probe (Phase 2)** — resolve one view's selection and see the others.
+Run from the repo root so `--source` can read the RTL:
+
+```bash
+P="probe fixtures/picorv32_soc/golden/hierarchy.json fixtures/picorv32_soc/traces/picorv32_soc.fst --excluded fixtures/picorv32_soc/excluded_scopes.txt"
+
+# waveform signal → source location
+cargo run --manifest-path core/Cargo.toml -- $P --signal TOP.tb.dut.g_lane[0].bus.valid
+
+# source position inside a generate loop → picker; --context steers the anchor
+cargo run --manifest-path core/Cargo.toml -- $P --source picorv32_soc.sv:27:29
+cargo run --manifest-path core/Cargo.toml -- $P --source picorv32_soc.sv:27:29 --context picorv32_soc.g_lane[1]
 ```
 
 ## Development setup
