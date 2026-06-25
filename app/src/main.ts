@@ -1,7 +1,7 @@
 // hdl-schemview frontend: three panes (schematic / source / waveform) linked by
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
-import { layout, nodeId } from "./elk";
+import { ffRole, layout, nodeId } from "./elk";
 import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -129,6 +129,11 @@ async function renderSchematic(graph: SchematicGraph) {
       renderBoundaryPin(root, c, node, id);
       continue;
     }
+    // Inferred register: a generic flip-flop symbol.
+    if (node?.kind === "FF") {
+      renderFF(root, c, node, id);
+      continue;
+    }
 
     const portById = new Map<number, SchPort>();
     node?.ports.forEach((p) => portById.set(p.id, p));
@@ -136,9 +141,8 @@ async function renderSchematic(graph: SchematicGraph) {
     const g = document.createElementNS(SVGNS, "g");
     g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
-    const isFF = node?.kind === "FF";
     const rect = document.createElementNS(SVGNS, "rect");
-    rect.setAttribute("class", "box" + (isFF ? " ff" : "") + (state.selected === id ? " sel" : ""));
+    rect.setAttribute("class", "box" + (state.selected === id ? " sel" : ""));
     rect.setAttribute("width", String(c.width));
     rect.setAttribute("height", String(c.height));
     rect.setAttribute("rx", "4");
@@ -147,13 +151,6 @@ async function renderSchematic(graph: SchematicGraph) {
       if (node?.expandable) setScope(node.path ?? "", node.label);
     };
     g.appendChild(rect);
-    // Inferred register: the classic clock-input wedge at the bottom-left edge.
-    if (isFF) {
-      const clk = document.createElementNS(SVGNS, "path");
-      clk.setAttribute("class", "ff-clk");
-      clk.setAttribute("d", `M0,${c.height - 14} L8,${c.height - 9} L0,${c.height - 4}`);
-      g.appendChild(clk);
-    }
 
     // Title: instance name, with the module type on a second line (like a
     // schematic block caption), centred in the box.
@@ -254,6 +251,59 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   if (!isConst) t.onclick = () => selectNode(id);
   g.appendChild(t);
 
+  parent.appendChild(g);
+}
+
+// An inferred register, drawn as a generic flip-flop: a plain square labelled
+// "FF" with a clock wedge (clk, inner bottom-left), an active-low bubble (reset,
+// outer bottom), conditions along the bottom, and Q at the right centre. Pin
+// positions come from ELK (FIXED_POS in `ffChild`); here we add the glyphs.
+function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const rect = document.createElementNS(SVGNS, "rect");
+  rect.setAttribute("class", "box ff" + (state.selected === id ? " sel" : ""));
+  rect.setAttribute("width", String(W));
+  rect.setAttribute("height", String(H));
+  rect.setAttribute("rx", "3");
+  rect.onclick = () => selectNode(id);
+  g.appendChild(rect);
+
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "box-label");
+  t.setAttribute("x", String(W / 2));
+  t.setAttribute("y", String(H / 2 + 1));
+  t.setAttribute("text-anchor", "middle");
+  t.style.pointerEvents = "none";
+  t.textContent = "FF";
+  g.appendChild(t);
+
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const sp = portById.get(Number(String(p.id).slice(1)));
+    if (!sp) continue;
+    const px = p.x ?? 0;
+    const role = ffRole(sp);
+    if (role === "clk") {
+      // Clock-edge wedge, flush to the bottom-left, pointing up into the box.
+      const tri = document.createElementNS(SVGNS, "path");
+      tri.setAttribute("class", "ff-clk");
+      tri.setAttribute("d", `M${px - 6},${H} L${px + 6},${H} L${px},${H - 10} Z`);
+      g.appendChild(tri);
+    } else if (role === "reset") {
+      // Active-low reset bubble just below the bottom edge.
+      const circ = document.createElementNS(SVGNS, "circle");
+      circ.setAttribute("class", "ff-rst");
+      circ.setAttribute("cx", String(px));
+      circ.setAttribute("cy", String(H + 3));
+      circ.setAttribute("r", "3");
+      g.appendChild(circ);
+    }
+  }
   parent.appendChild(g);
 }
 
