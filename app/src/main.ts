@@ -182,12 +182,9 @@ async function renderSchematic(graph: SchematicGraph) {
 
       const arrow = document.createElementNS(SVGNS, "path");
       arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
-      arrow.setAttribute(
-        "d",
-        west
-          ? `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`
-          : `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`,
-      );
+      // Triangle centred on the port point (px,py) so the wire connects to its
+      // centre; signal flows L→R, so it always points right.
+      arrow.setAttribute("d", `M${px - 3},${py - 4} L${px - 3},${py + 4} L${px + 5},${py} Z`);
       arrow.onclick = () => selectNode(pid);
       g.appendChild(arrow);
 
@@ -228,12 +225,8 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
 
   const arrow = document.createElementNS(SVGNS, "path");
   arrow.setAttribute("class", "pin " + (input ? "pin-in" : "pin-out"));
-  arrow.setAttribute(
-    "d",
-    input
-      ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
-      : `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`,
-  );
+  // Triangle centred on the port point so the wire connects to its centre.
+  arrow.setAttribute("d", `M${px - 3},${py - 4} L${px - 3},${py + 4} L${px + 5},${py} Z`);
   if (!isConst) arrow.onclick = () => selectNode(id);
   g.appendChild(arrow);
 
