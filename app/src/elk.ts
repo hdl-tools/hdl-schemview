@@ -55,7 +55,25 @@ export function toElk(graph: SchematicGraph): ElkGraph {
   const portOwner = new Set<number>();
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
 
-  const children: ElkChild[] = graph.nodes.map((n) => {
+  const children: ElkChild[] = graph.nodes.map((n): ElkChild => {
+    // Boundary I/O pin: a small node sized to its label, with its single port
+    // already sided toward the design.
+    if (n.kind === "Port") {
+      const lab = n.ports[0] ? pinLabelLen(n.ports[0]) : n.label.length;
+      return {
+        id: nodeId(n.id),
+        width: Math.max(40, lab * PIN_CH + 24),
+        height: 26,
+        labels: [{ text: n.label }],
+        layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+        ports: n.ports.map((p) => ({
+          id: portId(p.id),
+          width: 6,
+          height: 6,
+          layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
+        })),
+      };
+    }
     const west = n.ports.filter((p) => p.side !== "east");
     const east = n.ports.filter((p) => p.side === "east");
     const wMax = west.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);

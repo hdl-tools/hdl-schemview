@@ -204,6 +204,32 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
     })
 }
 
+/// A boundary I/O pin for one of the scope's own ports. Rendered as a frame pin
+/// (no box). Its single pin faces the design — inputs enter from the west frame
+/// (pin on the east), outputs leave at the east frame (pin on the west) — so the
+/// layered layout places inputs on the left and outputs on the right.
+fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
+    let n = design.node(port)?;
+    let side = match n.dir {
+        Some(Dir::Out) => Side::West,
+        _ => Side::East,
+    };
+    Some(SchNode {
+        id: port,
+        kind: NodeKind::Port,
+        label: n.name.clone(),
+        path: n.path.clone(),
+        expandable: false,
+        ports: vec![SchPort {
+            id: port,
+            name: n.name.clone(),
+            side,
+            width: width_of(&n.type_),
+        }],
+        module: None,
+    })
+}
+
 /// The schematic of one scope: child-instance boxes wired by the connections
 /// whose two ends both live inside the scope. Connections that leave the scope
 /// (e.g. to a top-level clock) are omitted here; use [`cone`] to trace those.
@@ -217,10 +243,45 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
 
     let boxes = child_boxes(design, scope);
     let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
-    let nodes: Vec<SchNode> = boxes.iter().filter_map(|&b| make_box(design, b)).collect();
+    let mut nodes: Vec<SchNode> = boxes.iter().filter_map(|&b| make_box(design, b)).collect();
+
+    // Boundary I/O: the scope's *own* ports, drawn as frame pins (inputs left,
+    // outputs right). An edge that reaches such a port — or its same-path backing
+    // net/var — anchors to that pin so the connection is visible.
+    let own_ports: Vec<NodeId> = design
+        .node(scope)
+        .map(|n| {
+            n.children
+                .iter()
+                .copied()
+                .filter(|&c| is_kind(design, c, NodeKind::Port))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut boundary_of: std::collections::HashMap<NodeId, NodeId> =
+        std::collections::HashMap::new();
+    if let Some(scope_node) = design.node(scope) {
+        for &p in &own_ports {
+            boundary_of.insert(p, p);
+            let ppath = design.node(p).map(|n| n.path.as_str());
+            for &sib in &scope_node.children {
+                if sib != p && design.node(sib).map(|n| n.path.as_str()) == ppath {
+                    boundary_of.insert(sib, p);
+                }
+            }
+        }
+    }
+    nodes.extend(
+        own_ports
+            .iter()
+            .filter_map(|&p| make_boundary_pin(design, p)),
+    );
 
     // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
     let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
+        if let Some(&bp) = boundary_of.get(&node) {
+            return Some((bp, bp));
+        }
         let b = box_of(design, node, &box_set)?;
         // Draw to the specific port if the node is a Port directly under the box;
         // otherwise anchor to the box.
@@ -235,9 +296,12 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     };
 
     let mut edges = Vec::new();
+    let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for (i, e) in design.edges().iter().enumerate() {
         if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
-            if sb != tb {
+            // Collapse parallel connections that land on the same two anchors
+            // (e.g. both lanes' clk meeting one boundary pin).
+            if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {
                 let net = design
                     .node(e.endpoint)
                     .map(|n| relative_to(&n.path, scope_path));

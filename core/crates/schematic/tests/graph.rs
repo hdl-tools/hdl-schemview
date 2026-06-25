@@ -102,6 +102,38 @@ fn expand_matches_scope_graph() {
 }
 
 #[test]
+fn top_scope_has_boundary_io_pins() {
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+
+    // The design's own ports appear as boundary pins (NodeKind::Port boxes).
+    let pin = |name: &str| {
+        top.nodes
+            .iter()
+            .find(|n| n.kind == svxprobe_model::NodeKind::Port && n.label == name)
+    };
+    let clk = pin("clk").expect("clk boundary pin");
+    let trap = pin("core_trap").expect("core_trap boundary pin");
+
+    // Inputs face the design from the west frame (pin on the east); outputs the
+    // reverse — so the layout puts inputs left, outputs right.
+    assert_eq!(clk.ports[0].side, Side::East, "input clk pin faces east");
+    assert_eq!(
+        trap.ports[0].side,
+        Side::West,
+        "output core_trap pin faces west"
+    );
+
+    // The boundary pins are actually wired into the design.
+    assert!(
+        top.edges
+            .iter()
+            .any(|e| e.source == clk.id || e.target == clk.id),
+        "clk boundary pin is not connected"
+    );
+}
+
+#[test]
 fn cone_reaches_the_driver() {
     let d = design();
     // bus.valid is driven by core.mem_valid; its cone should reach the core box.

@@ -2,7 +2,7 @@
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
 import { layout, nodeId } from "./elk";
-import type { ProbeResponse, SchematicGraph, SchPort, ValueChange } from "./types";
+import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -120,6 +120,13 @@ async function renderSchematic(graph: SchematicGraph) {
   for (const c of laid.children ?? []) {
     const id = Number(String(c.id).slice(1));
     const node = graph.nodes.find((n) => n.id === id);
+
+    // Boundary I/O pin (the scope's own port): a frame pin + label, not a box.
+    if (node?.kind === "Port") {
+      renderBoundaryPin(root, c, node, id);
+      continue;
+    }
+
     const portById = new Map<number, SchPort>();
     node?.ports.forEach((p) => portById.set(p.id, p));
 
@@ -200,6 +207,40 @@ async function renderSchematic(graph: SchematicGraph) {
 
   host.appendChild(svg);
   applyZoom(svg);
+}
+
+// A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
+// the port name on the outboard side (inputs on the left, outputs on the right).
+function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const sp = node.ports[0];
+  const p = c.ports?.[0];
+  const px = p?.x ?? 0;
+  const py = p?.y ?? 0;
+  const input = sp?.side === "east"; // east-facing pin ⇒ input on the west frame
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const arrow = document.createElementNS(SVGNS, "path");
+  arrow.setAttribute("class", "pin " + (input ? "pin-in" : "pin-out"));
+  arrow.setAttribute(
+    "d",
+    input
+      ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
+      : `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`,
+  );
+  arrow.onclick = () => selectNode(id);
+  g.appendChild(arrow);
+
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "pin-label");
+  t.setAttribute("x", String(input ? px - 12 : px + 12));
+  t.setAttribute("y", String(py + 3));
+  t.setAttribute("text-anchor", input ? "end" : "start");
+  t.textContent = sp?.width ? `${sp.name}${sp.width}` : (sp?.name ?? node.label);
+  t.onclick = () => selectNode(id);
+  g.appendChild(t);
+
+  parent.appendChild(g);
 }
 
 // Resize the SVG and scale its content to the current zoom factor (no relayout).
