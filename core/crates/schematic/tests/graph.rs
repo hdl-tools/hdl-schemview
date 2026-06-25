@@ -41,11 +41,15 @@ fn scope_graph_has_boxes_and_wires() {
     let clk = core.ports.iter().find(|p| p.name == "clk").unwrap();
     assert_eq!(clk.width, None, "scalar pin has no width");
 
-    // Pin side follows the *declared* direction, so even an unconnected output
-    // (eoi) lands on the east and an input (clk) on the west.
+    // Pin side follows the declared direction: input clk west, output east.
     assert_eq!(clk.side, Side::West, "input clk on the west");
-    let eoi = core.ports.iter().find(|p| p.name == "eoi").unwrap();
-    assert_eq!(eoi.side, Side::East, "unconnected output eoi on the east");
+    let mv = core.ports.iter().find(|p| p.name == "mem_valid").unwrap();
+    assert_eq!(mv.side, Side::East, "output mem_valid on the east");
+    // Unconnected ports are hidden to keep blocks compact.
+    assert!(
+        core.ports.iter().all(|p| p.name != "eoi"),
+        "dangling output eoi should be hidden"
+    );
 
     // There is internal wiring, including the memory↔bus connection.
     assert!(!g.edges.is_empty(), "no wires");
@@ -69,27 +73,26 @@ fn scope_graph_has_boxes_and_wires() {
 }
 
 #[test]
-fn generate_blocks_are_expandable_boxes() {
+fn generate_blocks_are_flattened_at_top() {
     let d = design();
-    // Top scope: the generate array is a single expandable group box.
+    // The generate array is dissolved: both lanes' leaf instances appear at the
+    // top, not a single g_lane group box.
     let top = scope_graph(&d, "picorv32_soc").expect("top graph");
-    let g_lane = top
-        .nodes
-        .iter()
-        .find(|n| n.label == "g_lane")
-        .expect("g_lane box at top");
-    assert!(g_lane.expandable, "generate array should be expandable");
-
-    // Expanding it reveals the two lane blocks, themselves expandable.
-    let lanes = svxprobe_schematic::expand(&d, g_lane.id).unwrap();
-    assert_eq!(lanes.nodes.len(), 2, "two lanes");
-    assert!(lanes.nodes.iter().all(|n| n.expandable), "lanes expandable");
-
-    // Expanding a lane reveals the leaf instances.
-    let lane0 = lanes.nodes.iter().find(|n| n.label == "g_lane[0]").unwrap();
-    let inside = svxprobe_schematic::expand(&d, lane0.id).unwrap();
-    let labels: Vec<&str> = inside.nodes.iter().map(|n| n.label.as_str()).collect();
-    assert!(labels.contains(&"core") && labels.contains(&"memory") && labels.contains(&"bus"));
+    let labels: Vec<&str> = top.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert!(
+        !labels.contains(&"g_lane"),
+        "g_lane should be flattened: {labels:?}"
+    );
+    assert_eq!(
+        top.nodes.iter().filter(|n| n.label == "core").count(),
+        2,
+        "both lane cores shown: {labels:?}"
+    );
+    assert_eq!(
+        top.nodes.iter().filter(|n| n.label == "memory").count(),
+        2,
+        "both lane memories shown: {labels:?}"
+    );
 }
 
 #[test]

@@ -75,24 +75,21 @@ fn side_of(dir: Dir) -> Side {
     }
 }
 
-/// The boxes directly inside a scope: child `Instance`s and child `GenBlock`s
-/// (a generate block/array is shown as an expandable group box).
+/// The boxes shown inside a scope: child `Instance`s, with `GenBlock`s dissolved
+/// — their leaf instances are pulled up so e.g. both `g_lane[*].core` sit
+/// together at the top instead of behind a generate-array group box.
 fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
-    design
-        .node(scope)
-        .map(|n| {
-            n.children
-                .iter()
-                .copied()
-                .filter(|&c| {
-                    matches!(
-                        design.node(c).map(|n| n.kind),
-                        Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut out = Vec::new();
+    if let Some(n) = design.node(scope) {
+        for &c in &n.children {
+            match design.node(c).map(|x| x.kind) {
+                Some(NodeKind::Instance) => out.push(c),
+                Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
+                _ => {}
+            }
+        }
+    }
+    out
 }
 
 /// The box (from `boxes`) that `node` lives in — its nearest ancestor that is a
@@ -165,6 +162,9 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
         .iter()
         .copied()
         .filter(|&c| is_kind(design, c, NodeKind::Port))
+        // Show only wired pins; dangling ports (unconnected outputs like
+        // mem_la_*, pcpi_*) are hidden to keep blocks compact.
+        .filter(|&pid| design.edges_of(pid).iter().any(|e| e.port == pid))
         .map(|pid| {
             let node = design.node(pid);
             // Prefer the port's declared direction so even unconnected pins land
