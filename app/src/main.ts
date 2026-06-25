@@ -175,23 +175,27 @@ async function renderSchematic(graph: SchematicGraph) {
       g.appendChild(mod);
     }
 
-    // Pins: a direction arrow drawn *just inside* the border so the wire lands
-    // exactly on the boundary (in on the west, out on the east), plus the port
-    // name + bit-width clear of the arrow.
+    // Pins: a direction arrow bounded by the module — its base flush on the box
+    // wall and apex pointing inward, so the pin is contained by the rectangle and
+    // the wire lands exactly on the boundary (in on the west, out on the east).
+    // The perpendicular position is anchored to the box edge (not ELK's port x)
+    // so pins stay inside regardless of ELK's port-offset convention.
+    const PIN = 8; // triangle depth
+    const LABEL_PAD = 11; // gap from the wall to the pin label
     for (const p of c.ports ?? []) {
       const pid = Number(String(p.id).slice(1));
       const sp = portById.get(pid);
-      const px = p.x ?? 0;
       const py = p.y ?? 0;
-      const west = sp ? sp.side !== "east" : px < c.width / 2;
+      const west = sp ? sp.side !== "east" : (p.x ?? 0) < c.width / 2;
+      const edgeX = west ? 0 : c.width;
 
       const arrow = document.createElementNS(SVGNS, "path");
       arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
       arrow.setAttribute(
         "d",
         west
-          ? `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`
-          : `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`,
+          ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
+          : `M${edgeX - PIN},${py - 4} L${edgeX - PIN},${py + 4} L${edgeX},${py} Z`,
       );
       arrow.onclick = () => selectNode(pid);
       g.appendChild(arrow);
@@ -199,7 +203,7 @@ async function renderSchematic(graph: SchematicGraph) {
       if (sp) {
         const t = document.createElementNS(SVGNS, "text");
         t.setAttribute("class", "pin-label");
-        t.setAttribute("x", String(west ? px + 11 : px - 11));
+        t.setAttribute("x", String(west ? edgeX + LABEL_PAD : edgeX - LABEL_PAD));
         t.setAttribute("y", String(py + 3));
         t.setAttribute("text-anchor", west ? "start" : "end");
         t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
