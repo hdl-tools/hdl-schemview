@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use wellen::simple::Waveform;
-use wellen::LoadOptions;
+use wellen::{Hierarchy, LoadOptions, VarType};
 
 /// A loaded waveform header (hierarchy known; signal bodies lazy).
 pub struct LoadedWave {
@@ -19,6 +19,27 @@ pub struct WaveSummary {
     pub scopes: usize,
     pub vars: usize,
     pub file_format: String,
+}
+
+/// One waveform variable, flattened for the matcher.
+///
+/// `var_ref` is wellen's stable per-variable handle (as a small int); it is the
+/// key the matcher uses for the node ↔ signal index. `signal_ref` is the handle
+/// for lazily loading values later (Phase 2+). Multiple vars can alias one
+/// `signal_ref`, so the matcher keys on `var_ref`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaveVar {
+    pub var_ref: u32,
+    pub signal_ref: u32,
+    pub full_name: String,
+    pub is_parameter: bool,
+}
+
+fn is_parameter(t: VarType) -> bool {
+    matches!(
+        t,
+        VarType::Parameter | VarType::RealParameter | VarType::EventParameter
+    )
 }
 
 impl LoadedWave {
@@ -46,6 +67,27 @@ impl LoadedWave {
     pub fn var_full_names(&self) -> Vec<String> {
         let h = self.wave.hierarchy();
         h.all_vars().map(|vr| h[vr].full_name(h)).collect()
+    }
+
+    /// Every variable flattened to a [`WaveVar`] — the matcher's input.
+    pub fn signals(&self) -> Vec<WaveVar> {
+        let h = self.wave.hierarchy();
+        h.all_vars()
+            .map(|vr| {
+                let v = &h[vr];
+                WaveVar {
+                    var_ref: vr.index() as u32,
+                    signal_ref: v.signal_ref().index() as u32,
+                    full_name: v.full_name(h),
+                    is_parameter: is_parameter(v.var_type()),
+                }
+            })
+            .collect()
+    }
+
+    /// Direct access to the wellen hierarchy (for callers that need more).
+    pub fn hierarchy(&self) -> &Hierarchy {
+        self.wave.hierarchy()
     }
 
     pub fn summary(&self) -> WaveSummary {

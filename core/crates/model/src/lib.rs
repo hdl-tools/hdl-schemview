@@ -26,6 +26,7 @@ pub enum NodeKind {
     Net,
     Port,
     Var,
+    Param,
     ModuleDef,
     GenBlock,
 }

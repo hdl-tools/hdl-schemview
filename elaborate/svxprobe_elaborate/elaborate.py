@@ -38,6 +38,10 @@ _KIND_MAP = {
     "Net": "Net",
     "Port": "Port",
     "Variable": "Var",
+    # Parameters/localparams are emitted so the matcher can distinguish a
+    # simulator-dumped parameter (not a real signal) from an unmatched signal,
+    # independent of whether the trace format tags it as a parameter.
+    "Parameter": "Param",
 }
 
 
