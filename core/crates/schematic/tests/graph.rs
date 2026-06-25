@@ -166,6 +166,38 @@ fn top_scope_has_boundary_io_pins() {
 }
 
 #[test]
+fn inferred_ff_is_a_box_with_clock_and_output() {
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+    let ffs: Vec<_> = top
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .collect();
+    assert_eq!(ffs.len(), 2, "one lane_state FF per lane");
+    let ff = ffs[0];
+    let clk = ff
+        .ports
+        .iter()
+        .find(|p| p.name == "clk")
+        .expect("FF clock pin");
+    assert_eq!(clk.side, Side::West, "clock on the west");
+    let q = ff
+        .ports
+        .iter()
+        .find(|p| p.name == "lane_state")
+        .expect("FF output pin");
+    assert_eq!(q.side, Side::East, "Q on the east");
+    // The FF clock pin is wired into the design (to the boundary clk).
+    assert!(
+        top.edges
+            .iter()
+            .any(|e| e.source == clk.id || e.target == clk.id),
+        "FF clock is not wired"
+    );
+}
+
+#[test]
 fn cone_reaches_the_driver() {
     let d = design();
     // bus.valid is driven by core.mem_valid; its cone should reach the core box.

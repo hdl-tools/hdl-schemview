@@ -56,6 +56,9 @@ pub struct SchNode {
 /// they never collide with real model node/port ids.
 const CONST_ID_BASE: NodeId = 1 << 28;
 
+/// Synthetic id base for an FF's synthesized pins (keyed by the wired signal id).
+const FF_PIN_BASE: NodeId = 1 << 29;
+
 /// A wire between two endpoints (a box or one of its ports), by model NodeId.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SchEdge {
@@ -91,7 +94,7 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
     if let Some(n) = design.node(scope) {
         for &c in &n.children {
             match design.node(c).map(|x| x.kind) {
-                Some(NodeKind::Instance) => out.push(c),
+                Some(NodeKind::Instance) | Some(NodeKind::Ff) => out.push(c),
                 Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
                 _ => {}
             }
@@ -239,6 +242,41 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
     }
 }
 
+/// An inferred register box. The FF has no model `Port` children, so synthesize a
+/// pin per wired signal (clock/data on the west, Q on the east) from its edges;
+/// pin ids are `FF_PIN_BASE + signal` so wires can target them.
+fn make_ff_box(design: &Design, ff: NodeId) -> Option<SchNode> {
+    let n = design.node(ff)?;
+    let ports: Vec<SchPort> = design
+        .edges_of(ff)
+        .iter()
+        .filter(|e| e.port == ff)
+        .map(|e| {
+            let sig = design.node(e.endpoint);
+            SchPort {
+                id: FF_PIN_BASE + e.endpoint,
+                name: sig.map(|s| s.name.clone()).unwrap_or_default(),
+                side: side_of(e.dir),
+                width: sig.and_then(|s| width_of(&s.type_)),
+            }
+        })
+        .collect();
+    Some(SchNode {
+        id: ff,
+        kind: NodeKind::Ff,
+        label: if n.name.is_empty() {
+            "FF".into()
+        } else {
+            n.name.clone()
+        },
+        path: n.path.clone(),
+        expandable: false,
+        ports,
+        module: None,
+        constant: None,
+    })
+}
+
 /// A boundary I/O pin for one of the scope's own ports. Rendered as a frame pin
 /// (no box). Its single pin faces the design — inputs enter from the west frame
 /// (pin on the east), outputs leave at the east frame (pin on the west) — so the
@@ -279,7 +317,16 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
 
     let boxes = child_boxes(design, scope);
     let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
-    let mut nodes: Vec<SchNode> = boxes.iter().filter_map(|&b| make_box(design, b)).collect();
+    let mut nodes: Vec<SchNode> = boxes
+        .iter()
+        .filter_map(|&b| {
+            if is_kind(design, b, NodeKind::Ff) {
+                make_ff_box(design, b)
+            } else {
+                make_box(design, b)
+            }
+        })
+        .collect();
 
     // Boundary I/O: the scope's *own* ports, drawn as frame pins (inputs left,
     // outputs right). An edge that reaches such a port — or its same-path backing
@@ -334,7 +381,16 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     let mut edges = Vec::new();
     let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for (i, e) in design.edges().iter().enumerate() {
-        if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
+        // An FF wires through its synthesized pin (FF_PIN_BASE + signal); other
+        // edges resolve both ends to in-scope boxes/pins.
+        let src_res = if is_kind(design, e.port, NodeKind::Ff) {
+            box_set
+                .contains(&e.port)
+                .then_some((e.port, FF_PIN_BASE + e.endpoint))
+        } else {
+            resolve(e.port)
+        };
+        if let (Some((sb, src)), Some((tb, tgt))) = (src_res, resolve(e.endpoint)) {
             // Collapse parallel connections that land on the same two anchors
             // (e.g. both lanes' clk meeting one boundary pin).
             if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {

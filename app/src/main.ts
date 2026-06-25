@@ -136,8 +136,9 @@ async function renderSchematic(graph: SchematicGraph) {
     const g = document.createElementNS(SVGNS, "g");
     g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
+    const isFF = node?.kind === "FF";
     const rect = document.createElementNS(SVGNS, "rect");
-    rect.setAttribute("class", "box" + (state.selected === id ? " sel" : ""));
+    rect.setAttribute("class", "box" + (isFF ? " ff" : "") + (state.selected === id ? " sel" : ""));
     rect.setAttribute("width", String(c.width));
     rect.setAttribute("height", String(c.height));
     rect.setAttribute("rx", "4");
@@ -146,6 +147,13 @@ async function renderSchematic(graph: SchematicGraph) {
       if (node?.expandable) setScope(node.path ?? "", node.label);
     };
     g.appendChild(rect);
+    // Inferred register: the classic clock-input wedge at the bottom-left edge.
+    if (isFF) {
+      const clk = document.createElementNS(SVGNS, "path");
+      clk.setAttribute("class", "ff-clk");
+      clk.setAttribute("d", `M0,${c.height - 14} L8,${c.height - 9} L0,${c.height - 4}`);
+      g.appendChild(clk);
+    }
 
     // Title: instance name, with the module type on a second line (like a
     // schematic block caption), centred in the box.

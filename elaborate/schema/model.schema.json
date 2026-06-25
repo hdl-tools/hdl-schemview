@@ -80,7 +80,7 @@
         "id": { "type": "integer", "minimum": 0 },
         "kind": {
           "type": "string",
-          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock"]
+          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF"]
         },
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },

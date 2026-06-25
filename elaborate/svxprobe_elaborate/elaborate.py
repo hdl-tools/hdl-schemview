@@ -73,6 +73,8 @@ class Elaborator:
         self.files: list[dict[str, Any]] = []
         # (instance node id, InstanceSymbol) collected for edge extraction.
         self.instances: list[tuple[int, Any]] = []
+        # (FF node id, ProceduralBlockSymbol) for inferred-register extraction.
+        self.ff_blocks: list[tuple[int, Any]] = []
 
     # -- source-range helpers ------------------------------------------------
     def _file_id(self, path: str) -> int:
@@ -155,6 +157,74 @@ class Elaborator:
             self.nodes[parent]["children"].append(nid)
         return nid
 
+    def _add_ff(self, sym: Any, parent: Optional[int]) -> int:
+        """Emit an inferred-register (FF) node. Procedural blocks are unnamed and
+        have no hierarchical path, so synthesize one."""
+        nid = self._add(sym, "FF", parent)
+        n = self.nodes[nid]
+        n["name"] = "FF"
+        base = self.nodes[parent]["path"] if parent is not None else ""
+        n["path"] = f"{base}.$ff{nid}"
+        n["symbol_key"] = n["path"]
+        return nid
+
+    @staticmethod
+    def _value_refs(node: Any) -> set[str]:
+        """Hierarchical paths of every value symbol referenced in an AST subtree."""
+        out: set[str] = set()
+
+        def cb(n: Any) -> None:
+            k = _kind_name(n)
+            if "NamedValue" in k or "HierarchicalValue" in k:
+                p = getattr(getattr(n, "symbol", None), "hierarchicalPath", None)
+                if p:
+                    out.add(p)
+
+        try:
+            node.visit(cb)
+        except Exception:
+            pass
+        return out
+
+    def _ff_edges(self, ff_id: int, sym: Any, seen: set) -> None:
+        """Wire an FF: clock + data signals in, assigned (Q) signals out."""
+        body = getattr(sym, "body", None)
+        clock = self._value_refs(getattr(body, "timing", None))
+        assigned: set[str] = set()
+
+        def cb(n: Any) -> None:
+            if "Assignment" in _kind_name(n):
+                left = getattr(n, "left", None)
+                if left is not None:
+                    assigned.update(self._value_refs(left))
+
+        try:
+            sym.visit(cb)
+        except Exception:
+            pass
+        data = self._value_refs(sym) - assigned - clock
+
+        def wire(paths: set, direction: str) -> list[int]:
+            ids = []
+            for p in sorted(paths):
+                nid = self._pick_node(p, ("Net", "Var", "Port"))
+                # Only wire real signals — drop genvars/params/enum constants.
+                if (
+                    nid is not None
+                    and nid != ff_id
+                    and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
+                ):
+                    seen.add((ff_id, nid, direction))
+                    ids.append(nid)
+            return ids
+
+        clk_ids = wire(clock, "in")
+        wire(data, "in")
+        wire(assigned, "out")
+        # Tell the renderer which pin is the clock (draws the FF clock notch).
+        if clk_ids:
+            self.nodes[ff_id]["type"] = self.nodes[clk_ids[0]]["name"]
+
     def _members(self, sym: Any):
         body = getattr(sym, "body", None)
         if body is not None:
@@ -166,6 +236,15 @@ class Elaborator:
     def _walk(self, sym: Any, parent: Optional[int]) -> None:
         kname = _kind_name(sym)
         kind = _KIND_MAP.get(kname)
+
+        # An inferred sequential register (`always_ff`) becomes an FF spine node;
+        # its clock/data/Q wiring is recovered later in `_ff_edges`.
+        if kname == "ProceduralBlock" and str(
+            getattr(sym, "procedureKind", "")
+        ).endswith("AlwaysFF"):
+            ff_id = self._add_ff(sym, parent)
+            self.ff_blocks.append((ff_id, sym))
+            return
 
         # Skip the auto-generated internal variable backing a port (the Port node
         # already represents that signal), to avoid duplicate same-path nodes.
@@ -276,6 +355,9 @@ class Elaborator:
                     lit = self._const_str(expr)
                     if lit is not None and self.nodes[port_id]["kind"] == "Port":
                         self.nodes[port_id]["const"] = lit
+
+        for ff_id, ff_sym in self.ff_blocks:
+            self._ff_edges(ff_id, ff_sym, seen_edges)
 
         return [
             {"id": i, "port": p, "endpoint": e, "dir": d}

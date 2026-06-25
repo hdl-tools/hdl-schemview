@@ -82,6 +82,24 @@ def test_constant_tied_inputs(model: dict) -> None:
     assert by["picorv32_soc.g_lane[0].core.clk"]["const"] is None
 
 
+def test_inferred_ff(model: dict) -> None:
+    """An always_ff becomes an FF node wired to its clock and assigned output."""
+    by = {n["id"]: n for n in model["nodes"]}
+    ffs = [n for n in model["nodes"] if n["kind"] == "FF"]
+    assert ffs, "no FF nodes emitted"
+
+    def sigs(ff_id: int, direction: str) -> set[str]:
+        return {
+            by[e["endpoint"]]["name"]
+            for e in model["edges"]
+            if e["port"] == ff_id and e["dir"] == direction
+        }
+
+    lane = [f for f in ffs if "lane_state" in sigs(f["id"], "out")]
+    assert lane, "no lane_state register"
+    assert "clk" in sigs(lane[0]["id"], "in"), "FF not clocked"
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]

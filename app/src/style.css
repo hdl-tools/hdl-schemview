@@ -56,6 +56,8 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .pin-out { fill:var(--pin-out); }
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }
 .const-label { fill:var(--sublabel); font-size:9px; font-family:ui-monospace, monospace; cursor:pointer; }
+.box.ff { fill:var(--box); stroke:var(--pin-out); }
+.ff-clk { fill:none; stroke:var(--pin-out); stroke-width:1.4; }
 .wire { stroke:var(--wire); fill:none; stroke-width:1.5; }
 .wire-label {
   fill:var(--wire-label); font-size:9.5px;

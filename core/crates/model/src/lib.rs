@@ -29,6 +29,9 @@ pub enum NodeKind {
     Param,
     ModuleDef,
     GenBlock,
+    /// Inferred sequential register (an `always_ff` block).
+    #[serde(rename = "FF")]
+    Ff,
 }
 
 /// A point in a source file.
