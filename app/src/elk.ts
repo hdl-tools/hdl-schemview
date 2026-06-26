@@ -66,8 +66,9 @@ export function ffRole(p: SchPort): FfRole {
 export const FF_H = 46;
 export const ffWidth = (dataCount: number) => Math.max(56, (dataCount + 1) * 20 + 24);
 
-// A fixed-size FF: clock on the left wall (low), reset + conditions spread along
-// the bottom, Q on the right centre (FIXED_POS so the renderer can match glyphs).
+// A fixed-size FF: clock on the left wall (low), reset centred on the bottom
+// with conditions reflowed either side, Q on the right centre (FIXED_POS so the
+// renderer can match glyphs).
 function ffChild(n: SchNode): ElkChild {
   const by = (r: FfRole) => n.ports.filter((p) => ffRole(p) === r);
   const data = by("data");
@@ -99,12 +100,18 @@ function ffChild(n: SchNode): ElkChild {
       layoutOptions: { "elk.port.side": "EAST" },
     });
   for (const p of by("clk")) ports.push(west(p.id, FF_H - 11));
-  for (const p of by("reset")) ports.push(south(p.id, 25));
-  const x0 = 40;
-  const x1 = W - 12;
-  data.forEach((p, i) =>
-    ports.push(south(p.id, data.length > 1 ? x0 + ((x1 - x0) * i) / (data.length - 1) : (x0 + x1) / 2)),
-  );
+  for (const p of by("reset")) ports.push(south(p.id, W / 2));
+  // Conditions reflow into two bands either side of the centre reset bubble:
+  // [margin, centre-gap] on the left, [centre+gap, W-margin] on the right.
+  const margin = 12;
+  const gap = 12; // clearance each side of the centre reset bubble
+  const place = (arr: typeof data, lo: number, hi: number) =>
+    arr.forEach((p, i) =>
+      ports.push(south(p.id, arr.length > 1 ? lo + ((hi - lo) * i) / (arr.length - 1) : (lo + hi) / 2)),
+    );
+  const half = Math.ceil(data.length / 2);
+  place(data.slice(0, half), margin, W / 2 - gap);
+  place(data.slice(half), W / 2 + gap, W - margin);
   return {
     id: nodeId(n.id),
     width: W,

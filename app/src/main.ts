@@ -301,7 +301,7 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
       tri.setAttribute("d", `M0,${py - 6} L0,${py + 6} L10,${py} Z`);
       g.appendChild(tri);
     } else if (role === "reset") {
-      // Active-low reset bubble just below the bottom edge.
+      // Active-low reset bubble, centred on and just below the bottom edge.
       const circ = document.createElementNS(SVGNS, "circle");
       circ.setAttribute("class", "ff-rst");
       circ.setAttribute("cx", String(px));
