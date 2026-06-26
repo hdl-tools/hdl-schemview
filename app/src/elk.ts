@@ -66,7 +66,7 @@ export function ffRole(p: SchPort): FfRole {
 export const FF_H = 46;
 export const ffWidth = (dataCount: number) => Math.max(56, (dataCount + 1) * 20 + 24);
 
-// A fixed-size FF: clock flush bottom-left, reset next, conditions spread along
+// A fixed-size FF: clock on the left wall (low), reset + conditions spread along
 // the bottom, Q on the right centre (FIXED_POS so the renderer can match glyphs).
 function ffChild(n: SchNode): ElkChild {
   const by = (r: FfRole) => n.ports.filter((p) => ffRole(p) === r);
@@ -80,6 +80,14 @@ function ffChild(n: SchNode): ElkChild {
     y: FF_H,
     layoutOptions: { "elk.port.side": "SOUTH" },
   });
+  const west = (id: number, y: number): ElkPort => ({
+    id: portId(id),
+    width: 6,
+    height: 6,
+    x: 0,
+    y,
+    layoutOptions: { "elk.port.side": "WEST" },
+  });
   const ports: ElkPort[] = [];
   for (const p of by("q"))
     ports.push({
@@ -90,7 +98,7 @@ function ffChild(n: SchNode): ElkChild {
       y: FF_H / 2,
       layoutOptions: { "elk.port.side": "EAST" },
     });
-  for (const p of by("clk")) ports.push(south(p.id, 11));
+  for (const p of by("clk")) ports.push(west(p.id, FF_H - 11));
   for (const p of by("reset")) ports.push(south(p.id, 25));
   const x0 = 40;
   const x1 = W - 12;

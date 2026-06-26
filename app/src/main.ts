@@ -259,7 +259,7 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
 }
 
 // An inferred register, drawn as a generic flip-flop: a plain square labelled
-// "FF" with a clock wedge (clk, inner bottom-left), an active-low bubble (reset,
+// "FF" with a clock wedge (clk, on the left wall), an active-low bubble (reset,
 // outer bottom), conditions along the bottom, and Q at the right centre. Pin
 // positions come from ELK (FIXED_POS in `ffChild`); here we add the glyphs.
 function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
@@ -293,10 +293,12 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
     const px = p.x ?? 0;
     const role = ffRole(sp);
     if (role === "clk") {
-      // Clock-edge wedge, flush to the bottom-left, pointing up into the box.
+      // Clock-edge wedge on the left wall: base flush to the wall, apex pointing
+      // right into the box.
+      const py = p.y ?? 0;
       const tri = document.createElementNS(SVGNS, "path");
       tri.setAttribute("class", "ff-clk");
-      tri.setAttribute("d", `M${px - 6},${H} L${px + 6},${H} L${px},${H - 10} Z`);
+      tri.setAttribute("d", `M0,${py - 6} L0,${py + 6} L10,${py} Z`);
       g.appendChild(tri);
     } else if (role === "reset") {
       // Active-low reset bubble just below the bottom edge.
