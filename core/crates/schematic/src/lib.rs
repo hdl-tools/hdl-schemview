@@ -164,8 +164,10 @@ fn width_of(type_: &Option<String>) -> Option<String> {
     Some(t[lo..=hi].to_string())
 }
 
-/// Build a box node with its ports; port sides come from incident edges.
-fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
+/// Build a box node with its ports; port sides come from incident edges. The
+/// label is scope-relative (like wire labels) so flattened generate-block
+/// iterations stay distinct — e.g. `g_lane[0].core` vs `g_lane[1].core`.
+fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
     let n = design.node(bx)?;
     // Generate blocks have no ports; instances expose their Port children.
     let ports: Vec<SchPort> = n
@@ -202,11 +204,7 @@ fn make_box(design: &Design, bx: NodeId) -> Option<SchNode> {
             }
         })
         .collect();
-    let label = if n.name.is_empty() {
-        last_segment(&n.path).to_string()
-    } else {
-        n.name.clone()
-    };
+    let label = relative_to(&n.path, scope);
     Some(SchNode {
         id: bx,
         kind: n.kind,
@@ -245,7 +243,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
 /// An inferred register box. The FF has no model `Port` children, so synthesize a
 /// pin per wired signal (clock/data on the west, Q on the east) from its edges;
 /// pin ids are `FF_PIN_BASE + signal` so wires can target them.
-fn make_ff_box(design: &Design, ff: NodeId) -> Option<SchNode> {
+fn make_ff_box(design: &Design, ff: NodeId, scope: &str) -> Option<SchNode> {
     let n = design.node(ff)?;
     let ports: Vec<SchPort> = design
         .edges_of(ff)
@@ -267,7 +265,7 @@ fn make_ff_box(design: &Design, ff: NodeId) -> Option<SchNode> {
         label: if n.name.is_empty() {
             "FF".into()
         } else {
-            n.name.clone()
+            relative_to(&n.path, scope)
         },
         path: n.path.clone(),
         expandable: false,
@@ -321,9 +319,9 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         .iter()
         .filter_map(|&b| {
             if is_kind(design, b, NodeKind::Ff) {
-                make_ff_box(design, b)
+                make_ff_box(design, b, scope_path)
             } else {
-                make_box(design, b)
+                make_box(design, b, scope_path)
             }
         })
         .collect();
@@ -489,7 +487,7 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
 
     let nodes = seen_boxes
         .into_iter()
-        .filter_map(|b| make_box(design, b))
+        .filter_map(|b| make_box(design, b, ""))
         .collect();
     let root = design
         .node(start)
