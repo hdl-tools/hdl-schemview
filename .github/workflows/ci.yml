@@ -62,6 +62,18 @@ jobs:
       - name: Test
         working-directory: elaborate
         run: uv run pytest -q
+      # VCS rejects a variable written by always_ff that has any other procedural
+      # driver (IEEE 1800 §9.2.2.4); slang/Verilator accept it, so this lint is
+      # our only gate against reintroducing it (e.g. $readmemh + always_ff RAM).
+      - name: Lint RTL for illegal always_ff driver combinations
+        run: |
+          uv run --project elaborate python -m svxprobe_elaborate.lint \
+            --top picorv32_soc \
+            fixtures/picorv32_soc/rtl/picorv32.v \
+            fixtures/picorv32_soc/rtl/soc_pkg.sv \
+            fixtures/picorv32_soc/rtl/mem_if.sv \
+            fixtures/picorv32_soc/rtl/soc_mem.sv \
+            fixtures/picorv32_soc/rtl/picorv32_soc.sv
       - name: Validate committed golden against schema
         working-directory: elaborate
         run: uv run python -m svxprobe_elaborate.validate ../fixtures/picorv32_soc/golden/hierarchy.json
