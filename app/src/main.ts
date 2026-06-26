@@ -241,7 +241,7 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
     "d",
     input
       ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
-      : `M${px},${py - 4} L${px},${py + 4} L${px + 8},${py} Z`,
+      : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
   );
   if (!isConst) arrow.onclick = () => selectNode(id);
   g.appendChild(arrow);
