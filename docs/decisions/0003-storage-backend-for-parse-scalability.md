@@ -99,6 +99,45 @@ Risk and effort: **lower is better**. Query power: **higher is better**.
   pointer-chasing traversals (`cone`/`expand`) that define the product. Their wins (relational
   queries, native graph traversal, vectorized joins) are real but not yet justified at this scale.
 
+## 1M+ node analysis — Phase B is empirical
+
+Does Phase B (redb/SQLite) still hold if the elaborated model reaches **1M+ nodes**? The honest
+split is: *the storage layer holds; the system behavior is the open question.*
+
+**Provable analytically (true for any embedded DB):**
+
+- **O(1) open** — independent of node count; no full materialization.
+- **Scoped queries stay bounded** — `scope_graph`/`expand`/`probe_node`/`probe_source` touch only
+  the rows for one scope/path/offset, so 1M total nodes don't change the cost of inspecting one
+  module. This is the property Phase A's full-materialization *lacks*, and it is why Phase B's
+  demand-loading *architecture* is the correct shape for 1M+.
+- **Indexed matcher join is O(signals·log n), not O(signals·n)** — SQLite/redb handle 1M-row
+  indexed joins routinely; the join itself does not fall over.
+
+**NOT provable on paper (design-distribution-dependent, not node-count-dependent):**
+
+- **`cone()`/impact cost is driven by net fan-out, not node count** — a global clock/reset net
+  touching 100K loads explodes the traversal frontier regardless of storage engine. Invisible to
+  complexity analysis.
+- **Matcher wall-time and memory scale with trace signal count** — the matcher iterates the entire
+  wave hierarchy; a 1M-signal VCD/FST is multi-second-to-minute even indexed.
+- **SQLite query-planner / recursive-CTE behavior vs redb's hand-rolled disk-backed BFS** depends
+  on real adjacency distributions and the query mix; which wins is not decidable a priori.
+- **DB build/ingest time and working-set RSS under real navigation** are empirical.
+
+**Verdict.** Phase B holds *directionally* at 1M+ (it is the only approach that decouples
+per-interaction cost from total design size), **but the engine choice — redb vs SQLite — and the
+confirmation that it actually holds must be settled by a benchmark on a real ≥1M-node design, not
+by another paper debate.** The re-evaluation must be free to reach a *third* outcome: at 1M+ the
+fix is **algorithmic** (viewport-scoped/streaming loading, level-of-detail, fan-out caps) layered
+on top of the DB, not a storage swap alone.
+
+**Re-evaluation basis is undecided.** `claude_verilog_test` maxes out at ~5–8K model nodes, so it
+**cannot** be the 1M-node basis. Two candidates, to be chosen at re-eval time: (a) a **synthetic
+scale-up generator** — parameterized fan-out, hierarchy depth, and signal count, deterministic in
+CI; and (b) a **large external open SoC** (e.g. an OpenTitan/multicore-scale design) elaborated
+through the pyslang harness. The benchmark output is the input to the Phase-B engine decision.
+
 ## Consequences
 
 - **Phase A** touches only `core/crates/model` (rkyv derives on `Document`/`Node`/`Edge`/index
@@ -107,8 +146,10 @@ Risk and effort: **lower is better**. Query power: **higher is better**.
   archive is a build/cache artifact, not committed.
 - **A load-time benchmark** at 665 / ~6K / synthetic 100K nodes should be added as a CI perf
   guard so regressions are caught.
-- **Phase B remains open.** If a future on-core workload needs to browse a 100K+-node design
-  without ever fully materializing it, revisit redb/SQLite using this ADR as the baseline.
+- **Phase B remains open and is gated on a benchmark.** If a future workload needs to browse a
+  100K+/1M+-node design without ever fully materializing it, the redb-vs-SQLite choice is decided
+  by the scalability benchmark (see "1M+ node analysis" above), not by this ADR alone. This ADR is
+  the baseline; the benchmark is the trigger.
 - This decision is **separate from the FSDB/plugin boundary (ADR 0002)** and the scope decision
   (ADR 0001); it concerns only how the elaborated model is stored and loaded.
 
@@ -117,4 +158,6 @@ Risk and effort: **lower is better**. Query power: **higher is better**.
 If Phase A lands and load time at the target scale is still dominated by the matcher (not parse +
 index), the fix is algorithmic — memoize/normalize in `matcher`, or persist `wave_index` per
 trace — not a different storage engine. Only a demonstrated need for *partial* loading of a
-design too large to hold resident should trigger Phase B.
+design too large to hold resident should trigger Phase B — and at 1M+ nodes that trigger runs
+through the scalability benchmark, which may itself conclude that demand-scoped/streaming loading
+(an algorithmic change) is required alongside, or instead of, the DB swap.
