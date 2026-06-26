@@ -209,6 +209,39 @@ fn inferred_ff_is_a_box_with_clock_and_output() {
 }
 
 #[test]
+fn shared_signal_gives_each_ff_a_distinct_pin() {
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+    let ffs: Vec<_> = top
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .collect();
+    assert_eq!(ffs.len(), 2, "one lane_state FF per lane");
+
+    // Both lane FFs are clocked by the *same* boundary clk net — the collision
+    // case. Each must still get its own synthesized clk pin id, or their wires
+    // would merge into one.
+    let clk_pin = |ff: &svxprobe_schematic::SchNode| {
+        ff.ports
+            .iter()
+            .find(|p| p.name == "clk")
+            .expect("FF clock pin")
+            .id
+    };
+    assert_ne!(
+        clk_pin(ffs[0]),
+        clk_pin(ffs[1]),
+        "two FFs sharing clk must have distinct clk pin ids"
+    );
+
+    // Within a single FF, every synthesized pin is distinct too.
+    let pin_ids: Vec<NodeId> = ffs[0].ports.iter().map(|p| p.id).collect();
+    let unique: std::collections::HashSet<NodeId> = pin_ids.iter().copied().collect();
+    assert_eq!(unique.len(), pin_ids.len(), "FF pins must be distinct");
+}
+
+#[test]
 fn cone_reaches_the_driver() {
     let d = design();
     // bus.valid is driven by core.mem_valid; its cone should reach the core box.
