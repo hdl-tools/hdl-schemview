@@ -49,6 +49,7 @@ export const portId = (id: number) => `p${id}`;
 const PIN_CH = 6.2; // port-name + width label
 const TITLE_CH = 7.5; // instance / (module) title
 const ROW_H = 18; // vertical space per pin row
+const PIN_HALF = 4; // pin triangle half-height (it extends ±4 around its py)
 
 const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 1 : 0);
 
@@ -152,25 +153,33 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     const rows = Math.max(west.length, east.length, 1);
     // Tall enough for the two-line title band plus one row per pin.
     const h = Math.max(58, 36 + rows * ROW_H);
+
+    // Place pins explicitly (FIXED_POS) so we control their Y — ELK's BEGIN
+    // alignment flushes the top pin to the box top edge. We shift the top pin
+    // down into the second pin's slot (one row pitch) and move every pin with
+    // it, clamping the shift so the bottom pin still fits inside the box.
+    const pitch = ROW_H;
+    const base = PIN_HALF; // top pin's py with its triangle top flush to the wall
+    const bottomY = base + (rows - 1) * pitch; // py of the lowest pin before shift
+    const shift = Math.max(0, Math.min(pitch, h - PIN_HALF - bottomY));
+    const sidePort = (p: SchPort, i: number, x: number): ElkPort => ({
+      id: portId(p.id),
+      width: 8,
+      height: 8,
+      x,
+      y: base + shift + i * pitch,
+      layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
+    });
     return {
       id: nodeId(n.id),
       width: w,
       height: h,
       labels: [{ text: n.label }],
-      layoutOptions: {
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.spacing.portPort": "10",
-        // Pack pins at the top of each side so they cluster (no justify-spread
-        // when one side has fewer pins than the other).
-        "elk.portAlignment.west": "BEGIN",
-        "elk.portAlignment.east": "BEGIN",
-      },
-      ports: n.ports.map((p) => ({
-        id: portId(p.id),
-        width: 8,
-        height: 8,
-        layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
-      })),
+      layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+      ports: [
+        ...west.map((p, i) => sidePort(p, i, 0)),
+        ...east.map((p, i) => sidePort(p, i, w)),
+      ],
     };
   });
 
