@@ -1,0 +1,81 @@
+name: Feature request
+description: Propose a new capability or an enhancement to an existing one.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. `hdl-schemview` is deliberately focused — please
+        frame the request around a concrete need rather than breadth-matching
+        Verdi/Indago.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What is hard or impossible today? What are you trying to accomplish?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you would like to happen. Sketch the behavior, UI, or API if you can.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the tool would this touch?
+      options:
+        - "core/ (Rust)"
+        - "elaborate/ (Python harness)"
+        - "app/ (Tauri desktop / TS frontend)"
+        - "Cross-probe engine"
+        - "fixtures/"
+        - "docs / CI"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: views
+    attributes:
+      label: View(s) affected
+      description: Select all that apply.
+      multiple: true
+      options:
+        - "Source"
+        - "Schematic"
+        - "Waveform"
+        - "N/A"
+
+  - type: textarea
+    id: sot-check
+    attributes:
+      label: Single-source-of-truth check
+      description: >
+        The elaborated hierarchy is the single source of truth; the three views
+        are projections of it. If this feature involves linking views, note how
+        it would resolve via model lookups rather than reintroducing
+        heuristics / string-matching.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed, and why they fall short.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I checked docs/ROADMAP.md and this is not already planned.
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

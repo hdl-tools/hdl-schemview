@@ -1,0 +1,103 @@
+name: Bug report
+description: Report something that is broken or behaving incorrectly.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill in the fields below so it can be
+        triaged quickly. The more precise the reproduction, the faster the fix.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the incorrect behavior.
+      placeholder: When I click a signal in the schematic, the source pane jumps to the wrong line.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, ordered steps. Include the fixture/design and the exact command or click path.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      description: Which tree does this bug live in?
+      options:
+        - "core/ (Rust)"
+        - "elaborate/ (Python harness)"
+        - "app/ (Tauri desktop / TS frontend)"
+        - "fixtures/"
+        - "docs / CI"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: views
+    attributes:
+      label: Affected view(s)
+      description: Which of the three linked views are involved? Select all that apply.
+      multiple: true
+      options:
+        - "Source"
+        - "Schematic"
+        - "Waveform"
+        - "Cross-probe / N/A"
+
+  - type: input
+    id: crate-file
+    attributes:
+      label: Crate / file (if known)
+      description: e.g. `svxprobe-matcher`, `core/crates/schematic/src/lib.rs`, `app/src/elk.ts`.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust toolchain (pin is 1.94), Node version, Python/uv version, and whether you hit this via the Tauri app or the `svxprobe` CLI.
+      render: text
+      placeholder: |
+        OS: Ubuntu 24.04
+        Rust: 1.94.0
+        Node: 20.x
+        Python/uv: 3.12 / uv 0.x
+        Path: Tauri app (npm run tauri dev)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Relevant console output, panic backtrace, or CLI stderr. Will be rendered as a code block.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: If trace-related, I confirmed it reproduces on a supported format (VCD/FST).

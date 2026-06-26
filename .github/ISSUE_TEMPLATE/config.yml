@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Roadmap
+    url: https://github.com/chuanseng-ng/hdl-schemview/blob/main/docs/ROADMAP.md
+    about: Check the phased execution plan before filing a feature request — it may already be planned.
+  - name: Architecture decisions (ADRs)
+    url: https://github.com/chuanseng-ng/hdl-schemview/tree/main/docs/decisions
+    about: Background on why the design works the way it does.
+  - name: Questions & discussion
+    url: https://github.com/chuanseng-ng/hdl-schemview/discussions
+    about: For usage questions, ideas, and open-ended discussion that isn't yet a bug or feature.
