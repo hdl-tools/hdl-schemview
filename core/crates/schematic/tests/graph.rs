@@ -112,15 +112,26 @@ fn generate_blocks_are_flattened_at_top() {
         !labels.contains(&"g_lane"),
         "g_lane should be flattened: {labels:?}"
     );
-    assert_eq!(
-        top.nodes.iter().filter(|n| n.label == "core").count(),
-        2,
-        "both lane cores shown: {labels:?}"
+    // Flattened genblock iterations carry their genblock segment (mirroring wire
+    // labels) so the two lanes stay distinct instead of both reading bare `core`.
+    assert!(
+        labels.contains(&"g_lane[0].core") && labels.contains(&"g_lane[1].core"),
+        "both lane cores shown scope-relative: {labels:?}"
     );
-    assert_eq!(
-        top.nodes.iter().filter(|n| n.label == "memory").count(),
-        2,
-        "both lane memories shown: {labels:?}"
+    assert!(
+        labels.contains(&"g_lane[0].memory") && labels.contains(&"g_lane[1].memory"),
+        "both lane memories shown scope-relative: {labels:?}"
+    );
+    // FF boxes are disambiguated the same way: each lane's FF carries its segment.
+    let ff_labels: Vec<&str> = top
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(
+        ff_labels.iter().all(|l| l.starts_with("g_lane[")),
+        "lane FF labels carry their genblock segment: {ff_labels:?}"
     );
 }
 
