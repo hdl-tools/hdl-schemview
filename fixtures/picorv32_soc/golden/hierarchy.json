@@ -323,7 +323,7 @@
       "parent": 0,
       "children": [
         11,
-        339
+        338
       ],
       "symbol_key": "picorv32_soc.g_lane",
       "def_range": {
@@ -9637,8 +9637,7 @@
         334,
         335,
         336,
-        337,
-        338
+        337
       ],
       "symbol_key": "picorv32_soc.g_lane[0].memory",
       "def_range": {
@@ -9649,9 +9648,9 @@
           "offset": 227
         },
         "end": {
-          "line": 39,
+          "line": 42,
           "col": 20,
-          "offset": 1246
+          "offset": 1483
         }
       },
       "inst_range": {
@@ -9871,45 +9870,17 @@
     },
     {
       "id": 338,
-      "kind": "FF",
-      "name": "FF",
-      "path": "picorv32_soc.g_lane[0].memory.$ff338",
-      "parent": 330,
-      "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].memory.$ff338",
-      "def_range": {
-        "file": 3,
-        "start": {
-          "line": 27,
-          "col": 3,
-          "offset": 765
-        },
-        "end": {
-          "line": 38,
-          "col": 6,
-          "offset": 1226
-        }
-      },
-      "inst_range": null,
-      "type": null,
-      "dir": null,
-      "const": null,
-      "drivers": [],
-      "loads": []
-    },
-    {
-      "id": 339,
       "kind": "GenBlock",
       "name": "",
       "path": "picorv32_soc.g_lane[1]",
       "parent": 10,
       "children": [
+        339,
         340,
-        341,
+        351,
         352,
         353,
-        354,
-        658
+        657
       ],
       "symbol_key": "picorv32_soc.g_lane[1]",
       "def_range": {
@@ -9933,11 +9904,11 @@
       "loads": []
     },
     {
-      "id": 340,
+      "id": 339,
       "kind": "Param",
       "name": "gi",
       "path": "picorv32_soc.g_lane[1].gi",
-      "parent": 339,
+      "parent": 338,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].gi",
       "def_range": {
@@ -9961,12 +9932,13 @@
       "loads": []
     },
     {
-      "id": 341,
+      "id": 340,
       "kind": "Instance",
       "name": "bus",
       "path": "picorv32_soc.g_lane[1].bus",
-      "parent": 339,
+      "parent": 338,
       "children": [
+        341,
         342,
         343,
         344,
@@ -9975,8 +9947,7 @@
         347,
         348,
         349,
-        350,
-        351
+        350
       ],
       "symbol_key": "picorv32_soc.g_lane[1].bus",
       "def_range": {
@@ -10012,11 +9983,11 @@
       "loads": []
     },
     {
-      "id": 342,
+      "id": 341,
       "kind": "Param",
       "name": "XLEN",
       "path": "picorv32_soc.g_lane[1].bus.XLEN",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.XLEN",
       "def_range": {
@@ -10040,11 +10011,11 @@
       "loads": []
     },
     {
-      "id": 343,
+      "id": 342,
       "kind": "Port",
       "name": "clk",
       "path": "picorv32_soc.g_lane[1].bus.clk",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.clk",
       "def_range": {
@@ -10068,11 +10039,11 @@
       "loads": []
     },
     {
-      "id": 344,
+      "id": 343,
       "kind": "Var",
       "name": "clk",
       "path": "picorv32_soc.g_lane[1].bus.clk",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.clk",
       "def_range": {
@@ -10096,11 +10067,11 @@
       "loads": []
     },
     {
-      "id": 345,
+      "id": 344,
       "kind": "Var",
       "name": "valid",
       "path": "picorv32_soc.g_lane[1].bus.valid",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.valid",
       "def_range": {
@@ -10124,11 +10095,11 @@
       "loads": []
     },
     {
-      "id": 346,
+      "id": 345,
       "kind": "Var",
       "name": "instr",
       "path": "picorv32_soc.g_lane[1].bus.instr",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.instr",
       "def_range": {
@@ -10152,11 +10123,11 @@
       "loads": []
     },
     {
-      "id": 347,
+      "id": 346,
       "kind": "Var",
       "name": "ready",
       "path": "picorv32_soc.g_lane[1].bus.ready",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.ready",
       "def_range": {
@@ -10180,11 +10151,11 @@
       "loads": []
     },
     {
-      "id": 348,
+      "id": 347,
       "kind": "Var",
       "name": "addr",
       "path": "picorv32_soc.g_lane[1].bus.addr",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.addr",
       "def_range": {
@@ -10208,11 +10179,11 @@
       "loads": []
     },
     {
-      "id": 349,
+      "id": 348,
       "kind": "Var",
       "name": "wdata",
       "path": "picorv32_soc.g_lane[1].bus.wdata",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.wdata",
       "def_range": {
@@ -10236,11 +10207,11 @@
       "loads": []
     },
     {
-      "id": 350,
+      "id": 349,
       "kind": "Var",
       "name": "wstrb",
       "path": "picorv32_soc.g_lane[1].bus.wstrb",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.wstrb",
       "def_range": {
@@ -10264,11 +10235,11 @@
       "loads": []
     },
     {
-      "id": 351,
+      "id": 350,
       "kind": "Var",
       "name": "rdata",
       "path": "picorv32_soc.g_lane[1].bus.rdata",
-      "parent": 341,
+      "parent": 340,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].bus.rdata",
       "def_range": {
@@ -10292,11 +10263,11 @@
       "loads": []
     },
     {
-      "id": 352,
+      "id": 351,
       "kind": "Var",
       "name": "lane_state",
       "path": "picorv32_soc.g_lane[1].lane_state",
-      "parent": 339,
+      "parent": 338,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].lane_state",
       "def_range": {
@@ -10320,13 +10291,13 @@
       "loads": []
     },
     {
-      "id": 353,
+      "id": 352,
       "kind": "FF",
       "name": "FF",
-      "path": "picorv32_soc.g_lane[1].$ff353",
-      "parent": 339,
+      "path": "picorv32_soc.g_lane[1].$ff352",
+      "parent": 338,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].$ff353",
+      "symbol_key": "picorv32_soc.g_lane[1].$ff352",
       "def_range": {
         "file": 0,
         "start": {
@@ -10348,12 +10319,13 @@
       "loads": []
     },
     {
-      "id": 354,
+      "id": 353,
       "kind": "Instance",
       "name": "core",
       "path": "picorv32_soc.g_lane[1].core",
-      "parent": 339,
+      "parent": 338,
       "children": [
+        354,
         355,
         356,
         357,
@@ -10655,8 +10627,7 @@
         653,
         654,
         655,
-        656,
-        657
+        656
       ],
       "symbol_key": "picorv32_soc.g_lane[1].core",
       "def_range": {
@@ -10692,11 +10663,11 @@
       "loads": []
     },
     {
-      "id": 355,
+      "id": 354,
       "kind": "Param",
       "name": "ENABLE_COUNTERS",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_COUNTERS",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_COUNTERS",
       "def_range": {
@@ -10720,11 +10691,11 @@
       "loads": []
     },
     {
-      "id": 356,
+      "id": 355,
       "kind": "Param",
       "name": "ENABLE_COUNTERS64",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_COUNTERS64",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_COUNTERS64",
       "def_range": {
@@ -10748,11 +10719,11 @@
       "loads": []
     },
     {
-      "id": 357,
+      "id": 356,
       "kind": "Param",
       "name": "ENABLE_REGS_16_31",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_REGS_16_31",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_REGS_16_31",
       "def_range": {
@@ -10776,11 +10747,11 @@
       "loads": []
     },
     {
-      "id": 358,
+      "id": 357,
       "kind": "Param",
       "name": "ENABLE_REGS_DUALPORT",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_REGS_DUALPORT",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_REGS_DUALPORT",
       "def_range": {
@@ -10804,11 +10775,11 @@
       "loads": []
     },
     {
-      "id": 359,
+      "id": 358,
       "kind": "Param",
       "name": "LATCHED_MEM_RDATA",
       "path": "picorv32_soc.g_lane[1].core.LATCHED_MEM_RDATA",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.LATCHED_MEM_RDATA",
       "def_range": {
@@ -10832,11 +10803,11 @@
       "loads": []
     },
     {
-      "id": 360,
+      "id": 359,
       "kind": "Param",
       "name": "TWO_STAGE_SHIFT",
       "path": "picorv32_soc.g_lane[1].core.TWO_STAGE_SHIFT",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.TWO_STAGE_SHIFT",
       "def_range": {
@@ -10860,11 +10831,11 @@
       "loads": []
     },
     {
-      "id": 361,
+      "id": 360,
       "kind": "Param",
       "name": "BARREL_SHIFTER",
       "path": "picorv32_soc.g_lane[1].core.BARREL_SHIFTER",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.BARREL_SHIFTER",
       "def_range": {
@@ -10888,11 +10859,11 @@
       "loads": []
     },
     {
-      "id": 362,
+      "id": 361,
       "kind": "Param",
       "name": "TWO_CYCLE_COMPARE",
       "path": "picorv32_soc.g_lane[1].core.TWO_CYCLE_COMPARE",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.TWO_CYCLE_COMPARE",
       "def_range": {
@@ -10916,11 +10887,11 @@
       "loads": []
     },
     {
-      "id": 363,
+      "id": 362,
       "kind": "Param",
       "name": "TWO_CYCLE_ALU",
       "path": "picorv32_soc.g_lane[1].core.TWO_CYCLE_ALU",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.TWO_CYCLE_ALU",
       "def_range": {
@@ -10944,11 +10915,11 @@
       "loads": []
     },
     {
-      "id": 364,
+      "id": 363,
       "kind": "Param",
       "name": "COMPRESSED_ISA",
       "path": "picorv32_soc.g_lane[1].core.COMPRESSED_ISA",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.COMPRESSED_ISA",
       "def_range": {
@@ -10972,11 +10943,11 @@
       "loads": []
     },
     {
-      "id": 365,
+      "id": 364,
       "kind": "Param",
       "name": "CATCH_MISALIGN",
       "path": "picorv32_soc.g_lane[1].core.CATCH_MISALIGN",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.CATCH_MISALIGN",
       "def_range": {
@@ -11000,11 +10971,11 @@
       "loads": []
     },
     {
-      "id": 366,
+      "id": 365,
       "kind": "Param",
       "name": "CATCH_ILLINSN",
       "path": "picorv32_soc.g_lane[1].core.CATCH_ILLINSN",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.CATCH_ILLINSN",
       "def_range": {
@@ -11028,11 +10999,11 @@
       "loads": []
     },
     {
-      "id": 367,
+      "id": 366,
       "kind": "Param",
       "name": "ENABLE_PCPI",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_PCPI",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_PCPI",
       "def_range": {
@@ -11056,11 +11027,11 @@
       "loads": []
     },
     {
-      "id": 368,
+      "id": 367,
       "kind": "Param",
       "name": "ENABLE_MUL",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_MUL",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_MUL",
       "def_range": {
@@ -11084,11 +11055,11 @@
       "loads": []
     },
     {
-      "id": 369,
+      "id": 368,
       "kind": "Param",
       "name": "ENABLE_FAST_MUL",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_FAST_MUL",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_FAST_MUL",
       "def_range": {
@@ -11112,11 +11083,11 @@
       "loads": []
     },
     {
-      "id": 370,
+      "id": 369,
       "kind": "Param",
       "name": "ENABLE_DIV",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_DIV",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_DIV",
       "def_range": {
@@ -11140,11 +11111,11 @@
       "loads": []
     },
     {
-      "id": 371,
+      "id": 370,
       "kind": "Param",
       "name": "ENABLE_IRQ",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_IRQ",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_IRQ",
       "def_range": {
@@ -11168,11 +11139,11 @@
       "loads": []
     },
     {
-      "id": 372,
+      "id": 371,
       "kind": "Param",
       "name": "ENABLE_IRQ_QREGS",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_IRQ_QREGS",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_IRQ_QREGS",
       "def_range": {
@@ -11196,11 +11167,11 @@
       "loads": []
     },
     {
-      "id": 373,
+      "id": 372,
       "kind": "Param",
       "name": "ENABLE_IRQ_TIMER",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_IRQ_TIMER",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_IRQ_TIMER",
       "def_range": {
@@ -11224,11 +11195,11 @@
       "loads": []
     },
     {
-      "id": 374,
+      "id": 373,
       "kind": "Param",
       "name": "ENABLE_TRACE",
       "path": "picorv32_soc.g_lane[1].core.ENABLE_TRACE",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.ENABLE_TRACE",
       "def_range": {
@@ -11252,11 +11223,11 @@
       "loads": []
     },
     {
-      "id": 375,
+      "id": 374,
       "kind": "Param",
       "name": "REGS_INIT_ZERO",
       "path": "picorv32_soc.g_lane[1].core.REGS_INIT_ZERO",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.REGS_INIT_ZERO",
       "def_range": {
@@ -11280,11 +11251,11 @@
       "loads": []
     },
     {
-      "id": 376,
+      "id": 375,
       "kind": "Param",
       "name": "MASKED_IRQ",
       "path": "picorv32_soc.g_lane[1].core.MASKED_IRQ",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.MASKED_IRQ",
       "def_range": {
@@ -11308,11 +11279,11 @@
       "loads": []
     },
     {
-      "id": 377,
+      "id": 376,
       "kind": "Param",
       "name": "LATCHED_IRQ",
       "path": "picorv32_soc.g_lane[1].core.LATCHED_IRQ",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.LATCHED_IRQ",
       "def_range": {
@@ -11336,11 +11307,11 @@
       "loads": []
     },
     {
-      "id": 378,
+      "id": 377,
       "kind": "Param",
       "name": "PROGADDR_RESET",
       "path": "picorv32_soc.g_lane[1].core.PROGADDR_RESET",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.PROGADDR_RESET",
       "def_range": {
@@ -11364,11 +11335,11 @@
       "loads": []
     },
     {
-      "id": 379,
+      "id": 378,
       "kind": "Param",
       "name": "PROGADDR_IRQ",
       "path": "picorv32_soc.g_lane[1].core.PROGADDR_IRQ",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.PROGADDR_IRQ",
       "def_range": {
@@ -11392,11 +11363,11 @@
       "loads": []
     },
     {
-      "id": 380,
+      "id": 379,
       "kind": "Param",
       "name": "STACKADDR",
       "path": "picorv32_soc.g_lane[1].core.STACKADDR",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.STACKADDR",
       "def_range": {
@@ -11420,11 +11391,11 @@
       "loads": []
     },
     {
-      "id": 381,
+      "id": 380,
       "kind": "Port",
       "name": "clk",
       "path": "picorv32_soc.g_lane[1].core.clk",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.clk",
       "def_range": {
@@ -11443,44 +11414,72 @@
       "inst_range": null,
       "type": "logic",
       "dir": "in",
+      "const": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 381,
+      "kind": "Net",
+      "name": "clk",
+      "path": "picorv32_soc.g_lane[1].core.clk",
+      "parent": 353,
+      "children": [],
+      "symbol_key": "picorv32_soc.g_lane[1].core.clk",
+      "def_range": {
+        "file": 2,
+        "start": {
+          "line": 90,
+          "col": 8,
+          "offset": 2937
+        },
+        "end": {
+          "line": 90,
+          "col": 11,
+          "offset": 2940
+        }
+      },
+      "inst_range": null,
+      "type": "logic",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 382,
-      "kind": "Net",
-      "name": "clk",
-      "path": "picorv32_soc.g_lane[1].core.clk",
-      "parent": 354,
+      "kind": "Port",
+      "name": "resetn",
+      "path": "picorv32_soc.g_lane[1].core.resetn",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.clk",
+      "symbol_key": "picorv32_soc.g_lane[1].core.resetn",
       "def_range": {
         "file": 2,
         "start": {
           "line": 90,
-          "col": 8,
-          "offset": 2937
+          "col": 13,
+          "offset": 2942
         },
         "end": {
           "line": 90,
-          "col": 11,
-          "offset": 2940
+          "col": 19,
+          "offset": 2948
         }
       },
       "inst_range": null,
       "type": "logic",
-      "dir": null,
+      "dir": "in",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 383,
-      "kind": "Port",
+      "kind": "Net",
       "name": "resetn",
       "path": "picorv32_soc.g_lane[1].core.resetn",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.resetn",
       "def_range": {
@@ -11498,45 +11497,45 @@
       },
       "inst_range": null,
       "type": "logic",
-      "dir": "in",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 384,
-      "kind": "Net",
-      "name": "resetn",
-      "path": "picorv32_soc.g_lane[1].core.resetn",
-      "parent": 354,
+      "kind": "Port",
+      "name": "trap",
+      "path": "picorv32_soc.g_lane[1].core.trap",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.resetn",
+      "symbol_key": "picorv32_soc.g_lane[1].core.trap",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 90,
+          "line": 91,
           "col": 13,
-          "offset": 2942
+          "offset": 2962
         },
         "end": {
-          "line": 90,
-          "col": 19,
-          "offset": 2948
+          "line": 91,
+          "col": 17,
+          "offset": 2966
         }
       },
       "inst_range": null,
-      "type": "logic",
-      "dir": null,
+      "type": "reg",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 385,
-      "kind": "Port",
+      "kind": "Var",
       "name": "trap",
       "path": "picorv32_soc.g_lane[1].core.trap",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.trap",
       "def_range": {
@@ -11554,45 +11553,45 @@
       },
       "inst_range": null,
       "type": "reg",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 386,
-      "kind": "Var",
-      "name": "trap",
-      "path": "picorv32_soc.g_lane[1].core.trap",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_valid",
+      "path": "picorv32_soc.g_lane[1].core.mem_valid",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.trap",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_valid",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 91,
-          "col": 13,
-          "offset": 2962
+          "line": 93,
+          "col": 20,
+          "offset": 2988
         },
         "end": {
-          "line": 91,
-          "col": 17,
-          "offset": 2966
+          "line": 93,
+          "col": 29,
+          "offset": 2997
         }
       },
       "inst_range": null,
       "type": "reg",
-      "dir": null,
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 387,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_valid",
       "path": "picorv32_soc.g_lane[1].core.mem_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_valid",
       "def_range": {
@@ -11610,45 +11609,45 @@
       },
       "inst_range": null,
       "type": "reg",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 388,
-      "kind": "Var",
-      "name": "mem_valid",
-      "path": "picorv32_soc.g_lane[1].core.mem_valid",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_instr",
+      "path": "picorv32_soc.g_lane[1].core.mem_instr",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_valid",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_instr",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 93,
+          "line": 94,
           "col": 20,
-          "offset": 2988
+          "offset": 3018
         },
         "end": {
-          "line": 93,
+          "line": 94,
           "col": 29,
-          "offset": 2997
+          "offset": 3027
         }
       },
       "inst_range": null,
       "type": "reg",
-      "dir": null,
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 389,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_instr",
       "path": "picorv32_soc.g_lane[1].core.mem_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_instr",
       "def_range": {
@@ -11666,45 +11665,45 @@
       },
       "inst_range": null,
       "type": "reg",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 390,
-      "kind": "Var",
-      "name": "mem_instr",
-      "path": "picorv32_soc.g_lane[1].core.mem_instr",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_ready",
+      "path": "picorv32_soc.g_lane[1].core.mem_ready",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_instr",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_ready",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 94,
+          "line": 95,
           "col": 20,
-          "offset": 3018
+          "offset": 3048
         },
         "end": {
-          "line": 94,
+          "line": 95,
           "col": 29,
-          "offset": 3027
+          "offset": 3057
         }
       },
       "inst_range": null,
-      "type": "reg",
-      "dir": null,
+      "type": "logic",
+      "dir": "in",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 391,
-      "kind": "Port",
+      "kind": "Net",
       "name": "mem_ready",
       "path": "picorv32_soc.g_lane[1].core.mem_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_ready",
       "def_range": {
@@ -11722,45 +11721,45 @@
       },
       "inst_range": null,
       "type": "logic",
-      "dir": "in",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 392,
-      "kind": "Net",
-      "name": "mem_ready",
-      "path": "picorv32_soc.g_lane[1].core.mem_ready",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_addr",
+      "path": "picorv32_soc.g_lane[1].core.mem_addr",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_ready",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_addr",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 95,
+          "line": 97,
           "col": 20,
-          "offset": 3048
+          "offset": 3079
         },
         "end": {
-          "line": 95,
-          "col": 29,
-          "offset": 3057
+          "line": 97,
+          "col": 28,
+          "offset": 3087
         }
       },
       "inst_range": null,
-      "type": "logic",
-      "dir": null,
+      "type": "reg[31:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 393,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_addr",
       "path": "picorv32_soc.g_lane[1].core.mem_addr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_addr",
       "def_range": {
@@ -11778,45 +11777,45 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 394,
-      "kind": "Var",
-      "name": "mem_addr",
-      "path": "picorv32_soc.g_lane[1].core.mem_addr",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_wdata",
+      "path": "picorv32_soc.g_lane[1].core.mem_wdata",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_addr",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_wdata",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 97,
+          "line": 98,
           "col": 20,
-          "offset": 3079
+          "offset": 3108
         },
         "end": {
-          "line": 97,
-          "col": 28,
-          "offset": 3087
+          "line": 98,
+          "col": 29,
+          "offset": 3117
         }
       },
       "inst_range": null,
       "type": "reg[31:0]",
-      "dir": null,
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 395,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_wdata",
       "path": "picorv32_soc.g_lane[1].core.mem_wdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_wdata",
       "def_range": {
@@ -11834,45 +11833,45 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 396,
-      "kind": "Var",
-      "name": "mem_wdata",
-      "path": "picorv32_soc.g_lane[1].core.mem_wdata",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_wstrb",
+      "path": "picorv32_soc.g_lane[1].core.mem_wstrb",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_wdata",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_wstrb",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 98,
+          "line": 99,
           "col": 20,
-          "offset": 3108
+          "offset": 3138
         },
         "end": {
-          "line": 98,
+          "line": 99,
           "col": 29,
-          "offset": 3117
+          "offset": 3147
         }
       },
       "inst_range": null,
-      "type": "reg[31:0]",
-      "dir": null,
+      "type": "reg[3:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 397,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_wstrb",
       "path": "picorv32_soc.g_lane[1].core.mem_wstrb",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_wstrb",
       "def_range": {
@@ -11890,45 +11889,45 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 398,
-      "kind": "Var",
-      "name": "mem_wstrb",
-      "path": "picorv32_soc.g_lane[1].core.mem_wstrb",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_rdata",
+      "path": "picorv32_soc.g_lane[1].core.mem_rdata",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_wstrb",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 99,
+          "line": 100,
           "col": 20,
-          "offset": 3138
+          "offset": 3168
         },
         "end": {
-          "line": 99,
+          "line": 100,
           "col": 29,
-          "offset": 3147
+          "offset": 3177
         }
       },
       "inst_range": null,
-      "type": "reg[3:0]",
-      "dir": null,
+      "type": "logic[31:0]",
+      "dir": "in",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 399,
-      "kind": "Port",
+      "kind": "Net",
       "name": "mem_rdata",
       "path": "picorv32_soc.g_lane[1].core.mem_rdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata",
       "def_range": {
@@ -11946,45 +11945,45 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
-      "dir": "in",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 400,
-      "kind": "Net",
-      "name": "mem_rdata",
-      "path": "picorv32_soc.g_lane[1].core.mem_rdata",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_la_read",
+      "path": "picorv32_soc.g_lane[1].core.mem_la_read",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_read",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 100,
+          "line": 103,
           "col": 20,
-          "offset": 3168
+          "offset": 3224
         },
         "end": {
-          "line": 100,
-          "col": 29,
-          "offset": 3177
+          "line": 103,
+          "col": 31,
+          "offset": 3235
         }
       },
       "inst_range": null,
-      "type": "logic[31:0]",
-      "dir": null,
+      "type": "logic",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 401,
-      "kind": "Port",
+      "kind": "Net",
       "name": "mem_la_read",
       "path": "picorv32_soc.g_lane[1].core.mem_la_read",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_read",
       "def_range": {
@@ -12002,45 +12001,45 @@
       },
       "inst_range": null,
       "type": "logic",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 402,
-      "kind": "Net",
-      "name": "mem_la_read",
-      "path": "picorv32_soc.g_lane[1].core.mem_la_read",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_la_write",
+      "path": "picorv32_soc.g_lane[1].core.mem_la_write",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_read",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_write",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 103,
+          "line": 104,
           "col": 20,
-          "offset": 3224
+          "offset": 3256
         },
         "end": {
-          "line": 103,
-          "col": 31,
-          "offset": 3235
+          "line": 104,
+          "col": 32,
+          "offset": 3268
         }
       },
       "inst_range": null,
       "type": "logic",
-      "dir": null,
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 403,
-      "kind": "Port",
+      "kind": "Net",
       "name": "mem_la_write",
       "path": "picorv32_soc.g_lane[1].core.mem_la_write",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_write",
       "def_range": {
@@ -12058,45 +12057,45 @@
       },
       "inst_range": null,
       "type": "logic",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 404,
-      "kind": "Net",
-      "name": "mem_la_write",
-      "path": "picorv32_soc.g_lane[1].core.mem_la_write",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_la_addr",
+      "path": "picorv32_soc.g_lane[1].core.mem_la_addr",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_write",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_addr",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 104,
+          "line": 105,
           "col": 20,
-          "offset": 3256
+          "offset": 3289
         },
         "end": {
-          "line": 104,
-          "col": 32,
-          "offset": 3268
+          "line": 105,
+          "col": 31,
+          "offset": 3300
         }
       },
       "inst_range": null,
-      "type": "logic",
-      "dir": null,
+      "type": "logic[31:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 405,
-      "kind": "Port",
+      "kind": "Net",
       "name": "mem_la_addr",
       "path": "picorv32_soc.g_lane[1].core.mem_la_addr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_addr",
       "def_range": {
@@ -12114,45 +12113,45 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 406,
-      "kind": "Net",
-      "name": "mem_la_addr",
-      "path": "picorv32_soc.g_lane[1].core.mem_la_addr",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_la_wdata",
+      "path": "picorv32_soc.g_lane[1].core.mem_la_wdata",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_addr",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_wdata",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 105,
+          "line": 106,
           "col": 20,
-          "offset": 3289
+          "offset": 3321
         },
         "end": {
-          "line": 105,
-          "col": 31,
-          "offset": 3300
+          "line": 106,
+          "col": 32,
+          "offset": 3333
         }
       },
       "inst_range": null,
-      "type": "logic[31:0]",
-      "dir": null,
+      "type": "reg[31:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 407,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_la_wdata",
       "path": "picorv32_soc.g_lane[1].core.mem_la_wdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_wdata",
       "def_range": {
@@ -12170,45 +12169,45 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 408,
-      "kind": "Var",
-      "name": "mem_la_wdata",
-      "path": "picorv32_soc.g_lane[1].core.mem_la_wdata",
-      "parent": 354,
+      "kind": "Port",
+      "name": "mem_la_wstrb",
+      "path": "picorv32_soc.g_lane[1].core.mem_la_wstrb",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_wdata",
+      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_wstrb",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 106,
+          "line": 107,
           "col": 20,
-          "offset": 3321
+          "offset": 3354
         },
         "end": {
-          "line": 106,
+          "line": 107,
           "col": 32,
-          "offset": 3333
+          "offset": 3366
         }
       },
       "inst_range": null,
-      "type": "reg[31:0]",
-      "dir": null,
+      "type": "reg[3:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 409,
-      "kind": "Port",
+      "kind": "Var",
       "name": "mem_la_wstrb",
       "path": "picorv32_soc.g_lane[1].core.mem_la_wstrb",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_wstrb",
       "def_range": {
@@ -12226,45 +12225,45 @@
       },
       "inst_range": null,
       "type": "reg[3:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 410,
-      "kind": "Var",
-      "name": "mem_la_wstrb",
-      "path": "picorv32_soc.g_lane[1].core.mem_la_wstrb",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_valid",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_valid",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_wstrb",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_valid",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 107,
+          "line": 110,
           "col": 20,
-          "offset": 3354
+          "offset": 3427
         },
         "end": {
-          "line": 107,
-          "col": 32,
-          "offset": 3366
+          "line": 110,
+          "col": 30,
+          "offset": 3437
         }
       },
       "inst_range": null,
-      "type": "reg[3:0]",
-      "dir": null,
+      "type": "reg",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 411,
-      "kind": "Port",
+      "kind": "Var",
       "name": "pcpi_valid",
       "path": "picorv32_soc.g_lane[1].core.pcpi_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_valid",
       "def_range": {
@@ -12282,45 +12281,45 @@
       },
       "inst_range": null,
       "type": "reg",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 412,
-      "kind": "Var",
-      "name": "pcpi_valid",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_valid",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_insn",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_insn",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_valid",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_insn",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 110,
+          "line": 111,
           "col": 20,
-          "offset": 3427
+          "offset": 3458
         },
         "end": {
-          "line": 110,
-          "col": 30,
-          "offset": 3437
+          "line": 111,
+          "col": 29,
+          "offset": 3467
         }
       },
       "inst_range": null,
-      "type": "reg",
-      "dir": null,
+      "type": "reg[31:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 413,
-      "kind": "Port",
+      "kind": "Var",
       "name": "pcpi_insn",
       "path": "picorv32_soc.g_lane[1].core.pcpi_insn",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_insn",
       "def_range": {
@@ -12338,45 +12337,45 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 414,
-      "kind": "Var",
-      "name": "pcpi_insn",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_insn",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_rs1",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_rs1",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_insn",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rs1",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 111,
+          "line": 112,
           "col": 20,
-          "offset": 3458
+          "offset": 3488
         },
         "end": {
-          "line": 111,
-          "col": 29,
-          "offset": 3467
+          "line": 112,
+          "col": 28,
+          "offset": 3496
         }
       },
       "inst_range": null,
-      "type": "reg[31:0]",
-      "dir": null,
+      "type": "logic[31:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 415,
-      "kind": "Port",
+      "kind": "Net",
       "name": "pcpi_rs1",
       "path": "picorv32_soc.g_lane[1].core.pcpi_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rs1",
       "def_range": {
@@ -12394,45 +12393,45 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 416,
-      "kind": "Net",
-      "name": "pcpi_rs1",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_rs1",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_rs2",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_rs2",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rs1",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rs2",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 112,
+          "line": 113,
           "col": 20,
-          "offset": 3488
+          "offset": 3517
         },
         "end": {
-          "line": 112,
+          "line": 113,
           "col": 28,
-          "offset": 3496
+          "offset": 3525
         }
       },
       "inst_range": null,
       "type": "logic[31:0]",
-      "dir": null,
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 417,
-      "kind": "Port",
+      "kind": "Net",
       "name": "pcpi_rs2",
       "path": "picorv32_soc.g_lane[1].core.pcpi_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rs2",
       "def_range": {
@@ -12450,45 +12449,45 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 418,
-      "kind": "Net",
-      "name": "pcpi_rs2",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_rs2",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_wr",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_wr",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rs2",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_wr",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 113,
+          "line": 114,
           "col": 20,
-          "offset": 3517
+          "offset": 3546
         },
         "end": {
-          "line": 113,
-          "col": 28,
-          "offset": 3525
+          "line": 114,
+          "col": 27,
+          "offset": 3553
         }
       },
       "inst_range": null,
-      "type": "logic[31:0]",
-      "dir": null,
-      "const": null,
+      "type": "logic",
+      "dir": "in",
+      "const": "1'b0",
       "drivers": [],
       "loads": []
     },
     {
       "id": 419,
-      "kind": "Port",
+      "kind": "Net",
       "name": "pcpi_wr",
       "path": "picorv32_soc.g_lane[1].core.pcpi_wr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_wr",
       "def_range": {
@@ -12506,45 +12505,45 @@
       },
       "inst_range": null,
       "type": "logic",
-      "dir": "in",
-      "const": "1'b0",
+      "dir": null,
+      "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 420,
-      "kind": "Net",
-      "name": "pcpi_wr",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_wr",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_rd",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_rd",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_wr",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rd",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 114,
+          "line": 115,
           "col": 20,
-          "offset": 3546
+          "offset": 3574
         },
         "end": {
-          "line": 114,
+          "line": 115,
           "col": 27,
-          "offset": 3553
+          "offset": 3581
         }
       },
       "inst_range": null,
-      "type": "logic",
-      "dir": null,
-      "const": null,
+      "type": "logic[31:0]",
+      "dir": "in",
+      "const": "32'd0",
       "drivers": [],
       "loads": []
     },
     {
       "id": 421,
-      "kind": "Port",
+      "kind": "Net",
       "name": "pcpi_rd",
       "path": "picorv32_soc.g_lane[1].core.pcpi_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rd",
       "def_range": {
@@ -12562,45 +12561,45 @@
       },
       "inst_range": null,
       "type": "logic[31:0]",
-      "dir": "in",
-      "const": "32'd0",
+      "dir": null,
+      "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 422,
-      "kind": "Net",
-      "name": "pcpi_rd",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_rd",
-      "parent": 354,
+      "kind": "Port",
+      "name": "pcpi_wait",
+      "path": "picorv32_soc.g_lane[1].core.pcpi_wait",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_rd",
+      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_wait",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 115,
+          "line": 116,
           "col": 20,
-          "offset": 3574
+          "offset": 3602
         },
         "end": {
-          "line": 115,
-          "col": 27,
-          "offset": 3581
+          "line": 116,
+          "col": 29,
+          "offset": 3611
         }
       },
       "inst_range": null,
-      "type": "logic[31:0]",
-      "dir": null,
-      "const": null,
+      "type": "logic",
+      "dir": "in",
+      "const": "1'b0",
       "drivers": [],
       "loads": []
     },
     {
       "id": 423,
-      "kind": "Port",
+      "kind": "Net",
       "name": "pcpi_wait",
       "path": "picorv32_soc.g_lane[1].core.pcpi_wait",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_wait",
       "def_range": {
@@ -12618,45 +12617,17 @@
       },
       "inst_range": null,
       "type": "logic",
-      "dir": "in",
-      "const": "1'b0",
+      "dir": null,
+      "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 424,
-      "kind": "Net",
-      "name": "pcpi_wait",
-      "path": "picorv32_soc.g_lane[1].core.pcpi_wait",
-      "parent": 354,
-      "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_wait",
-      "def_range": {
-        "file": 2,
-        "start": {
-          "line": 116,
-          "col": 20,
-          "offset": 3602
-        },
-        "end": {
-          "line": 116,
-          "col": 29,
-          "offset": 3611
-        }
-      },
-      "inst_range": null,
-      "type": "logic",
-      "dir": null,
-      "const": null,
-      "drivers": [],
-      "loads": []
-    },
-    {
-      "id": 425,
       "kind": "Port",
       "name": "pcpi_ready",
       "path": "picorv32_soc.g_lane[1].core.pcpi_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_ready",
       "def_range": {
@@ -12680,11 +12651,11 @@
       "loads": []
     },
     {
-      "id": 426,
+      "id": 425,
       "kind": "Net",
       "name": "pcpi_ready",
       "path": "picorv32_soc.g_lane[1].core.pcpi_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_ready",
       "def_range": {
@@ -12708,11 +12679,11 @@
       "loads": []
     },
     {
-      "id": 427,
+      "id": 426,
       "kind": "Port",
       "name": "irq",
       "path": "picorv32_soc.g_lane[1].core.irq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq",
       "def_range": {
@@ -12736,11 +12707,11 @@
       "loads": []
     },
     {
-      "id": 428,
+      "id": 427,
       "kind": "Net",
       "name": "irq",
       "path": "picorv32_soc.g_lane[1].core.irq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq",
       "def_range": {
@@ -12759,16 +12730,44 @@
       "inst_range": null,
       "type": "logic[31:0]",
       "dir": null,
+      "const": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 428,
+      "kind": "Port",
+      "name": "eoi",
+      "path": "picorv32_soc.g_lane[1].core.eoi",
+      "parent": 353,
+      "children": [],
+      "symbol_key": "picorv32_soc.g_lane[1].core.eoi",
+      "def_range": {
+        "file": 2,
+        "start": {
+          "line": 121,
+          "col": 20,
+          "offset": 3706
+        },
+        "end": {
+          "line": 121,
+          "col": 23,
+          "offset": 3709
+        }
+      },
+      "inst_range": null,
+      "type": "reg[31:0]",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 429,
-      "kind": "Port",
+      "kind": "Var",
       "name": "eoi",
       "path": "picorv32_soc.g_lane[1].core.eoi",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.eoi",
       "def_range": {
@@ -12786,45 +12785,45 @@
       },
       "inst_range": null,
       "type": "reg[31:0]",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 430,
-      "kind": "Var",
-      "name": "eoi",
-      "path": "picorv32_soc.g_lane[1].core.eoi",
-      "parent": 354,
+      "kind": "Port",
+      "name": "trace_valid",
+      "path": "picorv32_soc.g_lane[1].core.trace_valid",
+      "parent": 353,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.eoi",
+      "symbol_key": "picorv32_soc.g_lane[1].core.trace_valid",
       "def_range": {
         "file": 2,
         "start": {
-          "line": 121,
+          "line": 158,
           "col": 20,
-          "offset": 3706
+          "offset": 4813
         },
         "end": {
-          "line": 121,
-          "col": 23,
-          "offset": 3709
+          "line": 158,
+          "col": 31,
+          "offset": 4824
         }
       },
       "inst_range": null,
-      "type": "reg[31:0]",
-      "dir": null,
+      "type": "reg",
+      "dir": "out",
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 431,
-      "kind": "Port",
+      "kind": "Var",
       "name": "trace_valid",
       "path": "picorv32_soc.g_lane[1].core.trace_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.trace_valid",
       "def_range": {
@@ -12842,45 +12841,17 @@
       },
       "inst_range": null,
       "type": "reg",
-      "dir": "out",
+      "dir": null,
       "const": null,
       "drivers": [],
       "loads": []
     },
     {
       "id": 432,
-      "kind": "Var",
-      "name": "trace_valid",
-      "path": "picorv32_soc.g_lane[1].core.trace_valid",
-      "parent": 354,
-      "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.trace_valid",
-      "def_range": {
-        "file": 2,
-        "start": {
-          "line": 158,
-          "col": 20,
-          "offset": 4813
-        },
-        "end": {
-          "line": 158,
-          "col": 31,
-          "offset": 4824
-        }
-      },
-      "inst_range": null,
-      "type": "reg",
-      "dir": null,
-      "const": null,
-      "drivers": [],
-      "loads": []
-    },
-    {
-      "id": 433,
       "kind": "Port",
       "name": "trace_data",
       "path": "picorv32_soc.g_lane[1].core.trace_data",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.trace_data",
       "def_range": {
@@ -12904,11 +12875,11 @@
       "loads": []
     },
     {
-      "id": 434,
+      "id": 433,
       "kind": "Var",
       "name": "trace_data",
       "path": "picorv32_soc.g_lane[1].core.trace_data",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.trace_data",
       "def_range": {
@@ -12932,11 +12903,11 @@
       "loads": []
     },
     {
-      "id": 435,
+      "id": 434,
       "kind": "Param",
       "name": "irq_timer",
       "path": "picorv32_soc.g_lane[1].core.irq_timer",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_timer",
       "def_range": {
@@ -12960,11 +12931,11 @@
       "loads": []
     },
     {
-      "id": 436,
+      "id": 435,
       "kind": "Param",
       "name": "irq_ebreak",
       "path": "picorv32_soc.g_lane[1].core.irq_ebreak",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_ebreak",
       "def_range": {
@@ -12988,11 +12959,11 @@
       "loads": []
     },
     {
-      "id": 437,
+      "id": 436,
       "kind": "Param",
       "name": "irq_buserror",
       "path": "picorv32_soc.g_lane[1].core.irq_buserror",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_buserror",
       "def_range": {
@@ -13016,11 +12987,11 @@
       "loads": []
     },
     {
-      "id": 438,
+      "id": 437,
       "kind": "Param",
       "name": "irqregs_offset",
       "path": "picorv32_soc.g_lane[1].core.irqregs_offset",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irqregs_offset",
       "def_range": {
@@ -13044,11 +13015,11 @@
       "loads": []
     },
     {
-      "id": 439,
+      "id": 438,
       "kind": "Param",
       "name": "regfile_size",
       "path": "picorv32_soc.g_lane[1].core.regfile_size",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.regfile_size",
       "def_range": {
@@ -13072,11 +13043,11 @@
       "loads": []
     },
     {
-      "id": 440,
+      "id": 439,
       "kind": "Param",
       "name": "regindex_bits",
       "path": "picorv32_soc.g_lane[1].core.regindex_bits",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.regindex_bits",
       "def_range": {
@@ -13100,11 +13071,11 @@
       "loads": []
     },
     {
-      "id": 441,
+      "id": 440,
       "kind": "Param",
       "name": "WITH_PCPI",
       "path": "picorv32_soc.g_lane[1].core.WITH_PCPI",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.WITH_PCPI",
       "def_range": {
@@ -13128,11 +13099,11 @@
       "loads": []
     },
     {
-      "id": 442,
+      "id": 441,
       "kind": "Param",
       "name": "TRACE_BRANCH",
       "path": "picorv32_soc.g_lane[1].core.TRACE_BRANCH",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.TRACE_BRANCH",
       "def_range": {
@@ -13156,11 +13127,11 @@
       "loads": []
     },
     {
-      "id": 443,
+      "id": 442,
       "kind": "Param",
       "name": "TRACE_ADDR",
       "path": "picorv32_soc.g_lane[1].core.TRACE_ADDR",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.TRACE_ADDR",
       "def_range": {
@@ -13184,11 +13155,11 @@
       "loads": []
     },
     {
-      "id": 444,
+      "id": 443,
       "kind": "Param",
       "name": "TRACE_IRQ",
       "path": "picorv32_soc.g_lane[1].core.TRACE_IRQ",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.TRACE_IRQ",
       "def_range": {
@@ -13212,11 +13183,11 @@
       "loads": []
     },
     {
-      "id": 445,
+      "id": 444,
       "kind": "Var",
       "name": "count_cycle",
       "path": "picorv32_soc.g_lane[1].core.count_cycle",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.count_cycle",
       "def_range": {
@@ -13240,11 +13211,11 @@
       "loads": []
     },
     {
-      "id": 446,
+      "id": 445,
       "kind": "Var",
       "name": "count_instr",
       "path": "picorv32_soc.g_lane[1].core.count_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.count_instr",
       "def_range": {
@@ -13268,11 +13239,11 @@
       "loads": []
     },
     {
-      "id": 447,
+      "id": 446,
       "kind": "Var",
       "name": "reg_pc",
       "path": "picorv32_soc.g_lane[1].core.reg_pc",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.reg_pc",
       "def_range": {
@@ -13296,11 +13267,11 @@
       "loads": []
     },
     {
-      "id": 448,
+      "id": 447,
       "kind": "Var",
       "name": "reg_next_pc",
       "path": "picorv32_soc.g_lane[1].core.reg_next_pc",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.reg_next_pc",
       "def_range": {
@@ -13324,11 +13295,11 @@
       "loads": []
     },
     {
-      "id": 449,
+      "id": 448,
       "kind": "Var",
       "name": "reg_op1",
       "path": "picorv32_soc.g_lane[1].core.reg_op1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.reg_op1",
       "def_range": {
@@ -13352,11 +13323,11 @@
       "loads": []
     },
     {
-      "id": 450,
+      "id": 449,
       "kind": "Var",
       "name": "reg_op2",
       "path": "picorv32_soc.g_lane[1].core.reg_op2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.reg_op2",
       "def_range": {
@@ -13380,11 +13351,11 @@
       "loads": []
     },
     {
-      "id": 451,
+      "id": 450,
       "kind": "Var",
       "name": "reg_out",
       "path": "picorv32_soc.g_lane[1].core.reg_out",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.reg_out",
       "def_range": {
@@ -13408,11 +13379,11 @@
       "loads": []
     },
     {
-      "id": 452,
+      "id": 451,
       "kind": "Var",
       "name": "reg_sh",
       "path": "picorv32_soc.g_lane[1].core.reg_sh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.reg_sh",
       "def_range": {
@@ -13436,11 +13407,11 @@
       "loads": []
     },
     {
-      "id": 453,
+      "id": 452,
       "kind": "Var",
       "name": "next_insn_opcode",
       "path": "picorv32_soc.g_lane[1].core.next_insn_opcode",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.next_insn_opcode",
       "def_range": {
@@ -13464,11 +13435,11 @@
       "loads": []
     },
     {
-      "id": 454,
+      "id": 453,
       "kind": "Var",
       "name": "dbg_insn_opcode",
       "path": "picorv32_soc.g_lane[1].core.dbg_insn_opcode",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_insn_opcode",
       "def_range": {
@@ -13492,11 +13463,11 @@
       "loads": []
     },
     {
-      "id": 455,
+      "id": 454,
       "kind": "Var",
       "name": "dbg_insn_addr",
       "path": "picorv32_soc.g_lane[1].core.dbg_insn_addr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_insn_addr",
       "def_range": {
@@ -13520,11 +13491,11 @@
       "loads": []
     },
     {
-      "id": 456,
+      "id": 455,
       "kind": "Net",
       "name": "dbg_mem_valid",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_valid",
       "def_range": {
@@ -13548,11 +13519,11 @@
       "loads": []
     },
     {
-      "id": 457,
+      "id": 456,
       "kind": "Net",
       "name": "dbg_mem_instr",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_instr",
       "def_range": {
@@ -13576,11 +13547,11 @@
       "loads": []
     },
     {
-      "id": 458,
+      "id": 457,
       "kind": "Net",
       "name": "dbg_mem_ready",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_ready",
       "def_range": {
@@ -13604,11 +13575,11 @@
       "loads": []
     },
     {
-      "id": 459,
+      "id": 458,
       "kind": "Net",
       "name": "dbg_mem_addr",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_addr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_addr",
       "def_range": {
@@ -13632,11 +13603,11 @@
       "loads": []
     },
     {
-      "id": 460,
+      "id": 459,
       "kind": "Net",
       "name": "dbg_mem_wdata",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_wdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_wdata",
       "def_range": {
@@ -13660,11 +13631,11 @@
       "loads": []
     },
     {
-      "id": 461,
+      "id": 460,
       "kind": "Net",
       "name": "dbg_mem_wstrb",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_wstrb",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_wstrb",
       "def_range": {
@@ -13688,11 +13659,11 @@
       "loads": []
     },
     {
-      "id": 462,
+      "id": 461,
       "kind": "Net",
       "name": "dbg_mem_rdata",
       "path": "picorv32_soc.g_lane[1].core.dbg_mem_rdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_mem_rdata",
       "def_range": {
@@ -13716,11 +13687,11 @@
       "loads": []
     },
     {
-      "id": 463,
+      "id": 462,
       "kind": "Net",
       "name": "next_pc",
       "path": "picorv32_soc.g_lane[1].core.next_pc",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.next_pc",
       "def_range": {
@@ -13744,11 +13715,11 @@
       "loads": []
     },
     {
-      "id": 464,
+      "id": 463,
       "kind": "Var",
       "name": "irq_delay",
       "path": "picorv32_soc.g_lane[1].core.irq_delay",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_delay",
       "def_range": {
@@ -13772,11 +13743,11 @@
       "loads": []
     },
     {
-      "id": 465,
+      "id": 464,
       "kind": "Var",
       "name": "irq_active",
       "path": "picorv32_soc.g_lane[1].core.irq_active",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_active",
       "def_range": {
@@ -13800,11 +13771,11 @@
       "loads": []
     },
     {
-      "id": 466,
+      "id": 465,
       "kind": "Var",
       "name": "irq_mask",
       "path": "picorv32_soc.g_lane[1].core.irq_mask",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_mask",
       "def_range": {
@@ -13828,11 +13799,11 @@
       "loads": []
     },
     {
-      "id": 467,
+      "id": 466,
       "kind": "Var",
       "name": "irq_pending",
       "path": "picorv32_soc.g_lane[1].core.irq_pending",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_pending",
       "def_range": {
@@ -13856,11 +13827,11 @@
       "loads": []
     },
     {
-      "id": 468,
+      "id": 467,
       "kind": "Var",
       "name": "timer",
       "path": "picorv32_soc.g_lane[1].core.timer",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.timer",
       "def_range": {
@@ -13884,11 +13855,11 @@
       "loads": []
     },
     {
-      "id": 469,
+      "id": 468,
       "kind": "Var",
       "name": "cpuregs",
       "path": "picorv32_soc.g_lane[1].core.cpuregs",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpuregs",
       "def_range": {
@@ -13912,11 +13883,11 @@
       "loads": []
     },
     {
-      "id": 470,
+      "id": 469,
       "kind": "Var",
       "name": "i",
       "path": "picorv32_soc.g_lane[1].core.i",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.i",
       "def_range": {
@@ -13940,11 +13911,11 @@
       "loads": []
     },
     {
-      "id": 471,
+      "id": 470,
       "kind": "Net",
       "name": "pcpi_mul_wr",
       "path": "picorv32_soc.g_lane[1].core.pcpi_mul_wr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_mul_wr",
       "def_range": {
@@ -13968,11 +13939,11 @@
       "loads": []
     },
     {
-      "id": 472,
+      "id": 471,
       "kind": "Net",
       "name": "pcpi_mul_rd",
       "path": "picorv32_soc.g_lane[1].core.pcpi_mul_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_mul_rd",
       "def_range": {
@@ -13996,11 +13967,11 @@
       "loads": []
     },
     {
-      "id": 473,
+      "id": 472,
       "kind": "Net",
       "name": "pcpi_mul_wait",
       "path": "picorv32_soc.g_lane[1].core.pcpi_mul_wait",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_mul_wait",
       "def_range": {
@@ -14024,11 +13995,11 @@
       "loads": []
     },
     {
-      "id": 474,
+      "id": 473,
       "kind": "Net",
       "name": "pcpi_mul_ready",
       "path": "picorv32_soc.g_lane[1].core.pcpi_mul_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_mul_ready",
       "def_range": {
@@ -14052,11 +14023,11 @@
       "loads": []
     },
     {
-      "id": 475,
+      "id": 474,
       "kind": "Net",
       "name": "pcpi_div_wr",
       "path": "picorv32_soc.g_lane[1].core.pcpi_div_wr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_div_wr",
       "def_range": {
@@ -14080,11 +14051,11 @@
       "loads": []
     },
     {
-      "id": 476,
+      "id": 475,
       "kind": "Net",
       "name": "pcpi_div_rd",
       "path": "picorv32_soc.g_lane[1].core.pcpi_div_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_div_rd",
       "def_range": {
@@ -14108,11 +14079,11 @@
       "loads": []
     },
     {
-      "id": 477,
+      "id": 476,
       "kind": "Net",
       "name": "pcpi_div_wait",
       "path": "picorv32_soc.g_lane[1].core.pcpi_div_wait",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_div_wait",
       "def_range": {
@@ -14136,11 +14107,11 @@
       "loads": []
     },
     {
-      "id": 478,
+      "id": 477,
       "kind": "Net",
       "name": "pcpi_div_ready",
       "path": "picorv32_soc.g_lane[1].core.pcpi_div_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_div_ready",
       "def_range": {
@@ -14164,11 +14135,11 @@
       "loads": []
     },
     {
-      "id": 479,
+      "id": 478,
       "kind": "Var",
       "name": "pcpi_int_wr",
       "path": "picorv32_soc.g_lane[1].core.pcpi_int_wr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_int_wr",
       "def_range": {
@@ -14192,11 +14163,11 @@
       "loads": []
     },
     {
-      "id": 480,
+      "id": 479,
       "kind": "Var",
       "name": "pcpi_int_rd",
       "path": "picorv32_soc.g_lane[1].core.pcpi_int_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_int_rd",
       "def_range": {
@@ -14220,11 +14191,11 @@
       "loads": []
     },
     {
-      "id": 481,
+      "id": 480,
       "kind": "Var",
       "name": "pcpi_int_wait",
       "path": "picorv32_soc.g_lane[1].core.pcpi_int_wait",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_int_wait",
       "def_range": {
@@ -14248,11 +14219,11 @@
       "loads": []
     },
     {
-      "id": 482,
+      "id": 481,
       "kind": "Var",
       "name": "pcpi_int_ready",
       "path": "picorv32_soc.g_lane[1].core.pcpi_int_ready",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_int_ready",
       "def_range": {
@@ -14276,11 +14247,11 @@
       "loads": []
     },
     {
-      "id": 483,
+      "id": 482,
       "kind": "GenBlock",
       "name": "",
       "path": "picorv32_soc.g_lane[1].core.genblk1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk1",
       "def_range": {
@@ -14304,11 +14275,11 @@
       "loads": []
     },
     {
-      "id": 484,
+      "id": 483,
       "kind": "GenBlock",
       "name": "",
       "path": "picorv32_soc.g_lane[1].core.genblk1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk1",
       "def_range": {
@@ -14332,11 +14303,11 @@
       "loads": []
     },
     {
-      "id": 485,
+      "id": 484,
       "kind": "GenBlock",
       "name": "genblk1",
       "path": "picorv32_soc.g_lane[1].core.genblk1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk1",
       "def_range": {
@@ -14360,11 +14331,11 @@
       "loads": []
     },
     {
-      "id": 486,
+      "id": 485,
       "kind": "GenBlock",
       "name": "",
       "path": "picorv32_soc.g_lane[1].core.genblk2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk2",
       "def_range": {
@@ -14388,11 +14359,11 @@
       "loads": []
     },
     {
-      "id": 487,
+      "id": 486,
       "kind": "GenBlock",
       "name": "genblk2",
       "path": "picorv32_soc.g_lane[1].core.genblk2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk2",
       "def_range": {
@@ -14416,11 +14387,11 @@
       "loads": []
     },
     {
-      "id": 488,
+      "id": 487,
       "kind": "Var",
       "name": "mem_state",
       "path": "picorv32_soc.g_lane[1].core.mem_state",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_state",
       "def_range": {
@@ -14444,11 +14415,11 @@
       "loads": []
     },
     {
-      "id": 489,
+      "id": 488,
       "kind": "Var",
       "name": "mem_wordsize",
       "path": "picorv32_soc.g_lane[1].core.mem_wordsize",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_wordsize",
       "def_range": {
@@ -14472,11 +14443,11 @@
       "loads": []
     },
     {
-      "id": 490,
+      "id": 489,
       "kind": "Var",
       "name": "mem_rdata_word",
       "path": "picorv32_soc.g_lane[1].core.mem_rdata_word",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata_word",
       "def_range": {
@@ -14500,11 +14471,11 @@
       "loads": []
     },
     {
-      "id": 491,
+      "id": 490,
       "kind": "Var",
       "name": "mem_rdata_q",
       "path": "picorv32_soc.g_lane[1].core.mem_rdata_q",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata_q",
       "def_range": {
@@ -14528,11 +14499,11 @@
       "loads": []
     },
     {
-      "id": 492,
+      "id": 491,
       "kind": "Var",
       "name": "mem_do_prefetch",
       "path": "picorv32_soc.g_lane[1].core.mem_do_prefetch",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_do_prefetch",
       "def_range": {
@@ -14556,11 +14527,11 @@
       "loads": []
     },
     {
-      "id": 493,
+      "id": 492,
       "kind": "Var",
       "name": "mem_do_rinst",
       "path": "picorv32_soc.g_lane[1].core.mem_do_rinst",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_do_rinst",
       "def_range": {
@@ -14584,11 +14555,11 @@
       "loads": []
     },
     {
-      "id": 494,
+      "id": 493,
       "kind": "Var",
       "name": "mem_do_rdata",
       "path": "picorv32_soc.g_lane[1].core.mem_do_rdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_do_rdata",
       "def_range": {
@@ -14612,11 +14583,11 @@
       "loads": []
     },
     {
-      "id": 495,
+      "id": 494,
       "kind": "Var",
       "name": "mem_do_wdata",
       "path": "picorv32_soc.g_lane[1].core.mem_do_wdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_do_wdata",
       "def_range": {
@@ -14640,11 +14611,11 @@
       "loads": []
     },
     {
-      "id": 496,
+      "id": 495,
       "kind": "Net",
       "name": "mem_xfer",
       "path": "picorv32_soc.g_lane[1].core.mem_xfer",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_xfer",
       "def_range": {
@@ -14668,11 +14639,11 @@
       "loads": []
     },
     {
-      "id": 497,
+      "id": 496,
       "kind": "Var",
       "name": "mem_la_secondword",
       "path": "picorv32_soc.g_lane[1].core.mem_la_secondword",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_secondword",
       "def_range": {
@@ -14696,11 +14667,11 @@
       "loads": []
     },
     {
-      "id": 498,
+      "id": 497,
       "kind": "Var",
       "name": "mem_la_firstword_reg",
       "path": "picorv32_soc.g_lane[1].core.mem_la_firstword_reg",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_firstword_reg",
       "def_range": {
@@ -14724,11 +14695,11 @@
       "loads": []
     },
     {
-      "id": 499,
+      "id": 498,
       "kind": "Var",
       "name": "last_mem_valid",
       "path": "picorv32_soc.g_lane[1].core.last_mem_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.last_mem_valid",
       "def_range": {
@@ -14752,11 +14723,11 @@
       "loads": []
     },
     {
-      "id": 500,
+      "id": 499,
       "kind": "Net",
       "name": "mem_la_firstword",
       "path": "picorv32_soc.g_lane[1].core.mem_la_firstword",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_firstword",
       "def_range": {
@@ -14780,11 +14751,11 @@
       "loads": []
     },
     {
-      "id": 501,
+      "id": 500,
       "kind": "Net",
       "name": "mem_la_firstword_xfer",
       "path": "picorv32_soc.g_lane[1].core.mem_la_firstword_xfer",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_firstword_xfer",
       "def_range": {
@@ -14808,11 +14779,11 @@
       "loads": []
     },
     {
-      "id": 502,
+      "id": 501,
       "kind": "Var",
       "name": "prefetched_high_word",
       "path": "picorv32_soc.g_lane[1].core.prefetched_high_word",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.prefetched_high_word",
       "def_range": {
@@ -14836,11 +14807,11 @@
       "loads": []
     },
     {
-      "id": 503,
+      "id": 502,
       "kind": "Var",
       "name": "clear_prefetched_high_word",
       "path": "picorv32_soc.g_lane[1].core.clear_prefetched_high_word",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.clear_prefetched_high_word",
       "def_range": {
@@ -14864,11 +14835,11 @@
       "loads": []
     },
     {
-      "id": 504,
+      "id": 503,
       "kind": "Var",
       "name": "mem_16bit_buffer",
       "path": "picorv32_soc.g_lane[1].core.mem_16bit_buffer",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_16bit_buffer",
       "def_range": {
@@ -14892,11 +14863,11 @@
       "loads": []
     },
     {
-      "id": 505,
+      "id": 504,
       "kind": "Net",
       "name": "mem_rdata_latched_noshuffle",
       "path": "picorv32_soc.g_lane[1].core.mem_rdata_latched_noshuffle",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata_latched_noshuffle",
       "def_range": {
@@ -14920,11 +14891,11 @@
       "loads": []
     },
     {
-      "id": 506,
+      "id": 505,
       "kind": "Net",
       "name": "mem_rdata_latched",
       "path": "picorv32_soc.g_lane[1].core.mem_rdata_latched",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_rdata_latched",
       "def_range": {
@@ -14948,11 +14919,11 @@
       "loads": []
     },
     {
-      "id": 507,
+      "id": 506,
       "kind": "Net",
       "name": "mem_la_use_prefetched_high_word",
       "path": "picorv32_soc.g_lane[1].core.mem_la_use_prefetched_high_word",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_la_use_prefetched_high_word",
       "def_range": {
@@ -14976,11 +14947,11 @@
       "loads": []
     },
     {
-      "id": 508,
+      "id": 507,
       "kind": "Net",
       "name": "mem_busy",
       "path": "picorv32_soc.g_lane[1].core.mem_busy",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_busy",
       "def_range": {
@@ -15004,11 +14975,11 @@
       "loads": []
     },
     {
-      "id": 509,
+      "id": 508,
       "kind": "Net",
       "name": "mem_done",
       "path": "picorv32_soc.g_lane[1].core.mem_done",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.mem_done",
       "def_range": {
@@ -15032,11 +15003,11 @@
       "loads": []
     },
     {
-      "id": 510,
+      "id": 509,
       "kind": "Var",
       "name": "instr_lui",
       "path": "picorv32_soc.g_lane[1].core.instr_lui",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_lui",
       "def_range": {
@@ -15060,11 +15031,11 @@
       "loads": []
     },
     {
-      "id": 511,
+      "id": 510,
       "kind": "Var",
       "name": "instr_auipc",
       "path": "picorv32_soc.g_lane[1].core.instr_auipc",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_auipc",
       "def_range": {
@@ -15088,11 +15059,11 @@
       "loads": []
     },
     {
-      "id": 512,
+      "id": 511,
       "kind": "Var",
       "name": "instr_jal",
       "path": "picorv32_soc.g_lane[1].core.instr_jal",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_jal",
       "def_range": {
@@ -15116,11 +15087,11 @@
       "loads": []
     },
     {
-      "id": 513,
+      "id": 512,
       "kind": "Var",
       "name": "instr_jalr",
       "path": "picorv32_soc.g_lane[1].core.instr_jalr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_jalr",
       "def_range": {
@@ -15144,11 +15115,11 @@
       "loads": []
     },
     {
-      "id": 514,
+      "id": 513,
       "kind": "Var",
       "name": "instr_beq",
       "path": "picorv32_soc.g_lane[1].core.instr_beq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_beq",
       "def_range": {
@@ -15172,11 +15143,11 @@
       "loads": []
     },
     {
-      "id": 515,
+      "id": 514,
       "kind": "Var",
       "name": "instr_bne",
       "path": "picorv32_soc.g_lane[1].core.instr_bne",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_bne",
       "def_range": {
@@ -15200,11 +15171,11 @@
       "loads": []
     },
     {
-      "id": 516,
+      "id": 515,
       "kind": "Var",
       "name": "instr_blt",
       "path": "picorv32_soc.g_lane[1].core.instr_blt",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_blt",
       "def_range": {
@@ -15228,11 +15199,11 @@
       "loads": []
     },
     {
-      "id": 517,
+      "id": 516,
       "kind": "Var",
       "name": "instr_bge",
       "path": "picorv32_soc.g_lane[1].core.instr_bge",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_bge",
       "def_range": {
@@ -15256,11 +15227,11 @@
       "loads": []
     },
     {
-      "id": 518,
+      "id": 517,
       "kind": "Var",
       "name": "instr_bltu",
       "path": "picorv32_soc.g_lane[1].core.instr_bltu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_bltu",
       "def_range": {
@@ -15284,11 +15255,11 @@
       "loads": []
     },
     {
-      "id": 519,
+      "id": 518,
       "kind": "Var",
       "name": "instr_bgeu",
       "path": "picorv32_soc.g_lane[1].core.instr_bgeu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_bgeu",
       "def_range": {
@@ -15312,11 +15283,11 @@
       "loads": []
     },
     {
-      "id": 520,
+      "id": 519,
       "kind": "Var",
       "name": "instr_lb",
       "path": "picorv32_soc.g_lane[1].core.instr_lb",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_lb",
       "def_range": {
@@ -15340,11 +15311,11 @@
       "loads": []
     },
     {
-      "id": 521,
+      "id": 520,
       "kind": "Var",
       "name": "instr_lh",
       "path": "picorv32_soc.g_lane[1].core.instr_lh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_lh",
       "def_range": {
@@ -15368,11 +15339,11 @@
       "loads": []
     },
     {
-      "id": 522,
+      "id": 521,
       "kind": "Var",
       "name": "instr_lw",
       "path": "picorv32_soc.g_lane[1].core.instr_lw",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_lw",
       "def_range": {
@@ -15396,11 +15367,11 @@
       "loads": []
     },
     {
-      "id": 523,
+      "id": 522,
       "kind": "Var",
       "name": "instr_lbu",
       "path": "picorv32_soc.g_lane[1].core.instr_lbu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_lbu",
       "def_range": {
@@ -15424,11 +15395,11 @@
       "loads": []
     },
     {
-      "id": 524,
+      "id": 523,
       "kind": "Var",
       "name": "instr_lhu",
       "path": "picorv32_soc.g_lane[1].core.instr_lhu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_lhu",
       "def_range": {
@@ -15452,11 +15423,11 @@
       "loads": []
     },
     {
-      "id": 525,
+      "id": 524,
       "kind": "Var",
       "name": "instr_sb",
       "path": "picorv32_soc.g_lane[1].core.instr_sb",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sb",
       "def_range": {
@@ -15480,11 +15451,11 @@
       "loads": []
     },
     {
-      "id": 526,
+      "id": 525,
       "kind": "Var",
       "name": "instr_sh",
       "path": "picorv32_soc.g_lane[1].core.instr_sh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sh",
       "def_range": {
@@ -15508,11 +15479,11 @@
       "loads": []
     },
     {
-      "id": 527,
+      "id": 526,
       "kind": "Var",
       "name": "instr_sw",
       "path": "picorv32_soc.g_lane[1].core.instr_sw",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sw",
       "def_range": {
@@ -15536,11 +15507,11 @@
       "loads": []
     },
     {
-      "id": 528,
+      "id": 527,
       "kind": "Var",
       "name": "instr_addi",
       "path": "picorv32_soc.g_lane[1].core.instr_addi",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_addi",
       "def_range": {
@@ -15564,11 +15535,11 @@
       "loads": []
     },
     {
-      "id": 529,
+      "id": 528,
       "kind": "Var",
       "name": "instr_slti",
       "path": "picorv32_soc.g_lane[1].core.instr_slti",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_slti",
       "def_range": {
@@ -15592,11 +15563,11 @@
       "loads": []
     },
     {
-      "id": 530,
+      "id": 529,
       "kind": "Var",
       "name": "instr_sltiu",
       "path": "picorv32_soc.g_lane[1].core.instr_sltiu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sltiu",
       "def_range": {
@@ -15620,11 +15591,11 @@
       "loads": []
     },
     {
-      "id": 531,
+      "id": 530,
       "kind": "Var",
       "name": "instr_xori",
       "path": "picorv32_soc.g_lane[1].core.instr_xori",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_xori",
       "def_range": {
@@ -15648,11 +15619,11 @@
       "loads": []
     },
     {
-      "id": 532,
+      "id": 531,
       "kind": "Var",
       "name": "instr_ori",
       "path": "picorv32_soc.g_lane[1].core.instr_ori",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_ori",
       "def_range": {
@@ -15676,11 +15647,11 @@
       "loads": []
     },
     {
-      "id": 533,
+      "id": 532,
       "kind": "Var",
       "name": "instr_andi",
       "path": "picorv32_soc.g_lane[1].core.instr_andi",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_andi",
       "def_range": {
@@ -15704,11 +15675,11 @@
       "loads": []
     },
     {
-      "id": 534,
+      "id": 533,
       "kind": "Var",
       "name": "instr_slli",
       "path": "picorv32_soc.g_lane[1].core.instr_slli",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_slli",
       "def_range": {
@@ -15732,11 +15703,11 @@
       "loads": []
     },
     {
-      "id": 535,
+      "id": 534,
       "kind": "Var",
       "name": "instr_srli",
       "path": "picorv32_soc.g_lane[1].core.instr_srli",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_srli",
       "def_range": {
@@ -15760,11 +15731,11 @@
       "loads": []
     },
     {
-      "id": 536,
+      "id": 535,
       "kind": "Var",
       "name": "instr_srai",
       "path": "picorv32_soc.g_lane[1].core.instr_srai",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_srai",
       "def_range": {
@@ -15788,11 +15759,11 @@
       "loads": []
     },
     {
-      "id": 537,
+      "id": 536,
       "kind": "Var",
       "name": "instr_add",
       "path": "picorv32_soc.g_lane[1].core.instr_add",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_add",
       "def_range": {
@@ -15816,11 +15787,11 @@
       "loads": []
     },
     {
-      "id": 538,
+      "id": 537,
       "kind": "Var",
       "name": "instr_sub",
       "path": "picorv32_soc.g_lane[1].core.instr_sub",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sub",
       "def_range": {
@@ -15844,11 +15815,11 @@
       "loads": []
     },
     {
-      "id": 539,
+      "id": 538,
       "kind": "Var",
       "name": "instr_sll",
       "path": "picorv32_soc.g_lane[1].core.instr_sll",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sll",
       "def_range": {
@@ -15872,11 +15843,11 @@
       "loads": []
     },
     {
-      "id": 540,
+      "id": 539,
       "kind": "Var",
       "name": "instr_slt",
       "path": "picorv32_soc.g_lane[1].core.instr_slt",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_slt",
       "def_range": {
@@ -15900,11 +15871,11 @@
       "loads": []
     },
     {
-      "id": 541,
+      "id": 540,
       "kind": "Var",
       "name": "instr_sltu",
       "path": "picorv32_soc.g_lane[1].core.instr_sltu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sltu",
       "def_range": {
@@ -15928,11 +15899,11 @@
       "loads": []
     },
     {
-      "id": 542,
+      "id": 541,
       "kind": "Var",
       "name": "instr_xor",
       "path": "picorv32_soc.g_lane[1].core.instr_xor",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_xor",
       "def_range": {
@@ -15956,11 +15927,11 @@
       "loads": []
     },
     {
-      "id": 543,
+      "id": 542,
       "kind": "Var",
       "name": "instr_srl",
       "path": "picorv32_soc.g_lane[1].core.instr_srl",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_srl",
       "def_range": {
@@ -15984,11 +15955,11 @@
       "loads": []
     },
     {
-      "id": 544,
+      "id": 543,
       "kind": "Var",
       "name": "instr_sra",
       "path": "picorv32_soc.g_lane[1].core.instr_sra",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_sra",
       "def_range": {
@@ -16012,11 +15983,11 @@
       "loads": []
     },
     {
-      "id": 545,
+      "id": 544,
       "kind": "Var",
       "name": "instr_or",
       "path": "picorv32_soc.g_lane[1].core.instr_or",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_or",
       "def_range": {
@@ -16040,11 +16011,11 @@
       "loads": []
     },
     {
-      "id": 546,
+      "id": 545,
       "kind": "Var",
       "name": "instr_and",
       "path": "picorv32_soc.g_lane[1].core.instr_and",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_and",
       "def_range": {
@@ -16068,11 +16039,11 @@
       "loads": []
     },
     {
-      "id": 547,
+      "id": 546,
       "kind": "Var",
       "name": "instr_rdcycle",
       "path": "picorv32_soc.g_lane[1].core.instr_rdcycle",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_rdcycle",
       "def_range": {
@@ -16096,11 +16067,11 @@
       "loads": []
     },
     {
-      "id": 548,
+      "id": 547,
       "kind": "Var",
       "name": "instr_rdcycleh",
       "path": "picorv32_soc.g_lane[1].core.instr_rdcycleh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_rdcycleh",
       "def_range": {
@@ -16124,11 +16095,11 @@
       "loads": []
     },
     {
-      "id": 549,
+      "id": 548,
       "kind": "Var",
       "name": "instr_rdinstr",
       "path": "picorv32_soc.g_lane[1].core.instr_rdinstr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_rdinstr",
       "def_range": {
@@ -16152,11 +16123,11 @@
       "loads": []
     },
     {
-      "id": 550,
+      "id": 549,
       "kind": "Var",
       "name": "instr_rdinstrh",
       "path": "picorv32_soc.g_lane[1].core.instr_rdinstrh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_rdinstrh",
       "def_range": {
@@ -16180,11 +16151,11 @@
       "loads": []
     },
     {
-      "id": 551,
+      "id": 550,
       "kind": "Var",
       "name": "instr_ecall_ebreak",
       "path": "picorv32_soc.g_lane[1].core.instr_ecall_ebreak",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_ecall_ebreak",
       "def_range": {
@@ -16208,11 +16179,11 @@
       "loads": []
     },
     {
-      "id": 552,
+      "id": 551,
       "kind": "Var",
       "name": "instr_fence",
       "path": "picorv32_soc.g_lane[1].core.instr_fence",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_fence",
       "def_range": {
@@ -16236,11 +16207,11 @@
       "loads": []
     },
     {
-      "id": 553,
+      "id": 552,
       "kind": "Var",
       "name": "instr_getq",
       "path": "picorv32_soc.g_lane[1].core.instr_getq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_getq",
       "def_range": {
@@ -16264,11 +16235,11 @@
       "loads": []
     },
     {
-      "id": 554,
+      "id": 553,
       "kind": "Var",
       "name": "instr_setq",
       "path": "picorv32_soc.g_lane[1].core.instr_setq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_setq",
       "def_range": {
@@ -16292,11 +16263,11 @@
       "loads": []
     },
     {
-      "id": 555,
+      "id": 554,
       "kind": "Var",
       "name": "instr_retirq",
       "path": "picorv32_soc.g_lane[1].core.instr_retirq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_retirq",
       "def_range": {
@@ -16320,11 +16291,11 @@
       "loads": []
     },
     {
-      "id": 556,
+      "id": 555,
       "kind": "Var",
       "name": "instr_maskirq",
       "path": "picorv32_soc.g_lane[1].core.instr_maskirq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_maskirq",
       "def_range": {
@@ -16348,11 +16319,11 @@
       "loads": []
     },
     {
-      "id": 557,
+      "id": 556,
       "kind": "Var",
       "name": "instr_waitirq",
       "path": "picorv32_soc.g_lane[1].core.instr_waitirq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_waitirq",
       "def_range": {
@@ -16376,11 +16347,11 @@
       "loads": []
     },
     {
-      "id": 558,
+      "id": 557,
       "kind": "Var",
       "name": "instr_timer",
       "path": "picorv32_soc.g_lane[1].core.instr_timer",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_timer",
       "def_range": {
@@ -16404,11 +16375,11 @@
       "loads": []
     },
     {
-      "id": 559,
+      "id": 558,
       "kind": "Net",
       "name": "instr_trap",
       "path": "picorv32_soc.g_lane[1].core.instr_trap",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.instr_trap",
       "def_range": {
@@ -16432,11 +16403,11 @@
       "loads": []
     },
     {
-      "id": 560,
+      "id": 559,
       "kind": "Var",
       "name": "decoded_rd",
       "path": "picorv32_soc.g_lane[1].core.decoded_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoded_rd",
       "def_range": {
@@ -16460,11 +16431,11 @@
       "loads": []
     },
     {
-      "id": 561,
+      "id": 560,
       "kind": "Var",
       "name": "decoded_rs1",
       "path": "picorv32_soc.g_lane[1].core.decoded_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoded_rs1",
       "def_range": {
@@ -16488,11 +16459,11 @@
       "loads": []
     },
     {
-      "id": 562,
+      "id": 561,
       "kind": "Var",
       "name": "decoded_rs2",
       "path": "picorv32_soc.g_lane[1].core.decoded_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoded_rs2",
       "def_range": {
@@ -16516,11 +16487,11 @@
       "loads": []
     },
     {
-      "id": 563,
+      "id": 562,
       "kind": "Var",
       "name": "decoded_imm",
       "path": "picorv32_soc.g_lane[1].core.decoded_imm",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoded_imm",
       "def_range": {
@@ -16544,11 +16515,11 @@
       "loads": []
     },
     {
-      "id": 564,
+      "id": 563,
       "kind": "Var",
       "name": "decoded_imm_j",
       "path": "picorv32_soc.g_lane[1].core.decoded_imm_j",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoded_imm_j",
       "def_range": {
@@ -16572,11 +16543,11 @@
       "loads": []
     },
     {
-      "id": 565,
+      "id": 564,
       "kind": "Var",
       "name": "decoder_trigger",
       "path": "picorv32_soc.g_lane[1].core.decoder_trigger",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoder_trigger",
       "def_range": {
@@ -16600,11 +16571,11 @@
       "loads": []
     },
     {
-      "id": 566,
+      "id": 565,
       "kind": "Var",
       "name": "decoder_trigger_q",
       "path": "picorv32_soc.g_lane[1].core.decoder_trigger_q",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoder_trigger_q",
       "def_range": {
@@ -16628,11 +16599,11 @@
       "loads": []
     },
     {
-      "id": 567,
+      "id": 566,
       "kind": "Var",
       "name": "decoder_pseudo_trigger",
       "path": "picorv32_soc.g_lane[1].core.decoder_pseudo_trigger",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoder_pseudo_trigger",
       "def_range": {
@@ -16656,11 +16627,11 @@
       "loads": []
     },
     {
-      "id": 568,
+      "id": 567,
       "kind": "Var",
       "name": "decoder_pseudo_trigger_q",
       "path": "picorv32_soc.g_lane[1].core.decoder_pseudo_trigger_q",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoder_pseudo_trigger_q",
       "def_range": {
@@ -16684,11 +16655,11 @@
       "loads": []
     },
     {
-      "id": 569,
+      "id": 568,
       "kind": "Var",
       "name": "compressed_instr",
       "path": "picorv32_soc.g_lane[1].core.compressed_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.compressed_instr",
       "def_range": {
@@ -16712,11 +16683,11 @@
       "loads": []
     },
     {
-      "id": 570,
+      "id": 569,
       "kind": "Var",
       "name": "is_lui_auipc_jal",
       "path": "picorv32_soc.g_lane[1].core.is_lui_auipc_jal",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_lui_auipc_jal",
       "def_range": {
@@ -16740,11 +16711,11 @@
       "loads": []
     },
     {
-      "id": 571,
+      "id": 570,
       "kind": "Var",
       "name": "is_lb_lh_lw_lbu_lhu",
       "path": "picorv32_soc.g_lane[1].core.is_lb_lh_lw_lbu_lhu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_lb_lh_lw_lbu_lhu",
       "def_range": {
@@ -16768,11 +16739,11 @@
       "loads": []
     },
     {
-      "id": 572,
+      "id": 571,
       "kind": "Var",
       "name": "is_slli_srli_srai",
       "path": "picorv32_soc.g_lane[1].core.is_slli_srli_srai",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_slli_srli_srai",
       "def_range": {
@@ -16796,11 +16767,11 @@
       "loads": []
     },
     {
-      "id": 573,
+      "id": 572,
       "kind": "Var",
       "name": "is_jalr_addi_slti_sltiu_xori_ori_andi",
       "path": "picorv32_soc.g_lane[1].core.is_jalr_addi_slti_sltiu_xori_ori_andi",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_jalr_addi_slti_sltiu_xori_ori_andi",
       "def_range": {
@@ -16824,11 +16795,11 @@
       "loads": []
     },
     {
-      "id": 574,
+      "id": 573,
       "kind": "Var",
       "name": "is_sb_sh_sw",
       "path": "picorv32_soc.g_lane[1].core.is_sb_sh_sw",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_sb_sh_sw",
       "def_range": {
@@ -16852,11 +16823,11 @@
       "loads": []
     },
     {
-      "id": 575,
+      "id": 574,
       "kind": "Var",
       "name": "is_sll_srl_sra",
       "path": "picorv32_soc.g_lane[1].core.is_sll_srl_sra",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_sll_srl_sra",
       "def_range": {
@@ -16880,11 +16851,11 @@
       "loads": []
     },
     {
-      "id": 576,
+      "id": 575,
       "kind": "Var",
       "name": "is_lui_auipc_jal_jalr_addi_add_sub",
       "path": "picorv32_soc.g_lane[1].core.is_lui_auipc_jal_jalr_addi_add_sub",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_lui_auipc_jal_jalr_addi_add_sub",
       "def_range": {
@@ -16908,11 +16879,11 @@
       "loads": []
     },
     {
-      "id": 577,
+      "id": 576,
       "kind": "Var",
       "name": "is_slti_blt_slt",
       "path": "picorv32_soc.g_lane[1].core.is_slti_blt_slt",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_slti_blt_slt",
       "def_range": {
@@ -16936,11 +16907,11 @@
       "loads": []
     },
     {
-      "id": 578,
+      "id": 577,
       "kind": "Var",
       "name": "is_sltiu_bltu_sltu",
       "path": "picorv32_soc.g_lane[1].core.is_sltiu_bltu_sltu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_sltiu_bltu_sltu",
       "def_range": {
@@ -16964,11 +16935,11 @@
       "loads": []
     },
     {
-      "id": 579,
+      "id": 578,
       "kind": "Var",
       "name": "is_beq_bne_blt_bge_bltu_bgeu",
       "path": "picorv32_soc.g_lane[1].core.is_beq_bne_blt_bge_bltu_bgeu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_beq_bne_blt_bge_bltu_bgeu",
       "def_range": {
@@ -16992,11 +16963,11 @@
       "loads": []
     },
     {
-      "id": 580,
+      "id": 579,
       "kind": "Var",
       "name": "is_lbu_lhu_lw",
       "path": "picorv32_soc.g_lane[1].core.is_lbu_lhu_lw",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_lbu_lhu_lw",
       "def_range": {
@@ -17020,11 +16991,11 @@
       "loads": []
     },
     {
-      "id": 581,
+      "id": 580,
       "kind": "Var",
       "name": "is_alu_reg_imm",
       "path": "picorv32_soc.g_lane[1].core.is_alu_reg_imm",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_alu_reg_imm",
       "def_range": {
@@ -17048,11 +17019,11 @@
       "loads": []
     },
     {
-      "id": 582,
+      "id": 581,
       "kind": "Var",
       "name": "is_alu_reg_reg",
       "path": "picorv32_soc.g_lane[1].core.is_alu_reg_reg",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_alu_reg_reg",
       "def_range": {
@@ -17076,11 +17047,11 @@
       "loads": []
     },
     {
-      "id": 583,
+      "id": 582,
       "kind": "Var",
       "name": "is_compare",
       "path": "picorv32_soc.g_lane[1].core.is_compare",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_compare",
       "def_range": {
@@ -17104,11 +17075,11 @@
       "loads": []
     },
     {
-      "id": 584,
+      "id": 583,
       "kind": "Net",
       "name": "is_rdcycle_rdcycleh_rdinstr_rdinstrh",
       "path": "picorv32_soc.g_lane[1].core.is_rdcycle_rdcycleh_rdinstr_rdinstrh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.is_rdcycle_rdcycleh_rdinstr_rdinstrh",
       "def_range": {
@@ -17132,11 +17103,11 @@
       "loads": []
     },
     {
-      "id": 585,
+      "id": 584,
       "kind": "Var",
       "name": "new_ascii_instr",
       "path": "picorv32_soc.g_lane[1].core.new_ascii_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.new_ascii_instr",
       "def_range": {
@@ -17160,11 +17131,11 @@
       "loads": []
     },
     {
-      "id": 586,
+      "id": 585,
       "kind": "Var",
       "name": "dbg_ascii_instr",
       "path": "picorv32_soc.g_lane[1].core.dbg_ascii_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_ascii_instr",
       "def_range": {
@@ -17188,11 +17159,11 @@
       "loads": []
     },
     {
-      "id": 587,
+      "id": 586,
       "kind": "Var",
       "name": "dbg_insn_imm",
       "path": "picorv32_soc.g_lane[1].core.dbg_insn_imm",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_insn_imm",
       "def_range": {
@@ -17216,11 +17187,11 @@
       "loads": []
     },
     {
-      "id": 588,
+      "id": 587,
       "kind": "Var",
       "name": "dbg_insn_rs1",
       "path": "picorv32_soc.g_lane[1].core.dbg_insn_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_insn_rs1",
       "def_range": {
@@ -17244,11 +17215,11 @@
       "loads": []
     },
     {
-      "id": 589,
+      "id": 588,
       "kind": "Var",
       "name": "dbg_insn_rs2",
       "path": "picorv32_soc.g_lane[1].core.dbg_insn_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_insn_rs2",
       "def_range": {
@@ -17272,11 +17243,11 @@
       "loads": []
     },
     {
-      "id": 590,
+      "id": 589,
       "kind": "Var",
       "name": "dbg_insn_rd",
       "path": "picorv32_soc.g_lane[1].core.dbg_insn_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_insn_rd",
       "def_range": {
@@ -17300,11 +17271,11 @@
       "loads": []
     },
     {
-      "id": 591,
+      "id": 590,
       "kind": "Var",
       "name": "dbg_rs1val",
       "path": "picorv32_soc.g_lane[1].core.dbg_rs1val",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_rs1val",
       "def_range": {
@@ -17328,11 +17299,11 @@
       "loads": []
     },
     {
-      "id": 592,
+      "id": 591,
       "kind": "Var",
       "name": "dbg_rs2val",
       "path": "picorv32_soc.g_lane[1].core.dbg_rs2val",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_rs2val",
       "def_range": {
@@ -17356,11 +17327,11 @@
       "loads": []
     },
     {
-      "id": 593,
+      "id": 592,
       "kind": "Var",
       "name": "dbg_rs1val_valid",
       "path": "picorv32_soc.g_lane[1].core.dbg_rs1val_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_rs1val_valid",
       "def_range": {
@@ -17384,11 +17355,11 @@
       "loads": []
     },
     {
-      "id": 594,
+      "id": 593,
       "kind": "Var",
       "name": "dbg_rs2val_valid",
       "path": "picorv32_soc.g_lane[1].core.dbg_rs2val_valid",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_rs2val_valid",
       "def_range": {
@@ -17412,11 +17383,11 @@
       "loads": []
     },
     {
-      "id": 595,
+      "id": 594,
       "kind": "Var",
       "name": "q_ascii_instr",
       "path": "picorv32_soc.g_lane[1].core.q_ascii_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.q_ascii_instr",
       "def_range": {
@@ -17440,11 +17411,11 @@
       "loads": []
     },
     {
-      "id": 596,
+      "id": 595,
       "kind": "Var",
       "name": "q_insn_imm",
       "path": "picorv32_soc.g_lane[1].core.q_insn_imm",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.q_insn_imm",
       "def_range": {
@@ -17468,11 +17439,11 @@
       "loads": []
     },
     {
-      "id": 597,
+      "id": 596,
       "kind": "Var",
       "name": "q_insn_opcode",
       "path": "picorv32_soc.g_lane[1].core.q_insn_opcode",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.q_insn_opcode",
       "def_range": {
@@ -17496,11 +17467,11 @@
       "loads": []
     },
     {
-      "id": 598,
+      "id": 597,
       "kind": "Var",
       "name": "q_insn_rs1",
       "path": "picorv32_soc.g_lane[1].core.q_insn_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.q_insn_rs1",
       "def_range": {
@@ -17524,11 +17495,11 @@
       "loads": []
     },
     {
-      "id": 599,
+      "id": 598,
       "kind": "Var",
       "name": "q_insn_rs2",
       "path": "picorv32_soc.g_lane[1].core.q_insn_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.q_insn_rs2",
       "def_range": {
@@ -17552,11 +17523,11 @@
       "loads": []
     },
     {
-      "id": 600,
+      "id": 599,
       "kind": "Var",
       "name": "q_insn_rd",
       "path": "picorv32_soc.g_lane[1].core.q_insn_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.q_insn_rd",
       "def_range": {
@@ -17580,11 +17551,11 @@
       "loads": []
     },
     {
-      "id": 601,
+      "id": 600,
       "kind": "Var",
       "name": "dbg_next",
       "path": "picorv32_soc.g_lane[1].core.dbg_next",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_next",
       "def_range": {
@@ -17608,11 +17579,11 @@
       "loads": []
     },
     {
-      "id": 602,
+      "id": 601,
       "kind": "Net",
       "name": "launch_next_insn",
       "path": "picorv32_soc.g_lane[1].core.launch_next_insn",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.launch_next_insn",
       "def_range": {
@@ -17636,11 +17607,11 @@
       "loads": []
     },
     {
-      "id": 603,
+      "id": 602,
       "kind": "Var",
       "name": "dbg_valid_insn",
       "path": "picorv32_soc.g_lane[1].core.dbg_valid_insn",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_valid_insn",
       "def_range": {
@@ -17664,11 +17635,11 @@
       "loads": []
     },
     {
-      "id": 604,
+      "id": 603,
       "kind": "Var",
       "name": "cached_ascii_instr",
       "path": "picorv32_soc.g_lane[1].core.cached_ascii_instr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cached_ascii_instr",
       "def_range": {
@@ -17692,11 +17663,11 @@
       "loads": []
     },
     {
-      "id": 605,
+      "id": 604,
       "kind": "Var",
       "name": "cached_insn_imm",
       "path": "picorv32_soc.g_lane[1].core.cached_insn_imm",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cached_insn_imm",
       "def_range": {
@@ -17720,11 +17691,11 @@
       "loads": []
     },
     {
-      "id": 606,
+      "id": 605,
       "kind": "Var",
       "name": "cached_insn_opcode",
       "path": "picorv32_soc.g_lane[1].core.cached_insn_opcode",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cached_insn_opcode",
       "def_range": {
@@ -17748,11 +17719,11 @@
       "loads": []
     },
     {
-      "id": 607,
+      "id": 606,
       "kind": "Var",
       "name": "cached_insn_rs1",
       "path": "picorv32_soc.g_lane[1].core.cached_insn_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cached_insn_rs1",
       "def_range": {
@@ -17776,11 +17747,11 @@
       "loads": []
     },
     {
-      "id": 608,
+      "id": 607,
       "kind": "Var",
       "name": "cached_insn_rs2",
       "path": "picorv32_soc.g_lane[1].core.cached_insn_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cached_insn_rs2",
       "def_range": {
@@ -17804,11 +17775,11 @@
       "loads": []
     },
     {
-      "id": 609,
+      "id": 608,
       "kind": "Var",
       "name": "cached_insn_rd",
       "path": "picorv32_soc.g_lane[1].core.cached_insn_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cached_insn_rd",
       "def_range": {
@@ -17832,11 +17803,11 @@
       "loads": []
     },
     {
-      "id": 610,
+      "id": 609,
       "kind": "Param",
       "name": "cpu_state_trap",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_trap",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_trap",
       "def_range": {
@@ -17860,11 +17831,11 @@
       "loads": []
     },
     {
-      "id": 611,
+      "id": 610,
       "kind": "Param",
       "name": "cpu_state_fetch",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_fetch",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_fetch",
       "def_range": {
@@ -17888,11 +17859,11 @@
       "loads": []
     },
     {
-      "id": 612,
+      "id": 611,
       "kind": "Param",
       "name": "cpu_state_ld_rs1",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_ld_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_ld_rs1",
       "def_range": {
@@ -17916,11 +17887,11 @@
       "loads": []
     },
     {
-      "id": 613,
+      "id": 612,
       "kind": "Param",
       "name": "cpu_state_ld_rs2",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_ld_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_ld_rs2",
       "def_range": {
@@ -17944,11 +17915,11 @@
       "loads": []
     },
     {
-      "id": 614,
+      "id": 613,
       "kind": "Param",
       "name": "cpu_state_exec",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_exec",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_exec",
       "def_range": {
@@ -17972,11 +17943,11 @@
       "loads": []
     },
     {
-      "id": 615,
+      "id": 614,
       "kind": "Param",
       "name": "cpu_state_shift",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_shift",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_shift",
       "def_range": {
@@ -18000,11 +17971,11 @@
       "loads": []
     },
     {
-      "id": 616,
+      "id": 615,
       "kind": "Param",
       "name": "cpu_state_stmem",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_stmem",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_stmem",
       "def_range": {
@@ -18028,11 +17999,11 @@
       "loads": []
     },
     {
-      "id": 617,
+      "id": 616,
       "kind": "Param",
       "name": "cpu_state_ldmem",
       "path": "picorv32_soc.g_lane[1].core.cpu_state_ldmem",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state_ldmem",
       "def_range": {
@@ -18056,11 +18027,11 @@
       "loads": []
     },
     {
-      "id": 618,
+      "id": 617,
       "kind": "Var",
       "name": "cpu_state",
       "path": "picorv32_soc.g_lane[1].core.cpu_state",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpu_state",
       "def_range": {
@@ -18084,11 +18055,11 @@
       "loads": []
     },
     {
-      "id": 619,
+      "id": 618,
       "kind": "Var",
       "name": "irq_state",
       "path": "picorv32_soc.g_lane[1].core.irq_state",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.irq_state",
       "def_range": {
@@ -18112,11 +18083,11 @@
       "loads": []
     },
     {
-      "id": 620,
+      "id": 619,
       "kind": "Var",
       "name": "dbg_ascii_state",
       "path": "picorv32_soc.g_lane[1].core.dbg_ascii_state",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.dbg_ascii_state",
       "def_range": {
@@ -18140,11 +18111,11 @@
       "loads": []
     },
     {
-      "id": 621,
+      "id": 620,
       "kind": "Var",
       "name": "set_mem_do_rinst",
       "path": "picorv32_soc.g_lane[1].core.set_mem_do_rinst",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.set_mem_do_rinst",
       "def_range": {
@@ -18168,11 +18139,11 @@
       "loads": []
     },
     {
-      "id": 622,
+      "id": 621,
       "kind": "Var",
       "name": "set_mem_do_rdata",
       "path": "picorv32_soc.g_lane[1].core.set_mem_do_rdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.set_mem_do_rdata",
       "def_range": {
@@ -18196,11 +18167,11 @@
       "loads": []
     },
     {
-      "id": 623,
+      "id": 622,
       "kind": "Var",
       "name": "set_mem_do_wdata",
       "path": "picorv32_soc.g_lane[1].core.set_mem_do_wdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.set_mem_do_wdata",
       "def_range": {
@@ -18224,11 +18195,11 @@
       "loads": []
     },
     {
-      "id": 624,
+      "id": 623,
       "kind": "Var",
       "name": "latched_store",
       "path": "picorv32_soc.g_lane[1].core.latched_store",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_store",
       "def_range": {
@@ -18252,11 +18223,11 @@
       "loads": []
     },
     {
-      "id": 625,
+      "id": 624,
       "kind": "Var",
       "name": "latched_stalu",
       "path": "picorv32_soc.g_lane[1].core.latched_stalu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_stalu",
       "def_range": {
@@ -18280,11 +18251,11 @@
       "loads": []
     },
     {
-      "id": 626,
+      "id": 625,
       "kind": "Var",
       "name": "latched_branch",
       "path": "picorv32_soc.g_lane[1].core.latched_branch",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_branch",
       "def_range": {
@@ -18308,11 +18279,11 @@
       "loads": []
     },
     {
-      "id": 627,
+      "id": 626,
       "kind": "Var",
       "name": "latched_compr",
       "path": "picorv32_soc.g_lane[1].core.latched_compr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_compr",
       "def_range": {
@@ -18336,11 +18307,11 @@
       "loads": []
     },
     {
-      "id": 628,
+      "id": 627,
       "kind": "Var",
       "name": "latched_trace",
       "path": "picorv32_soc.g_lane[1].core.latched_trace",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_trace",
       "def_range": {
@@ -18364,11 +18335,11 @@
       "loads": []
     },
     {
-      "id": 629,
+      "id": 628,
       "kind": "Var",
       "name": "latched_is_lu",
       "path": "picorv32_soc.g_lane[1].core.latched_is_lu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_is_lu",
       "def_range": {
@@ -18392,11 +18363,11 @@
       "loads": []
     },
     {
-      "id": 630,
+      "id": 629,
       "kind": "Var",
       "name": "latched_is_lh",
       "path": "picorv32_soc.g_lane[1].core.latched_is_lh",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_is_lh",
       "def_range": {
@@ -18420,11 +18391,11 @@
       "loads": []
     },
     {
-      "id": 631,
+      "id": 630,
       "kind": "Var",
       "name": "latched_is_lb",
       "path": "picorv32_soc.g_lane[1].core.latched_is_lb",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_is_lb",
       "def_range": {
@@ -18448,11 +18419,11 @@
       "loads": []
     },
     {
-      "id": 632,
+      "id": 631,
       "kind": "Var",
       "name": "latched_rd",
       "path": "picorv32_soc.g_lane[1].core.latched_rd",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.latched_rd",
       "def_range": {
@@ -18476,11 +18447,11 @@
       "loads": []
     },
     {
-      "id": 633,
+      "id": 632,
       "kind": "Var",
       "name": "current_pc",
       "path": "picorv32_soc.g_lane[1].core.current_pc",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.current_pc",
       "def_range": {
@@ -18504,11 +18475,11 @@
       "loads": []
     },
     {
-      "id": 634,
+      "id": 633,
       "kind": "Var",
       "name": "pcpi_timeout_counter",
       "path": "picorv32_soc.g_lane[1].core.pcpi_timeout_counter",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_timeout_counter",
       "def_range": {
@@ -18532,11 +18503,11 @@
       "loads": []
     },
     {
-      "id": 635,
+      "id": 634,
       "kind": "Var",
       "name": "pcpi_timeout",
       "path": "picorv32_soc.g_lane[1].core.pcpi_timeout",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.pcpi_timeout",
       "def_range": {
@@ -18560,11 +18531,11 @@
       "loads": []
     },
     {
-      "id": 636,
+      "id": 635,
       "kind": "Var",
       "name": "next_irq_pending",
       "path": "picorv32_soc.g_lane[1].core.next_irq_pending",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.next_irq_pending",
       "def_range": {
@@ -18588,11 +18559,11 @@
       "loads": []
     },
     {
-      "id": 637,
+      "id": 636,
       "kind": "Var",
       "name": "do_waitirq",
       "path": "picorv32_soc.g_lane[1].core.do_waitirq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.do_waitirq",
       "def_range": {
@@ -18616,11 +18587,11 @@
       "loads": []
     },
     {
-      "id": 638,
+      "id": 637,
       "kind": "Var",
       "name": "alu_out",
       "path": "picorv32_soc.g_lane[1].core.alu_out",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_out",
       "def_range": {
@@ -18644,11 +18615,11 @@
       "loads": []
     },
     {
-      "id": 639,
+      "id": 638,
       "kind": "Var",
       "name": "alu_out_q",
       "path": "picorv32_soc.g_lane[1].core.alu_out_q",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_out_q",
       "def_range": {
@@ -18672,11 +18643,11 @@
       "loads": []
     },
     {
-      "id": 640,
+      "id": 639,
       "kind": "Var",
       "name": "alu_out_0",
       "path": "picorv32_soc.g_lane[1].core.alu_out_0",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_out_0",
       "def_range": {
@@ -18700,11 +18671,11 @@
       "loads": []
     },
     {
-      "id": 641,
+      "id": 640,
       "kind": "Var",
       "name": "alu_out_0_q",
       "path": "picorv32_soc.g_lane[1].core.alu_out_0_q",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_out_0_q",
       "def_range": {
@@ -18728,11 +18699,11 @@
       "loads": []
     },
     {
-      "id": 642,
+      "id": 641,
       "kind": "Var",
       "name": "alu_wait",
       "path": "picorv32_soc.g_lane[1].core.alu_wait",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_wait",
       "def_range": {
@@ -18756,11 +18727,11 @@
       "loads": []
     },
     {
-      "id": 643,
+      "id": 642,
       "kind": "Var",
       "name": "alu_wait_2",
       "path": "picorv32_soc.g_lane[1].core.alu_wait_2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_wait_2",
       "def_range": {
@@ -18784,11 +18755,11 @@
       "loads": []
     },
     {
-      "id": 644,
+      "id": 643,
       "kind": "Var",
       "name": "alu_add_sub",
       "path": "picorv32_soc.g_lane[1].core.alu_add_sub",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_add_sub",
       "def_range": {
@@ -18812,11 +18783,11 @@
       "loads": []
     },
     {
-      "id": 645,
+      "id": 644,
       "kind": "Var",
       "name": "alu_shl",
       "path": "picorv32_soc.g_lane[1].core.alu_shl",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_shl",
       "def_range": {
@@ -18840,11 +18811,11 @@
       "loads": []
     },
     {
-      "id": 646,
+      "id": 645,
       "kind": "Var",
       "name": "alu_shr",
       "path": "picorv32_soc.g_lane[1].core.alu_shr",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_shr",
       "def_range": {
@@ -18868,11 +18839,11 @@
       "loads": []
     },
     {
-      "id": 647,
+      "id": 646,
       "kind": "Var",
       "name": "alu_eq",
       "path": "picorv32_soc.g_lane[1].core.alu_eq",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_eq",
       "def_range": {
@@ -18896,11 +18867,11 @@
       "loads": []
     },
     {
-      "id": 648,
+      "id": 647,
       "kind": "Var",
       "name": "alu_ltu",
       "path": "picorv32_soc.g_lane[1].core.alu_ltu",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_ltu",
       "def_range": {
@@ -18924,11 +18895,11 @@
       "loads": []
     },
     {
-      "id": 649,
+      "id": 648,
       "kind": "Var",
       "name": "alu_lts",
       "path": "picorv32_soc.g_lane[1].core.alu_lts",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.alu_lts",
       "def_range": {
@@ -18952,11 +18923,11 @@
       "loads": []
     },
     {
-      "id": 650,
+      "id": 649,
       "kind": "GenBlock",
       "name": "",
       "path": "picorv32_soc.g_lane[1].core.genblk3",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk3",
       "def_range": {
@@ -18980,11 +18951,11 @@
       "loads": []
     },
     {
-      "id": 651,
+      "id": 650,
       "kind": "GenBlock",
       "name": "genblk3",
       "path": "picorv32_soc.g_lane[1].core.genblk3",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.genblk3",
       "def_range": {
@@ -19008,11 +18979,11 @@
       "loads": []
     },
     {
-      "id": 652,
+      "id": 651,
       "kind": "Var",
       "name": "clear_prefetched_high_word_q",
       "path": "picorv32_soc.g_lane[1].core.clear_prefetched_high_word_q",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.clear_prefetched_high_word_q",
       "def_range": {
@@ -19036,11 +19007,11 @@
       "loads": []
     },
     {
-      "id": 653,
+      "id": 652,
       "kind": "Var",
       "name": "cpuregs_write",
       "path": "picorv32_soc.g_lane[1].core.cpuregs_write",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpuregs_write",
       "def_range": {
@@ -19064,11 +19035,11 @@
       "loads": []
     },
     {
-      "id": 654,
+      "id": 653,
       "kind": "Var",
       "name": "cpuregs_wrdata",
       "path": "picorv32_soc.g_lane[1].core.cpuregs_wrdata",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpuregs_wrdata",
       "def_range": {
@@ -19092,11 +19063,11 @@
       "loads": []
     },
     {
-      "id": 655,
+      "id": 654,
       "kind": "Var",
       "name": "cpuregs_rs1",
       "path": "picorv32_soc.g_lane[1].core.cpuregs_rs1",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpuregs_rs1",
       "def_range": {
@@ -19120,11 +19091,11 @@
       "loads": []
     },
     {
-      "id": 656,
+      "id": 655,
       "kind": "Var",
       "name": "cpuregs_rs2",
       "path": "picorv32_soc.g_lane[1].core.cpuregs_rs2",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.cpuregs_rs2",
       "def_range": {
@@ -19148,11 +19119,11 @@
       "loads": []
     },
     {
-      "id": 657,
+      "id": 656,
       "kind": "Var",
       "name": "decoded_rs",
       "path": "picorv32_soc.g_lane[1].core.decoded_rs",
-      "parent": 354,
+      "parent": 353,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].core.decoded_rs",
       "def_range": {
@@ -19176,20 +19147,19 @@
       "loads": []
     },
     {
-      "id": 658,
+      "id": 657,
       "kind": "Instance",
       "name": "memory",
       "path": "picorv32_soc.g_lane[1].memory",
-      "parent": 339,
+      "parent": 338,
       "children": [
+        658,
         659,
         660,
         661,
         662,
         663,
-        664,
-        665,
-        666
+        664
       ],
       "symbol_key": "picorv32_soc.g_lane[1].memory",
       "def_range": {
@@ -19200,9 +19170,9 @@
           "offset": 227
         },
         "end": {
-          "line": 39,
+          "line": 42,
           "col": 20,
-          "offset": 1246
+          "offset": 1483
         }
       },
       "inst_range": {
@@ -19225,11 +19195,11 @@
       "loads": []
     },
     {
-      "id": 659,
+      "id": 658,
       "kind": "Param",
       "name": "WORDS",
       "path": "picorv32_soc.g_lane[1].memory.WORDS",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.WORDS",
       "def_range": {
@@ -19253,11 +19223,11 @@
       "loads": []
     },
     {
-      "id": 660,
+      "id": 659,
       "kind": "Param",
       "name": "INIT_FILE",
       "path": "picorv32_soc.g_lane[1].memory.INIT_FILE",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.INIT_FILE",
       "def_range": {
@@ -19281,11 +19251,11 @@
       "loads": []
     },
     {
-      "id": 661,
+      "id": 660,
       "kind": "Port",
       "name": "resetn",
       "path": "picorv32_soc.g_lane[1].memory.resetn",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.resetn",
       "def_range": {
@@ -19309,11 +19279,11 @@
       "loads": []
     },
     {
-      "id": 662,
+      "id": 661,
       "kind": "Var",
       "name": "resetn",
       "path": "picorv32_soc.g_lane[1].memory.resetn",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.resetn",
       "def_range": {
@@ -19337,11 +19307,11 @@
       "loads": []
     },
     {
-      "id": 663,
+      "id": 662,
       "kind": "Param",
       "name": "AW",
       "path": "picorv32_soc.g_lane[1].memory.AW",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.AW",
       "def_range": {
@@ -19365,11 +19335,11 @@
       "loads": []
     },
     {
-      "id": 664,
+      "id": 663,
       "kind": "Var",
       "name": "ram",
       "path": "picorv32_soc.g_lane[1].memory.ram",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.ram",
       "def_range": {
@@ -19393,11 +19363,11 @@
       "loads": []
     },
     {
-      "id": 665,
+      "id": 664,
       "kind": "Net",
       "name": "word_idx",
       "path": "picorv32_soc.g_lane[1].memory.word_idx",
-      "parent": 658,
+      "parent": 657,
       "children": [],
       "symbol_key": "picorv32_soc.g_lane[1].memory.word_idx",
       "def_range": {
@@ -19415,34 +19385,6 @@
       },
       "inst_range": null,
       "type": "logic[8:0]",
-      "dir": null,
-      "const": null,
-      "drivers": [],
-      "loads": []
-    },
-    {
-      "id": 666,
-      "kind": "FF",
-      "name": "FF",
-      "path": "picorv32_soc.g_lane[1].memory.$ff666",
-      "parent": 658,
-      "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].memory.$ff666",
-      "def_range": {
-        "file": 3,
-        "start": {
-          "line": 27,
-          "col": 3,
-          "offset": 765
-        },
-        "end": {
-          "line": 38,
-          "col": 6,
-          "offset": 1226
-        }
-      },
-      "inst_range": null,
-      "type": null,
       "dir": null,
       "const": null,
       "drivers": [],
@@ -19554,141 +19496,105 @@
     },
     {
       "id": 17,
-      "port": 338,
-      "endpoint": 334,
+      "port": 342,
+      "endpoint": 5,
       "dir": "in"
     },
     {
       "id": 18,
-      "port": 338,
-      "endpoint": 336,
-      "dir": "out"
+      "port": 352,
+      "endpoint": 5,
+      "dir": "in"
     },
     {
       "id": 19,
-      "port": 338,
-      "endpoint": 337,
-      "dir": "out"
+      "port": 352,
+      "endpoint": 7,
+      "dir": "in"
     },
     {
       "id": 20,
-      "port": 343,
-      "endpoint": 5,
+      "port": 352,
+      "endpoint": 9,
       "dir": "in"
     },
     {
       "id": 21,
-      "port": 353,
-      "endpoint": 5,
-      "dir": "in"
+      "port": 352,
+      "endpoint": 351,
+      "dir": "out"
     },
     {
       "id": 22,
-      "port": 353,
-      "endpoint": 7,
+      "port": 380,
+      "endpoint": 5,
       "dir": "in"
     },
     {
       "id": 23,
-      "port": 353,
-      "endpoint": 9,
+      "port": 382,
+      "endpoint": 7,
       "dir": "in"
     },
     {
       "id": 24,
-      "port": 353,
-      "endpoint": 352,
-      "dir": "out"
-    },
-    {
-      "id": 25,
-      "port": 381,
-      "endpoint": 5,
-      "dir": "in"
-    },
-    {
-      "id": 26,
-      "port": 383,
-      "endpoint": 7,
-      "dir": "in"
-    },
-    {
-      "id": 27,
-      "port": 385,
+      "port": 384,
       "endpoint": 9,
       "dir": "out"
     },
     {
-      "id": 28,
-      "port": 387,
+      "id": 25,
+      "port": 386,
+      "endpoint": 344,
+      "dir": "out"
+    },
+    {
+      "id": 26,
+      "port": 388,
       "endpoint": 345,
       "dir": "out"
     },
     {
-      "id": 29,
-      "port": 389,
+      "id": 27,
+      "port": 390,
       "endpoint": 346,
-      "dir": "out"
-    },
-    {
-      "id": 30,
-      "port": 391,
-      "endpoint": 347,
       "dir": "in"
     },
     {
-      "id": 31,
-      "port": 393,
+      "id": 28,
+      "port": 392,
+      "endpoint": 347,
+      "dir": "out"
+    },
+    {
+      "id": 29,
+      "port": 394,
       "endpoint": 348,
       "dir": "out"
     },
     {
-      "id": 32,
-      "port": 395,
+      "id": 30,
+      "port": 396,
       "endpoint": 349,
       "dir": "out"
     },
     {
-      "id": 33,
-      "port": 397,
+      "id": 31,
+      "port": 398,
       "endpoint": 350,
-      "dir": "out"
-    },
-    {
-      "id": 34,
-      "port": 399,
-      "endpoint": 351,
       "dir": "in"
     },
     {
-      "id": 35,
-      "port": 658,
-      "endpoint": 341,
+      "id": 32,
+      "port": 657,
+      "endpoint": 340,
       "dir": "inout"
     },
     {
-      "id": 36,
-      "port": 661,
+      "id": 33,
+      "port": 660,
       "endpoint": 7,
       "dir": "in"
-    },
-    {
-      "id": 37,
-      "port": 666,
-      "endpoint": 662,
-      "dir": "in"
-    },
-    {
-      "id": 38,
-      "port": 666,
-      "endpoint": 664,
-      "dir": "out"
-    },
-    {
-      "id": 39,
-      "port": 666,
-      "endpoint": 665,
-      "dir": "out"
     }
   ]
 }

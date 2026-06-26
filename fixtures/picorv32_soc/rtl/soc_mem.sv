@@ -24,7 +24,10 @@ module soc_mem
   // which keeps the firmware's data writes inside the array.
   wire [AW-1:0] word_idx = bus.addr[AW+1:2];
 
-  always_ff @(posedge bus.clk) begin
+  // A plain `always @(posedge)` (not `always_ff`): the array is also initialized
+  // by `$readmemh` in the initial block above, and strict tools (e.g. VCS) reject
+  // a variable written by `always_ff` having any other procedural driver.
+  always @(posedge bus.clk) begin
     bus.ready <= 1'b0;
     bus.rdata <= '0;
     if (resetn && bus.valid && !bus.ready) begin
