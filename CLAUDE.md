@@ -155,6 +155,27 @@ See `docs/fixtures.md` for the two-tier policy and pinned tool versions.
 - `.github/workflows/app.yml` — cross-platform Tauri build (Ubuntu + Windows matrix). Triggers when `app/` or `core/crates/` change.
 - Nightly — Verilator trace regeneration.
 
+## Workflow gates
+
+- **Review before commit** — never commit on the user's behalf without an explicit
+  review pass first. Before any `git commit`, surface the local changes for the user
+  to review: show the diff (`git diff`/`git status`) for code review, *and* — when the
+  change affects the schematic, source, or waveform views — let the user verify it
+  **visually** in the running app (`npm run tauri dev` / `npm run dev`) or via a
+  screenshot. Wait for the user's explicit go-ahead before committing. This applies
+  even when the user asked for the feature; "implement X" is not standing approval to
+  commit X.
+- **Label created issues** — whenever you file a GitHub issue, automatically attach
+  appropriate labels (e.g. `bug`, `enhancement`/`feature`, `schematic`, `frontend`,
+  `model`, `docs`, area/severity tags). Pick labels that already exist in the repo
+  (`gh label list`); only create a new label when no existing one fits, and prefer the
+  conventional-commit-aligned categories above. Never leave a new issue unlabeled.
+  Where feasible, also attach an **effort label** estimating the work involved
+  (e.g. `effort/S`, `effort/M`, `effort/L` — or `effort/xs`…`effort/xl`). Create the
+  effort label set once if it doesn't exist yet, keep the scale consistent across
+  issues, and base the estimate on scope (files/layers touched, fixture regeneration,
+  cross-layer changes) rather than guesswork.
+
 ## Conventions & gotchas
 
 - **Rust toolchain pinned to 1.94** (`core/rust-toolchain.toml`) — match it locally.

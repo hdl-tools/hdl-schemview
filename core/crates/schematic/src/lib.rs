@@ -56,8 +56,40 @@ pub struct SchNode {
 /// they never collide with real model node/port ids.
 const CONST_ID_BASE: NodeId = 1 << 28;
 
-/// Synthetic id base for an FF's synthesized pins (keyed by the wired signal id).
-const FF_PIN_BASE: NodeId = 1 << 29;
+/// Synthetic id base for synthesized logic-box pins (FFs today, combinational
+/// boxes next). Above `CONST_ID_BASE` and any real model NodeId; pins are handed
+/// out per `(box, signal)` by [`PinAlloc`] so boxes sharing a net keep distinct
+/// pins.
+const LOGIC_PIN_BASE: NodeId = 1 << 30;
+
+/// Allocates a distinct, stable synthetic pin id per `(box, signal)` pair. Keying
+/// on the box (not the signal alone) keeps several boxes that share one net — a
+/// clock fanning out to many registers — from collapsing onto a single pin.
+struct PinAlloc {
+    next: NodeId,
+    map: std::collections::HashMap<(NodeId, NodeId), NodeId>,
+}
+
+impl PinAlloc {
+    fn new() -> Self {
+        Self {
+            next: LOGIC_PIN_BASE,
+            map: std::collections::HashMap::new(),
+        }
+    }
+
+    /// The pin id for `(box, signal)`, allocating one on first use. Injective
+    /// over the pair; allocation order follows the caller's deterministic edge
+    /// traversal, so ids are stable across runs.
+    fn pin(&mut self, bx: NodeId, sig: NodeId) -> NodeId {
+        let next = &mut self.next;
+        *self.map.entry((bx, sig)).or_insert_with(|| {
+            let p = *next;
+            *next += 1;
+            p
+        })
+    }
+}
 
 /// A wire between two endpoints (a box or one of its ports), by model NodeId.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -242,8 +274,9 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
 
 /// An inferred register box. The FF has no model `Port` children, so synthesize a
 /// pin per wired signal (clock/data on the west, Q on the east) from its edges;
-/// pin ids are `FF_PIN_BASE + signal` so wires can target them.
-fn make_ff_box(design: &Design, ff: NodeId, scope: &str) -> Option<SchNode> {
+/// pin ids come from `pins` keyed by `(ff, signal)` so wires can target them and
+/// FFs sharing a net (e.g. clk) keep distinct pins.
+fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) -> Option<SchNode> {
     let n = design.node(ff)?;
     let ports: Vec<SchPort> = design
         .edges_of(ff)
@@ -252,7 +285,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str) -> Option<SchNode> {
         .map(|e| {
             let sig = design.node(e.endpoint);
             SchPort {
-                id: FF_PIN_BASE + e.endpoint,
+                id: pins.pin(ff, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
                 width: sig.and_then(|s| width_of(&s.type_)),
@@ -315,16 +348,19 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
 
     let boxes = child_boxes(design, scope);
     let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
-    let mut nodes: Vec<SchNode> = boxes
-        .iter()
-        .filter_map(|&b| {
-            if is_kind(design, b, NodeKind::Ff) {
-                make_ff_box(design, b, scope_path)
-            } else {
-                make_box(design, b, scope_path)
-            }
-        })
-        .collect();
+    // Synthesized pins (FF clk/data/Q) are handed out per (box, signal) so boxes
+    // sharing a net keep distinct pins. The same allocator is reused by the FF
+    // wiring branch below so wires resolve to the pins built here.
+    let mut pins = PinAlloc::new();
+    let mut nodes: Vec<SchNode> = Vec::new();
+    for &b in &boxes {
+        let node = if is_kind(design, b, NodeKind::Ff) {
+            make_ff_box(design, b, scope_path, &mut pins)
+        } else {
+            make_box(design, b, scope_path)
+        };
+        nodes.extend(node);
+    }
 
     // Boundary I/O: the scope's *own* ports, drawn as frame pins (inputs left,
     // outputs right). An edge that reaches such a port — or its same-path backing
@@ -379,12 +415,12 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     let mut edges = Vec::new();
     let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for (i, e) in design.edges().iter().enumerate() {
-        // An FF wires through its synthesized pin (FF_PIN_BASE + signal); other
-        // edges resolve both ends to in-scope boxes/pins.
+        // An FF wires through its synthesized pin (allocated per (ff, signal) in
+        // make_ff_box above); other edges resolve both ends to in-scope boxes/pins.
         let src_res = if is_kind(design, e.port, NodeKind::Ff) {
             box_set
                 .contains(&e.port)
-                .then_some((e.port, FF_PIN_BASE + e.endpoint))
+                .then(|| (e.port, pins.pin(e.port, e.endpoint)))
         } else {
             resolve(e.port)
         };
