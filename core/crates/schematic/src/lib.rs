@@ -129,6 +129,7 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
                 Some(NodeKind::Instance)
                 | Some(NodeKind::Ff)
                 | Some(NodeKind::Comb)
+                | Some(NodeKind::Latch)
                 | Some(NodeKind::Assign) => out.push(c),
                 Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
                 _ => {}
@@ -163,7 +164,7 @@ fn is_kind(design: &Design, id: NodeId, kind: NodeKind) -> bool {
 fn is_logic_box(design: &Design, id: NodeId) -> bool {
     matches!(
         design.node(id).map(|n| n.kind),
-        Some(NodeKind::Ff) | Some(NodeKind::Comb) | Some(NodeKind::Assign)
+        Some(NodeKind::Ff) | Some(NodeKind::Comb) | Some(NodeKind::Latch) | Some(NodeKind::Assign)
     )
 }
 
@@ -355,10 +356,10 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
             }
         })
         .collect();
-    let label = if n.kind == NodeKind::Assign {
-        "assign"
-    } else {
-        "comb"
+    let label = match n.kind {
+        NodeKind::Assign => "assign",
+        NodeKind::Latch => "latch",
+        _ => "comb",
     };
     Some(SchNode {
         id: bx,
@@ -420,7 +421,9 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     for &b in &boxes {
         let node = match design.node(b).map(|n| n.kind) {
             Some(NodeKind::Ff) => make_ff_box(design, b, scope_path, &mut pins),
-            Some(NodeKind::Comb) | Some(NodeKind::Assign) => make_logic_box(design, b, &mut pins),
+            Some(NodeKind::Comb) | Some(NodeKind::Latch) | Some(NodeKind::Assign) => {
+                make_logic_box(design, b, &mut pins)
+            }
             _ => make_box(design, b, scope_path),
         };
         nodes.extend(node);

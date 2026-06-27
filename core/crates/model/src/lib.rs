@@ -33,8 +33,11 @@ pub enum NodeKind {
     /// `always` block).
     #[serde(rename = "FF")]
     Ff,
-    /// Combinational process (an `always_comb` / `always @*` / `always_latch`).
+    /// Combinational process (an `always_comb` / `always @*`).
     Comb,
+    /// Level-sensitive latch (an `always_latch`). Distinct from `Comb` so the
+    /// schematic can flag inferred latches (often unintended).
+    Latch,
     /// Continuous `assign` — a combinational function driving one signal. Kept
     /// distinct from `Comb` so the schematic can render it as a function node.
     Assign,

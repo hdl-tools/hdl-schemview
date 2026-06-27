@@ -143,6 +143,27 @@ def test_continuous_assign_is_distinct_kind(model: dict) -> None:
     ), "no assign node with both inputs and an output"
 
 
+def test_always_latch_is_distinct_kind(tmp_path) -> None:
+    """An `always_latch` is its own `Latch` kind (not folded into `Comb`), wired to
+    its data/enable in and its output. picorv32 has no latch, so use a snippet."""
+    src = tmp_path / "latch_dut.sv"
+    src.write_text(
+        "module latch_dut(input en, input d, output logic q);\n"
+        "  always_latch if (en) q = d;\n"
+        "endmodule\n"
+    )
+    m = build_model([str(src)], top="latch_dut")
+    by = {n["id"]: n for n in m["nodes"]}
+    latches = [n for n in m["nodes"] if n["kind"] == "Latch"]
+    assert latches, f"no Latch node; kinds={sorted({n['kind'] for n in m['nodes']})}"
+
+    lid = latches[0]["id"]
+    ins = {by[e["endpoint"]]["name"] for e in m["edges"] if e["port"] == lid and e["dir"] == "in"}
+    outs = {by[e["endpoint"]]["name"] for e in m["edges"] if e["port"] == lid and e["dir"] == "out"}
+    assert "q" in outs, outs
+    assert ins & {"en", "d"}, ins
+
+
 def test_legacy_clocked_always_is_ff(model: dict) -> None:
     """A legacy `always @(posedge clk)` inside a leaf core yields FF nodes — not
     only the top-level `always_ff` lane registers."""

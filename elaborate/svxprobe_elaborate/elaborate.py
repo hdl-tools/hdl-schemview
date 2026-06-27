@@ -197,22 +197,33 @@ class Elaborator:
         pk = str(getattr(sym, "procedureKind", "")).split(".")[-1]
         if pk == "AlwaysFF":
             return "ff"
-        if pk in ("AlwaysComb", "AlwaysLatch"):
+        if pk == "AlwaysComb":
             return "comb"
+        if pk == "AlwaysLatch":
+            return "latch"
         if pk == "Always":
             # Legacy `always`: edge-sensitive ⇒ sequential, else combinational.
+            # (A level-sensitive legacy `always` that infers a latch via incomplete
+            # assignment is still reported `comb` — detecting that needs more
+            # analysis; only the explicit `always_latch` form is a `latch` here.)
             timing = getattr(getattr(sym, "body", None), "timing", None)
             return "ff" if Elaborator._has_edge(timing) else "comb"
         return None  # Initial / Final / other
 
     # role -> (NodeKind, node name / path tag). The tag also names the synthetic
     # path segment (`$ff12` / `$comb12` / `$assign12`).
-    _LOGIC_KIND = {"ff": ("FF", "FF", "ff"), "comb": ("Comb", "comb", "comb"), "assign": ("Assign", "assign", "assign")}
+    _LOGIC_KIND = {
+        "ff": ("FF", "FF", "ff"),
+        "comb": ("Comb", "comb", "comb"),
+        "latch": ("Latch", "latch", "latch"),
+        "assign": ("Assign", "assign", "assign"),
+    }
 
     def _add_logic(self, sym: Any, parent: Optional[int], role: str) -> int:
         """Emit a process-level logic node — an inferred register (``ff``), a
-        combinational process (``comb`` — ``always_comb`` / ``always @*``), or a
-        continuous assign (``assign``). Processes / continuous assigns are unnamed
+        combinational process (``comb`` — ``always_comb`` / ``always @*``), a level
+        latch (``latch`` — ``always_latch``), or a continuous assign (``assign``).
+        Processes / continuous assigns are unnamed
         and have no hierarchical path, so synthesize one (``$ff{nid}`` etc.).
         ``def_range`` comes from ``sym.syntax`` (via ``_add``), giving source
         cross-probe for every block kind for free.
