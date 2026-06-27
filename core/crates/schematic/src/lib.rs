@@ -533,7 +533,7 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
 }
 
 fn incident_edges(design: &Design, node: NodeId) -> Vec<Edge> {
-    design.edges_of(node).into_iter().copied().collect()
+    design.edges_of(node).into_iter().cloned().collect()
 }
 
 /// The nearest enclosing Instance for a node (the box it belongs to).
