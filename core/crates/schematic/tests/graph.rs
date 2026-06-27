@@ -73,6 +73,31 @@ fn scope_graph_has_boxes_and_wires() {
 }
 
 #[test]
+fn bus_wires_carry_bit_select_labels() {
+    // `core_trap` is `logic[1:0]`; at the top scope each lane's FF and core tap a
+    // distinct bit, so the wires must be labelled `core_trap[0]` / `core_trap[1]`
+    // rather than a bare, indistinguishable `core_trap`.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc").expect("top scope graph");
+
+    let ct_labels: std::collections::HashSet<&str> = g
+        .edges
+        .iter()
+        .filter_map(|e| e.net.as_deref())
+        .filter(|n| n.starts_with("core_trap"))
+        .collect();
+
+    assert!(
+        ct_labels.contains("core_trap[0]"),
+        "missing core_trap[0]: {ct_labels:?}"
+    );
+    assert!(
+        ct_labels.contains("core_trap[1]"),
+        "missing core_trap[1]: {ct_labels:?}"
+    );
+}
+
+#[test]
 fn constant_tied_inputs_show_their_literal() {
     let d = design();
     let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();
