@@ -1,34 +1,30 @@
 # CLAUDE.md — hdl-schemview
 
-> Guidance for Claude Code when working in this repository. Read this first; it
-> captures the architecture, commands, conventions, and which skills to reach for.
+> Guidance for Claude Code in this repo. Read first: architecture, commands,
+> conventions, and which skills to reach for.
 
 ## What this is
 
 `hdl-schemview` is an **open, focused, RTL-level SystemVerilog cross-probe tool**.
-It links three views of a digital design and keeps them in sync:
+It links three views and keeps them in sync — click a signal in any one and the
+others jump to the matching object:
 
-- **Source** — the SystemVerilog text (file:line:col, lexical scopes).
-- **Schematic** — a generated, navigable diagram of the elaborated design.
-- **Waveform** — simulation traces (VCD/FST via `wellen`; user plugins out-of-process).
+- **Source** — SystemVerilog text (file:line:col, lexical scopes).
+- **Schematic** — generated, navigable diagram of the elaborated design.
+- **Waveform** — sim traces (VCD/FST via `wellen`; user plugins out-of-process).
 
-Click a signal in any view and the other two jump to the corresponding object.
-Not trying to match Verdi/Indago breadth — a focused, open tool composed from
-best-in-class components (`slang`/`pyslang` for elaboration, `wellen` for traces,
-`elkjs` for layout).
+Not Verdi/Indago breadth — a focused tool composed from best-in-class parts
+(`slang`/`pyslang` elaboration, `wellen` traces, `elkjs` layout).
 
-### The governing principle
-
-**The elaborated hierarchy is the single source of truth. Source, schematic, and
-waveform are three _projections_ of it.** Source and waveform get bidirectional
-maps *to* the elaborated model; the schematic *is* the elaborated model rendered.
-Get this right and cross-probing is lookups, not heuristics. Preserve this
-invariant in any change — do not reintroduce guesswork/string-matching where a
-model lookup exists.
+**Governing principle:** the elaborated hierarchy is the single source of truth;
+source, schematic, and waveform are three _projections_ of it. Source/waveform map
+*to* the model; the schematic *is* the model rendered. Cross-probing is lookups,
+not heuristics — **never reintroduce guesswork/string-matching where a model lookup
+exists.**
 
 ## Architecture map
 
-Polyglot monorepo with three trees:
+Polyglot monorepo, three trees:
 
 ```
 core/        Rust workspace — model, ingest, matching, cross-probe, schematic, GUI logic, CLI
@@ -38,52 +34,54 @@ fixtures/    Committed golden hierarchy + VCD/FST traces (picorv32_soc)
 docs/        ROADMAP, fixtures policy, ADRs (docs/decisions/*)
 ```
 
-### Data flow (end to end)
+Data flow (end to end):
 
 ```
 SystemVerilog RTL
-  └─ elaborate/ (pyslang harness)      → hierarchy.json (model document, schema-validated)
-       └─ core/crates/ingest           → Design (deserialize + referential-integrity check)
-            └─ core/crates/model        → indices: path_index, src_index (interval tree), wave_index
-                 ├─ core/crates/schematic  → SchematicGraph (scope_graph / expand / cone)
-                 ├─ core/crates/xprobe      → cross-probe resolution
-                 └─ core/crates/wave        → trace ValueChanges (wellen)
-                      └─ core/crates/gui     → Session + serializable DTOs (UI-toolkit-free, CI-testable)
+  └─ elaborate/ (pyslang)          → hierarchy.json (schema-validated model document)
+       └─ core/crates/ingest       → Design (deserialize + referential-integrity check)
+            └─ core/crates/model    → indices: path_index, src_index (interval tree), wave_index
+                 ├─ schematic       → SchematicGraph (scope_graph / expand / cone)
+                 ├─ xprobe          → cross-probe resolution
+                 └─ wave            → trace ValueChanges (wellen)
+                      └─ gui        → Session + serializable DTOs (UI-toolkit-free, CI-testable)
                            └─ app/src-tauri/src/lib.rs  → 9 #[tauri::command]s over Mutex<Session>
                                 └─ app/src/api.ts         → typed invoke() wrappers
-                                     └─ app/src/main.ts    → 3 panes: schematic (SVG via elk.ts), source, waveform (canvas)
+                                     └─ app/src/main.ts    → 3 panes: schematic (SVG/elk.ts), source, waveform (canvas)
 ```
 
 ### Rust crates (`core/crates/`, edition 2021, toolchain pinned to 1.94)
 
 | Crate | Package | Purpose |
 | --- | --- | --- |
-| `model` | `svxprobe-model` | Elaborated node model + indices (`path_index`, `src_index` interval tree, `wave_index`). Spine of the tool. |
+| `model` | `svxprobe-model` | Elaborated node model + indices (`path_index`, `src_index` interval tree, `wave_index`). The spine. |
 | `ingest` | `svxprobe-ingest` | JSON → `Design` deserialization + referential-integrity validation. |
 | `wave` | `svxprobe-wave` | VCD/FST/GHW trace loader via `wellen` (lazy per-signal). |
 | `matcher` | `svxprobe-matcher` | Phase-1 canonical-path matcher. **≥95% hit-rate is a hard PR gate.** |
-| `xprobe` | `svxprobe-xprobe` | Cross-probe engine: resolves source ↔ waveform ↔ schematic selections. |
+| `xprobe` | `svxprobe-xprobe` | Cross-probe engine: source ↔ waveform ↔ schematic. |
 | `schematic` | `svxprobe-schematic` | Layout-agnostic graph extractor: `scope_graph()`, `expand()`, `cone()`. |
-| `gui` | `svxprobe-gui` | `Session` logic + serializable DTOs. No UI toolkit — fully CI-testable. |
+| `gui` | `svxprobe-gui` | `Session` logic + serializable DTOs. No UI toolkit — CI-testable. |
 | `cli` | `svxprobe` | Dev/test binary. Subcommands: `ingest`, `wave`, `match`, `graph`, `probe`. |
 
-The Tauri shell (`app/src-tauri/`, package `hdl-schemview-app`) is a thin
-`cdylib`/`lib` that wraps `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
+Tauri shell (`app/src-tauri/`, package `hdl-schemview-app`) is a thin `cdylib`/`lib`
+wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 
 ### Frontend (`app/`, vanilla TS + Vite 5 + Vitest, no UI framework)
 
 | File | Role |
 | --- | --- |
-| `app/index.html` | Entry; three-pane layout + toolbar/breadcrumb. |
+| `app/index.html` | Three-pane layout + toolbar/breadcrumb. |
 | `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache). |
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
-| `app/src/types.ts` | DTO interfaces mirroring the Rust serde types. |
+| `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |
 | `app/src/elk.ts` (+ `elk.test.ts`) | `SchematicGraph` → ELK layout → SVG DOM. |
-| `app/src/style.css` | Theme CSS vars. Dark is default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
+| `app/src/style.css` | Theme vars. Dark default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
 
 Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D.
 
-## Tauri command reference (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
+## Tauri commands (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
+
+Delegate to a global `AppState(Mutex<Session>)`.
 
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -97,14 +95,12 @@ Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D.
 | `signal_values` | `signalRef` | `ValueChange[]` |
 | `source_text` | `file` (id) | `String` |
 
-Commands delegate to a global `AppState(Mutex<Session>)`.
-
 ## Key data structures
 
 **Schematic** (`core/crates/schematic/src/lib.rs`):
-- `SchematicGraph { root: String, nodes: Vec<SchNode>, edges: Vec<SchEdge> }`
+- `SchematicGraph { root, nodes: Vec<SchNode>, edges: Vec<SchEdge> }`
 - `SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>, module: Option<String> }`
-- `SchPort { id, name, side: Side, width: Option<String> }` — `width` like `[31:0]` or `None` for scalar.
+- `SchPort { id, name, side: Side, width: Option<String> }` — `width` like `[31:0]`, else `None`.
 - `SchEdge { id, source, target, net: Option<String> }`
 - `Side { West, East }` — drives ELK port placement.
 
@@ -120,143 +116,107 @@ Commands delegate to a global `AppState(Mutex<Session>)`.
 
 ## Build, test & PR gates
 
-**Rust** (run from `core/`):
 ```bash
-cargo test --all                              # unit + integration (uses committed fixtures)
-cargo fmt --all --check                       # PR gate
-cargo clippy --all-targets -- -D warnings     # PR gate
+# Rust (from core/)
+cargo test --all                                    # unit + integration (committed fixtures)
+cargo fmt --all --check                             # PR gate
+cargo clippy --all-targets -- -D warnings           # PR gate
 cargo run --bin svxprobe -- match <model> <trace>   # Phase-1 cross-probe gate (≥95% hit-rate)
-```
 
-**Frontend** (run from `app/`):
-```bash
+# Frontend (from app/)
 npm install
 npm run dev          # Vite dev server (http://localhost:5173)
 npm run build        # tsc && vite build → dist/
 npm test             # Vitest (e.g. elk.test.ts)
 npm run tauri dev    # Tauri window + Vite HMR
 npm run tauri build  # Bundle desktop app (Win/Linux/macOS)
-```
 
-**Python harness** (run from `elaborate/`, `uv`-managed):
-```bash
+# Python harness (from elaborate/, uv-managed)
 uv sync
 uv run pytest -q
 uv run svxprobe-elaborate --top <top> -f <filelist.f> -o <out.json>
 ```
 
-Fixtures live at `fixtures/picorv32_soc/` (committed golden + VCD/FST). PR-gate
-tests run against them — **no Verilator regeneration needed** for normal work.
-See `docs/fixtures.md` for the two-tier policy and pinned tool versions.
+Fixtures: `fixtures/picorv32_soc/` (committed golden + VCD/FST). PR-gate tests run
+against them — **no Verilator regeneration needed** for normal work. See
+`docs/fixtures.md` for the two-tier policy and pinned tool versions.
 
-## CI
-
-- `.github/workflows/ci.yml` — Rust (fmt, clippy, test, match gate on FST+VCD) + Python (lint, test, schema validation, golden reproducibility). Ubuntu, on push/PR.
-- `.github/workflows/app.yml` — cross-platform Tauri build (Ubuntu + Windows matrix). Triggers when `app/` or `core/crates/` change.
-- Nightly — Verilator trace regeneration.
+**CI:** `ci.yml` — Rust (fmt, clippy, test, match gate on FST+VCD) + Python (lint,
+test, schema validation, golden reproducibility), Ubuntu, on push/PR. `app.yml` —
+cross-platform Tauri build (Ubuntu + Windows) when `app/` or `core/crates/` change.
+Nightly — Verilator trace regeneration.
 
 ## Workflow gates
 
-- **Review before commit** — never commit on the user's behalf without an explicit
-  review pass first. Before any `git commit`, surface the local changes for the user
-  to review: show the diff (`git diff`/`git status`) for code review, *and* — when the
-  change affects the schematic, source, or waveform views — let the user verify it
-  **visually** in the running app (`npm run tauri dev` / `npm run dev`) or via a
-  screenshot. Wait for the user's explicit go-ahead before committing. This applies
-  even when the user asked for the feature; "implement X" is not standing approval to
-  commit X.
-- **Label created issues** — whenever you file a GitHub issue, automatically attach
-  appropriate labels (e.g. `bug`, `enhancement`/`feature`, `schematic`, `frontend`,
-  `model`, `docs`, area/severity tags). Pick labels that already exist in the repo
-  (`gh label list`); only create a new label when no existing one fits, and prefer the
-  conventional-commit-aligned categories above. Never leave a new issue unlabeled.
-  Where feasible, also attach an **effort label** estimating the work involved
-  (e.g. `effort/S`, `effort/M`, `effort/L` — or `effort/xs`…`effort/xl`). Create the
-  effort label set once if it doesn't exist yet, keep the scale consistent across
-  issues, and base the estimate on scope (files/layers touched, fixture regeneration,
-  cross-layer changes) rather than guesswork.
+- **Review before commit.** Never commit on the user's behalf without an explicit
+  review pass. Before any `git commit`, show the diff (`git diff`/`git status`); when
+  the change affects schematic/source/waveform views, also let the user verify it
+  **visually** (`npm run tauri dev` / `npm run dev` or a screenshot). Wait for explicit
+  go-ahead. "Implement X" is not standing approval to commit X.
+- **Keep docs in sync after a PR.** After opening a new PR (or landing a change that
+  alters architecture, commands, DTOs, gates, or workflow), update `CLAUDE.md` and the
+  relevant `docs/*` in the same change so they never drift from the code. Treat doc
+  updates as part of the PR, not a follow-up.
+- **Label created issues.** Always attach existing labels (`gh label list`) — type
+  (`bug`, `enhancement`/`feature`), area (`schematic`, `frontend`, `model`, `docs`),
+  and an **effort** label (`effort/S|M|L` or `effort/xs…xl`, sized by files/layers
+  touched). Create a label only when none fits; never leave an issue unlabeled.
 
 ## Conventions & gotchas
 
-- **Rust toolchain pinned to 1.94** (`core/rust-toolchain.toml`) — match it locally.
-- **DTO sync** — Rust serde DTOs (`gui`, `schematic`) ↔ `app/src/types.ts` must stay aligned.
-- **TS is strict** (`tsconfig.json`: strict, `noUnusedLocals/Parameters`). No ESLint/Prettier configured — match existing style by hand.
-- **Don't reintroduce heuristics** — resolve via model indices (the single-source-of-truth principle).
-- **Roadmap context** — Phase 0–2 = model/matcher/cross-probe; Phase 3 = schematic extractor + Tauri app (current active area). See `docs/ROADMAP.md`.
+- **Rust toolchain pinned to 1.94** (`core/rust-toolchain.toml`) — match locally.
+- **DTO sync** — Rust serde DTOs (`gui`, `schematic`) ↔ `app/src/types.ts` ↔
+  `elaborate/schema/model.schema.json` must stay aligned.
+- **TS is strict** (`strict`, `noUnusedLocals/Parameters`). No ESLint/Prettier — match
+  existing style by hand.
+- **No heuristics** — resolve via model indices (single source of truth).
+- **Roadmap** — Phase 0–2 = model/matcher/cross-probe; Phase 3 = schematic + Tauri app
+  (active area). See `docs/ROADMAP.md`.
 
 ## Commit messages
 
-Follow Conventional Commits: a `type:` prefix, then a concise, imperative
-summary. Keep the subject focused on a single logical change.
-
-```
-<type>: <imperative summary>
-```
-
-| Type | Use for |
-| --- | --- |
-| `feat` | New feature for the user (not a new build-script feature). |
-| `fix` | Bug fix for the user (not a build-script fix). |
-| `docs` | Documentation-only changes. |
-| `style` | Formatting, missing semicolons, etc.; no production-code change. |
-| `refactor` | Refactoring production code, e.g. renaming a variable. |
-| `test` | Adding or refactoring tests; no production-code change. |
-| `chore` | Build tasks, tooling, deps, etc.; no production-code change. |
-
-Examples in this repo's context:
+Conventional Commits: `<type>: <imperative summary>`, one logical change per commit.
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`. Examples:
 
 ```
 feat: render inferred always_ff as a flip-flop symbol
 fix: connect wires to the centre of pin triangles
 docs: add architecture map and skill routing to CLAUDE.md
-style: apply cargo fmt to schematic crate
-refactor: extract scope-graph builder from Session
 test: cover cone() depth limits in schematic crate
-chore: bump Rust toolchain pin to 1.94
 ```
 
-## Skills to use
+## Skills & agents
 
-Reach for these installed skills/agents by task type (invoke via the `Skill` tool
-or the named agent):
+Reach for these by task type (invoke via `Skill` or the named agent). Process skills
+(brainstorming, TDD, debugging, planning) come **first** — they decide *how* — then
+domain skills guide execution.
 
 | When working on… | Use |
 | --- | --- |
-| Getting oriented / exploring the codebase | `claude-mem:learn-codebase`, `claude-mem:smart-explore` |
-| UI/design direction & visual consistency | `ecc:design-system`, `ecc:frontend-design` |
-| Frontend TS architecture/patterns (`app/src/*`) | `ecc:frontend-patterns` |
-| Reviewing TS/JS changes | `ecc:typescript-reviewer` (agent) + `ecc:code-review` (or built-in `/code-review`) |
+| Exploring the codebase | `claude-mem:learn-codebase`, `claude-mem:smart-explore` |
+| UI/design direction | `ecc:design-system`, `ecc:frontend-design` |
+| Frontend TS patterns (`app/src/*`) | `ecc:frontend-patterns` |
+| Reviewing TS/JS changes | `ecc:typescript-reviewer` (agent) + `/code-review` |
 | Shaping an idea before building | `superpowers:brainstorming` |
-| Writing features / fixing bugs | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
+| Features / bug fixes | `superpowers:test-driven-development`, `superpowers:systematic-debugging` |
 | Planning multi-step work | `ecc:plan`, `superpowers:writing-plans` |
 | Reviewing Rust changes (`core/crates/*`) | `ecc:rust-reviewer` (agent) |
-| Writing/refactoring idiomatic Rust | `ecc:rust-patterns` |
+| Idiomatic Rust | `ecc:rust-patterns` |
 
-Process skills (brainstorming, TDD, debugging, planning) come **first** — they
-decide *how* to approach the work — then the domain skills guide execution.
+### Sub-agents (delegation)
 
-## Sub-agents (delegation)
+Delegate via the `Agent` tool to keep the main thread focused and exploit this repo's
+polyglot fan-out — you get the conclusion back, not the file dumps.
 
-Delegate to sub-agents (via the `Agent` tool) to keep the main thread focused and
-to exploit this repo's natural fan-out. You get the conclusion back, not the file
-dumps. This is most valuable *here* because the tree is wide and polyglot.
-
-- **Explore broadly, then act.** For "where is X / how is Y wired" sweeps across the
-  three trees (`core/crates/*` + `app/src/*` + `elaborate/*`), dispatch an `Explore`
-  (or `general-purpose`) agent instead of reading dozens of files inline. Reserve
-  direct reads for the handful of files you'll actually edit.
-- **Fan out across layers for DTO-sync changes.** The single-source-of-truth wire
-  format spans Rust serde DTOs (`gui`/`schematic`) ↔ `app/src/types.ts` ↔
-  `elaborate/schema/model.schema.json`. When a change touches all three, spin up one
-  agent per layer **in a single message** so they run in parallel.
-- **Review per language at the commit gate.** Before the human review-before-commit
-  gate above, run the matching reviewer agent on the changed tree — in parallel when
-  the change is cross-cutting: `ecc:rust-reviewer` (`core/crates/*`),
-  `ecc:typescript-reviewer` (`app/src/*`), `ecc:python-reviewer` (`elaborate/*`).
-  This complements, never replaces, the user's visual + diff review.
-- **`fork` to preserve context.** For a sub-task that needs the current conversation's
-  full context (a mid-task investigation, a focused refactor), prefer a `fork`; use a
-  fresh `general-purpose` agent only for self-contained work.
-- **Don't double-run.** Once you've delegated a search, wait for the result instead of
-  also running it inline.
-
+- **Explore broadly, then act.** For "where is X / how is Y wired" sweeps across
+  `core/crates/*` + `app/src/*` + `elaborate/*`, dispatch an `Explore` (or
+  `general-purpose`) agent; reserve direct reads for files you'll edit.
+- **Fan out for DTO-sync changes.** When a change touches all three layers (Rust serde
+  ↔ `types.ts` ↔ `model.schema.json`), spin up one agent per layer **in a single
+  message** to run them in parallel.
+- **Review per language at the commit gate.** `ecc:rust-reviewer` (`core/crates/*`),
+  `ecc:typescript-reviewer` (`app/src/*`), `ecc:python-reviewer` (`elaborate/*`) — in
+  parallel when cross-cutting. Complements, never replaces, the user's review.
+- **`fork` to preserve context** for sub-tasks needing the current conversation; a
+  fresh `general-purpose` agent for self-contained work.
+- **Don't double-run** a search you've already delegated.
