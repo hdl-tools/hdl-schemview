@@ -19414,7 +19414,8 @@
       "id": 3,
       "port": 25,
       "endpoint": 9,
-      "dir": "in"
+      "dir": "in",
+      "select": "[0]"
     },
     {
       "id": 4,
@@ -19438,7 +19439,8 @@
       "id": 7,
       "port": 57,
       "endpoint": 9,
-      "dir": "out"
+      "dir": "out",
+      "select": "[0]"
     },
     {
       "id": 8,
@@ -19516,7 +19518,8 @@
       "id": 20,
       "port": 352,
       "endpoint": 9,
-      "dir": "in"
+      "dir": "in",
+      "select": "[1]"
     },
     {
       "id": 21,
@@ -19540,7 +19543,8 @@
       "id": 24,
       "port": 384,
       "endpoint": 9,
-      "dir": "out"
+      "dir": "out",
+      "select": "[1]"
     },
     {
       "id": 25,

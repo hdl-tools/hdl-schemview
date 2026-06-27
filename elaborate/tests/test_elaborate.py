@@ -124,3 +124,37 @@ def test_connectivity_edges(model: dict) -> None:
     )
     # The memory's interface port anchors to its box, wired to the bus instance.
     assert has_edge("picorv32_soc.g_lane[0].memory", "picorv32_soc.g_lane[0].bus")
+
+
+def test_bus_bitselect_on_edges(model: dict) -> None:
+    """A vector connected per-bit carries the resolved bit-select on its edge.
+
+    `core_trap` is `logic[1:0]`; lane `gi` reads/drives `core_trap[gi]` both in
+    its always_ff (FF edge) and via `.trap(core_trap[gi])` (port edge). Each such
+    edge must record the *resolved* constant bit, e.g. `[0]` / `[1]`.
+    """
+    by = {n["id"]: n for n in model["nodes"]}
+    ct = next(
+        n["id"]
+        for n in model["nodes"]
+        if n["path"] == "picorv32_soc.core_trap" and n["kind"] == "Var"
+    )
+    # select on each edge landing on core_trap, keyed by the lane of the other end.
+    lane_selects: dict[str, set] = {"g_lane[0]": set(), "g_lane[1]": set()}
+    for e in model["edges"]:
+        if e["endpoint"] != ct:
+            continue
+        other = by[e["port"]]["path"]
+        for lane in lane_selects:
+            if f".{lane}." in other:
+                lane_selects[lane].add(e.get("select"))
+    assert lane_selects["g_lane[0]"] == {"[0]"}, lane_selects
+    assert lane_selects["g_lane[1]"] == {"[1]"}, lane_selects
+
+    # A scalar, non-indexed connection carries no select.
+    for e in model["edges"]:
+        if (
+            by[e["port"]]["path"] == "picorv32_soc.g_lane[0].core.clk"
+            and by[e["endpoint"]]["path"] == "picorv32_soc.clk"
+        ):
+            assert e.get("select") is None

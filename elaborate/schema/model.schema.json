@@ -46,7 +46,8 @@
           "id": { "type": "integer", "minimum": 0 },
           "port": { "type": "integer", "minimum": 0, "description": "NodeId of the module port." },
           "endpoint": { "type": "integer", "minimum": 0, "description": "NodeId of the connected endpoint." },
-          "dir": { "type": "string", "enum": ["in", "out", "inout"] }
+          "dir": { "type": "string", "enum": ["in", "out", "inout"] },
+          "select": { "type": ["string", "null"], "description": "Resolved bit-select on the connected expression, e.g. \"[0]\" or \"[7:4]\"; absent/null when the whole signal is connected." }
         }
       }
     }
