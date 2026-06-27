@@ -1,7 +1,7 @@
 // hdl-schemview frontend: three panes (schematic / source / waveform) linked by
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
-import { ffRole, layout, nodeId } from "./elk";
+import { ffRole, isLogicKind, layout, nodeId } from "./elk";
 import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -205,7 +205,10 @@ async function renderSchematic(graph: SchematicGraph) {
       arrow.onclick = () => selectNode(pid);
       g.appendChild(arrow);
 
-      if (sp) {
+      // A logic node (comb/latch/assign) is a process, not a module: its pins are
+      // bare wire stubs, so skip the per-pin signal-name labels (the wire already
+      // carries that name).
+      if (sp && !isLogicKind(node?.kind ?? "")) {
         const t = document.createElementNS(SVGNS, "text");
         t.setAttribute("class", "pin-label");
         t.setAttribute("x", String(west ? edgeX + LABEL_PAD : edgeX - LABEL_PAD));

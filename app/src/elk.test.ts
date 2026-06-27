@@ -75,4 +75,32 @@ describe("toElk", () => {
     expect(c.width).toBeGreaterThan(150);
     expect(c.height).toBeGreaterThan(58);
   });
+
+  it("keeps comb/assign nodes compact despite long signal names", () => {
+    // Logic nodes draw bare pin stubs (no per-pin labels), so their width must not
+    // reserve room for the connected signal names — only the short title.
+    const make = (kind: "Comb" | "Assign"): SchematicGraph => ({
+      root: "s",
+      nodes: [
+        {
+          id: 1,
+          kind,
+          label: kind === "Comb" ? "comb" : "assign",
+          path: "s.x",
+          expandable: false,
+          ports: Array.from({ length: 6 }, (_, i) => ({
+            id: 200 + i,
+            name: `cached_insn_opcode_${i}`,
+            side: (i ? "west" : "east") as "east" | "west",
+          })),
+        },
+      ],
+      edges: [],
+    });
+    for (const kind of ["Comb", "Assign"] as const) {
+      const c = toElk(make(kind)).children[0];
+      // Sized from the title, not the long pin names; well under the 150 box floor.
+      expect(c.width).toBeLessThan(100);
+    }
+  });
 });

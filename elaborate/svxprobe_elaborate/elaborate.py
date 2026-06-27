@@ -73,11 +73,15 @@ class Elaborator:
         self.files: list[dict[str, Any]] = []
         # (instance node id, InstanceSymbol) collected for edge extraction.
         self.instances: list[tuple[int, Any]] = []
-        # (FF node id, ProceduralBlockSymbol) for inferred-register extraction.
-        self.ff_blocks: list[tuple[int, Any]] = []
+        # (logic node id, symbol, role) for process-level logic-edge extraction —
+        # inferred registers (`ff`) and combinational blocks (`comb`).
+        self.logic_blocks: list[tuple[int, Any, str]] = []
 
     # -- source-range helpers ------------------------------------------------
     def _file_id(self, path: str) -> int:
+        # Store paths with forward slashes so the golden is byte-identical across
+        # OSes (slang yields the platform separator); a no-op on POSIX.
+        path = path.replace("\\", "/")
         fid = self._file_ids.get(path)
         if fid is None:
             fid = len(self.files)
@@ -157,14 +161,79 @@ class Elaborator:
             self.nodes[parent]["children"].append(nid)
         return nid
 
-    def _add_ff(self, sym: Any, parent: Optional[int]) -> int:
-        """Emit an inferred-register (FF) node. Procedural blocks are unnamed and
-        have no hierarchical path, so synthesize one."""
-        nid = self._add(sym, "FF", parent)
+    @staticmethod
+    def _has_edge(timing: Any) -> bool:
+        """True if a timing control is edge-sensitive (`posedge`/`negedge`/both) —
+        i.e. a clocked process — vs level-sensitive (`@*`, `@(a or b)`)."""
+        found = {"v": False}
+
+        def cb(n: Any) -> None:
+            e = getattr(n, "edge", None)
+            if e is not None and str(e).split(".")[-1] in ("PosEdge", "NegEdge", "BothEdges"):
+                found["v"] = True
+
+        if timing is not None:
+            try:
+                timing.visit(cb)
+            except Exception:
+                pass
+        return found["v"]
+
+    @staticmethod
+    def _logic_role(sym: Any) -> Optional[str]:
+        """Classify a process / continuous assign as a logic spine node:
+        ``'ff'`` (edge-sensitive sequential), ``'comb'`` (combinational process —
+        ``always_comb`` / ``always @*`` / ``always_latch``), ``'assign'``
+        (continuous ``assign``), or ``None`` (not logic — e.g. ``initial`` /
+        ``final``). ``comb`` and ``assign`` are both combinational but kept distinct
+        so the schematic can render a process as a box and an assign as a function
+        node.
+        """
+        kname = _kind_name(sym)
+        if kname == "ContinuousAssign":
+            return "assign"
+        if kname != "ProceduralBlock":
+            return None
+        pk = str(getattr(sym, "procedureKind", "")).split(".")[-1]
+        if pk == "AlwaysFF":
+            return "ff"
+        if pk == "AlwaysComb":
+            return "comb"
+        if pk == "AlwaysLatch":
+            return "latch"
+        if pk == "Always":
+            # Legacy `always`: edge-sensitive ⇒ sequential, else combinational.
+            # (A level-sensitive legacy `always` that infers a latch via incomplete
+            # assignment is still reported `comb` — detecting that needs more
+            # analysis; only the explicit `always_latch` form is a `latch` here.)
+            timing = getattr(getattr(sym, "body", None), "timing", None)
+            return "ff" if Elaborator._has_edge(timing) else "comb"
+        return None  # Initial / Final / other
+
+    # role -> (NodeKind, node name / path tag). The tag also names the synthetic
+    # path segment (`$ff12` / `$comb12` / `$assign12`).
+    _LOGIC_KIND = {
+        "ff": ("FF", "FF", "ff"),
+        "comb": ("Comb", "comb", "comb"),
+        "latch": ("Latch", "latch", "latch"),
+        "assign": ("Assign", "assign", "assign"),
+    }
+
+    def _add_logic(self, sym: Any, parent: Optional[int], role: str) -> int:
+        """Emit a process-level logic node — an inferred register (``ff``), a
+        combinational process (``comb`` — ``always_comb`` / ``always @*``), a level
+        latch (``latch`` — ``always_latch``), or a continuous assign (``assign``).
+        Processes / continuous assigns are unnamed
+        and have no hierarchical path, so synthesize one (``$ff{nid}`` etc.).
+        ``def_range`` comes from ``sym.syntax`` (via ``_add``), giving source
+        cross-probe for every block kind for free.
+        """
+        kind, name, tag = self._LOGIC_KIND[role]
+        nid = self._add(sym, kind, parent)
         n = self.nodes[nid]
-        n["name"] = "FF"
+        n["name"] = name
         base = self.nodes[parent]["path"] if parent is not None else ""
-        n["path"] = f"{base}.$ff{nid}"
+        n["path"] = f"{base}.${tag}{nid}"
         n["symbol_key"] = n["path"]
         return nid
 
@@ -255,10 +324,16 @@ class Elaborator:
             sel.pop(b, None)
         return sel
 
-    def _ff_edges(self, ff_id: int, sym: Any, seen: set) -> None:
-        """Wire an FF: clock + data signals in, assigned (Q) signals out."""
-        body = getattr(sym, "body", None)
-        clock = self._value_refs(getattr(body, "timing", None))
+    def _logic_edges(self, logic_id: int, sym: Any, role: str, seen: set) -> None:
+        """Wire a logic block: data (and, for an FF, clock) signals in, assigned
+        signals out. ``data = reads − assigned − clock`` ⇒ a block never reads its
+        own output, so `q <= q + 1` produces no self-loop at source."""
+        # A continuous assign exposes its `.assignment` expression; procedural
+        # blocks are visited directly (their body holds the statements).
+        root = getattr(sym, "assignment", None) or sym
+        clock: set[str] = set()
+        if role == "ff":
+            clock = self._value_refs(getattr(getattr(sym, "body", None), "timing", None))
         assigned: set[str] = set()
 
         def cb(n: Any) -> None:
@@ -268,13 +343,13 @@ class Elaborator:
                     assigned.update(self._value_refs(left))
 
         try:
-            sym.visit(cb)
+            root.visit(cb)
         except Exception:
             pass
-        data = self._value_refs(sym) - assigned - clock
+        data = self._value_refs(root) - assigned - clock
         # Resolved bit-selects (e.g. `core_trap[gi]` -> `[0]`) for the signals
-        # this FF touches, so each wire is labelled with the bit it carries.
-        selects = self._selects_in(sym)
+        # this block touches, so each wire is labelled with the bit it carries.
+        selects = self._selects_in(root)
 
         def wire(paths: set, direction: str) -> list[int]:
             ids = []
@@ -283,10 +358,10 @@ class Elaborator:
                 # Only wire real signals — drop genvars/params/enum constants.
                 if (
                     nid is not None
-                    and nid != ff_id
+                    and nid != logic_id
                     and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
                 ):
-                    seen.add((ff_id, nid, direction, selects.get(p)))
+                    seen.add((logic_id, nid, direction, selects.get(p)))
                     ids.append(nid)
             return ids
 
@@ -295,7 +370,7 @@ class Elaborator:
         wire(assigned, "out")
         # Tell the renderer which pin is the clock (draws the FF clock notch).
         if clk_ids:
-            self.nodes[ff_id]["type"] = self.nodes[clk_ids[0]]["name"]
+            self.nodes[logic_id]["type"] = self.nodes[clk_ids[0]]["name"]
 
     def _members(self, sym: Any):
         body = getattr(sym, "body", None)
@@ -309,13 +384,13 @@ class Elaborator:
         kname = _kind_name(sym)
         kind = _KIND_MAP.get(kname)
 
-        # An inferred sequential register (`always_ff`) becomes an FF spine node;
-        # its clock/data/Q wiring is recovered later in `_ff_edges`.
-        if kname == "ProceduralBlock" and str(
-            getattr(sym, "procedureKind", "")
-        ).endswith("AlwaysFF"):
-            ff_id = self._add_ff(sym, parent)
-            self.ff_blocks.append((ff_id, sym))
+        # A process / continuous assign becomes a logic spine node: an inferred
+        # register (`ff`) or a combinational block (`comb`). Its read/assigned (and
+        # clock) wiring is recovered later in `_logic_edges`.
+        role = self._logic_role(sym)
+        if role is not None:
+            logic_id = self._add_logic(sym, parent, role)
+            self.logic_blocks.append((logic_id, sym, role))
             return
 
         # Skip the auto-generated internal variable backing a port (the Port node
@@ -431,8 +506,8 @@ class Elaborator:
                     if lit is not None and self.nodes[port_id]["kind"] == "Port":
                         self.nodes[port_id]["const"] = lit
 
-        for ff_id, ff_sym in self.ff_blocks:
-            self._ff_edges(ff_id, ff_sym, seen_edges)
+        for logic_id, logic_sym, role in self.logic_blocks:
+            self._logic_edges(logic_id, logic_sym, role, seen_edges)
 
         edges: list[dict[str, Any]] = []
         ordered = sorted(seen_edges, key=lambda t: (t[0], t[1], t[2], t[3] or ""))

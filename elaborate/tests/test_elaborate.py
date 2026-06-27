@@ -100,6 +100,81 @@ def test_inferred_ff(model: dict) -> None:
     assert "clk" in sigs(lane[0]["id"], "in"), "FF not clocked"
 
 
+def test_inferred_comb(model: dict) -> None:
+    """Combinational logic (`always @*` / `always_comb` / continuous `assign`)
+    becomes Comb nodes wired to the signals it reads (in) and assigns (out)."""
+    by = {n["id"]: n for n in model["nodes"]}
+    combs = [n for n in model["nodes"] if n["kind"] == "Comb"]
+    assert combs, "no Comb nodes emitted"
+
+    def sigs(cid: int, direction: str) -> set[str]:
+        return {
+            by[e["endpoint"]]["name"]
+            for e in model["edges"]
+            if e["port"] == cid and e["dir"] == direction
+        }
+
+    # At least one comb block is wired on both sides (reads something, drives
+    # something) — real RTL has no free-floating combinational logic.
+    assert any(
+        sigs(c["id"], "in") and sigs(c["id"], "out") for c in combs
+    ), "no comb box with both inputs and an output"
+
+
+def test_continuous_assign_is_distinct_kind(model: dict) -> None:
+    """A continuous `assign` is an `Assign` node (kept distinct from `Comb` so the
+    schematic can draw it as a function node), wired to its reads and its LHS."""
+    by = {n["id"]: n for n in model["nodes"]}
+    assigns = [n for n in model["nodes"] if n["kind"] == "Assign"]
+    combs = [n for n in model["nodes"] if n["kind"] == "Comb"]
+    assert assigns, "no Assign nodes emitted"
+    assert combs, "no Comb nodes emitted (always @* should not fold into Assign)"
+
+    def sigs(nid: int, direction: str) -> set[str]:
+        return {
+            by[e["endpoint"]]["name"]
+            for e in model["edges"]
+            if e["port"] == nid and e["dir"] == direction
+        }
+
+    # A real continuous assign reads at least one signal and drives an output.
+    assert any(
+        sigs(a["id"], "in") and sigs(a["id"], "out") for a in assigns
+    ), "no assign node with both inputs and an output"
+
+
+def test_always_latch_is_distinct_kind(tmp_path) -> None:
+    """An `always_latch` is its own `Latch` kind (not folded into `Comb`), wired to
+    its data/enable in and its output. picorv32 has no latch, so use a snippet."""
+    src = tmp_path / "latch_dut.sv"
+    src.write_text(
+        "module latch_dut(input en, input d, output logic q);\n"
+        "  always_latch if (en) q = d;\n"
+        "endmodule\n"
+    )
+    m = build_model([str(src)], top="latch_dut")
+    by = {n["id"]: n for n in m["nodes"]}
+    latches = [n for n in m["nodes"] if n["kind"] == "Latch"]
+    assert latches, f"no Latch node; kinds={sorted({n['kind'] for n in m['nodes']})}"
+
+    lid = latches[0]["id"]
+    ins = {by[e["endpoint"]]["name"] for e in m["edges"] if e["port"] == lid and e["dir"] == "in"}
+    outs = {by[e["endpoint"]]["name"] for e in m["edges"] if e["port"] == lid and e["dir"] == "out"}
+    assert "q" in outs, outs
+    assert ins & {"en", "d"}, ins
+
+
+def test_legacy_clocked_always_is_ff(model: dict) -> None:
+    """A legacy `always @(posedge clk)` inside a leaf core yields FF nodes — not
+    only the top-level `always_ff` lane registers."""
+    core_ffs = [
+        n
+        for n in model["nodes"]
+        if n["kind"] == "FF" and "g_lane[0].core.$ff" in n["path"]
+    ]
+    assert core_ffs, "no FF nodes inside the core (legacy clocked always unmodeled)"
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]
