@@ -267,6 +267,37 @@ fn shared_signal_gives_each_ff_a_distinct_pin() {
 }
 
 #[test]
+fn leaf_instance_is_drillable() {
+    // A leaf RTL module (picorv32 — no child instances or inferred FFs in its own
+    // scope) must still be drillable: a module instance always has an interior (its
+    // module body / I/O frame). Regression guard for the silent double-click no-op
+    // (#30) where leaf instances reported expandable == false.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();
+
+    let core = g.nodes.iter().find(|n| n.label == "core").unwrap();
+    assert_eq!(
+        core.kind,
+        svxprobe_model::NodeKind::Instance,
+        "core is a module instance"
+    );
+    assert!(core.expandable, "leaf instance must be drillable");
+
+    // Non-instance boxes/pins stay non-expandable (inferred FFs, boundary ports).
+    for n in g
+        .nodes
+        .iter()
+        .filter(|n| n.kind != svxprobe_model::NodeKind::Instance)
+    {
+        assert!(
+            !n.expandable,
+            "non-instance node should not be expandable: {} ({:?})",
+            n.label, n.kind
+        );
+    }
+}
+
+#[test]
 fn cone_reaches_the_driver() {
     let d = design();
     // bus.valid is driven by core.mem_valid; its cone should reach the core box.
