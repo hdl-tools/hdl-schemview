@@ -169,6 +169,16 @@ fn relative_to(path: &str, scope: &str) -> String {
         .unwrap_or_else(|| last_segment(path).to_string())
 }
 
+/// Append an edge's resolved bit-select to a net label (`core_trap` + `[0]` →
+/// `core_trap[0]`), so a vector fanned out per bit shows which bit each wire
+/// carries. Falls back to the bare label when the edge connects the whole signal.
+fn with_select(base: String, select: &Option<String>) -> String {
+    match select {
+        Some(s) => format!("{base}{s}"),
+        None => base,
+    }
+}
+
 /// The module/definition type of an instance, taken from the basename (no
 /// extension) of the file that defines it (`…/picorv32.v` → `picorv32`). This is
 /// a best-effort recovery until the harness emits the real definition name.
@@ -430,7 +440,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {
                 let net = design
                     .node(e.endpoint)
-                    .map(|n| relative_to(&n.path, scope_path));
+                    .map(|n| with_select(relative_to(&n.path, scope_path), &e.select));
                 edges.push(SchEdge {
                     id: i as u32,
                     source: src,
@@ -500,7 +510,7 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
                 }
                 let net = design
                     .node(e.endpoint)
-                    .map(|n| last_segment(&n.path).to_string());
+                    .map(|n| with_select(last_segment(&n.path).to_string(), &e.select));
                 edges.push(SchEdge {
                     id: e.id,
                     source: e.port,
