@@ -252,7 +252,10 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         kind: n.kind,
         label,
         path: n.path.clone(),
-        expandable: !child_boxes(design, bx).is_empty(),
+        // A module instance always has an interior (its module body), so it is
+        // always drillable — even a leaf with no child boxes (drilling renders its
+        // I/O frame). Other box kinds are drillable only if they contain boxes.
+        expandable: n.kind == NodeKind::Instance || !child_boxes(design, bx).is_empty(),
         ports,
         module: module_of(design, n),
         constant: None,
