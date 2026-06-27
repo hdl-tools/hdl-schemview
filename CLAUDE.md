@@ -235,3 +235,28 @@ or the named agent):
 Process skills (brainstorming, TDD, debugging, planning) come **first** — they
 decide *how* to approach the work — then the domain skills guide execution.
 
+## Sub-agents (delegation)
+
+Delegate to sub-agents (via the `Agent` tool) to keep the main thread focused and
+to exploit this repo's natural fan-out. You get the conclusion back, not the file
+dumps. This is most valuable *here* because the tree is wide and polyglot.
+
+- **Explore broadly, then act.** For "where is X / how is Y wired" sweeps across the
+  three trees (`core/crates/*` + `app/src/*` + `elaborate/*`), dispatch an `Explore`
+  (or `general-purpose`) agent instead of reading dozens of files inline. Reserve
+  direct reads for the handful of files you'll actually edit.
+- **Fan out across layers for DTO-sync changes.** The single-source-of-truth wire
+  format spans Rust serde DTOs (`gui`/`schematic`) ↔ `app/src/types.ts` ↔
+  `elaborate/schema/model.schema.json`. When a change touches all three, spin up one
+  agent per layer **in a single message** so they run in parallel.
+- **Review per language at the commit gate.** Before the human review-before-commit
+  gate above, run the matching reviewer agent on the changed tree — in parallel when
+  the change is cross-cutting: `ecc:rust-reviewer` (`core/crates/*`),
+  `ecc:typescript-reviewer` (`app/src/*`), `ecc:python-reviewer` (`elaborate/*`).
+  This complements, never replaces, the user's visual + diff review.
+- **`fork` to preserve context.** For a sub-task that needs the current conversation's
+  full context (a mid-task investigation, a focused refactor), prefer a `fork`; use a
+  fresh `general-purpose` agent only for self-contained work.
+- **Don't double-run.** Once you've delegated a search, wait for the result instead of
+  also running it inline.
+
