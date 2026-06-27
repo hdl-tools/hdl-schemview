@@ -11,6 +11,12 @@ export interface SchPort {
 }
 export interface SchNode {
   id: number;
+  /**
+   * Model NodeKind, mirrored as a string. Drives the renderer's glyph choice:
+   * `Instance`/`GenBlock` → module box, `Port` → boundary pin, `FF` → flip-flop,
+   * `Comb` → combinational rectangle, `Assign` → stadium (function) node,
+   * `Latch` → box (dedicated glyph pending).
+   */
   kind: string;
   label: string;
   path: string;
