@@ -182,12 +182,16 @@ class Elaborator:
     @staticmethod
     def _logic_role(sym: Any) -> Optional[str]:
         """Classify a process / continuous assign as a logic spine node:
-        ``'ff'`` (edge-sensitive sequential), ``'comb'`` (combinational/latch), or
-        ``None`` (not logic — e.g. ``initial``/``final``).
+        ``'ff'`` (edge-sensitive sequential), ``'comb'`` (combinational process —
+        ``always_comb`` / ``always @*`` / ``always_latch``), ``'assign'``
+        (continuous ``assign``), or ``None`` (not logic — e.g. ``initial`` /
+        ``final``). ``comb`` and ``assign`` are both combinational but kept distinct
+        so the schematic can render a process as a box and an assign as a function
+        node.
         """
         kname = _kind_name(sym)
         if kname == "ContinuousAssign":
-            return "comb"
+            return "assign"
         if kname != "ProceduralBlock":
             return None
         pk = str(getattr(sym, "procedureKind", "")).split(".")[-1]
@@ -201,18 +205,22 @@ class Elaborator:
             return "ff" if Elaborator._has_edge(timing) else "comb"
         return None  # Initial / Final / other
 
+    # role -> (NodeKind, node name / path tag). The tag also names the synthetic
+    # path segment (`$ff12` / `$comb12` / `$assign12`).
+    _LOGIC_KIND = {"ff": ("FF", "FF", "ff"), "comb": ("Comb", "comb", "comb"), "assign": ("Assign", "assign", "assign")}
+
     def _add_logic(self, sym: Any, parent: Optional[int], role: str) -> int:
-        """Emit a process-level logic node — an inferred register (``ff``) or a
-        combinational block (``comb``). Processes / continuous assigns are unnamed
-        and have no hierarchical path, so synthesize one (``$ff{nid}``/``$comb{nid}``).
+        """Emit a process-level logic node — an inferred register (``ff``), a
+        combinational process (``comb`` — ``always_comb`` / ``always @*``), or a
+        continuous assign (``assign``). Processes / continuous assigns are unnamed
+        and have no hierarchical path, so synthesize one (``$ff{nid}`` etc.).
         ``def_range`` comes from ``sym.syntax`` (via ``_add``), giving source
-        cross-probe for both block kinds for free.
+        cross-probe for every block kind for free.
         """
-        kind = "FF" if role == "ff" else "Comb"
-        tag = "ff" if role == "ff" else "comb"
+        kind, name, tag = self._LOGIC_KIND[role]
         nid = self._add(sym, kind, parent)
         n = self.nodes[nid]
-        n["name"] = "FF" if role == "ff" else "comb"
+        n["name"] = name
         base = self.nodes[parent]["path"] if parent is not None else ""
         n["path"] = f"{base}.${tag}{nid}"
         n["symbol_key"] = n["path"]

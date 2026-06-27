@@ -121,6 +121,28 @@ def test_inferred_comb(model: dict) -> None:
     ), "no comb box with both inputs and an output"
 
 
+def test_continuous_assign_is_distinct_kind(model: dict) -> None:
+    """A continuous `assign` is an `Assign` node (kept distinct from `Comb` so the
+    schematic can draw it as a function node), wired to its reads and its LHS."""
+    by = {n["id"]: n for n in model["nodes"]}
+    assigns = [n for n in model["nodes"] if n["kind"] == "Assign"]
+    combs = [n for n in model["nodes"] if n["kind"] == "Comb"]
+    assert assigns, "no Assign nodes emitted"
+    assert combs, "no Comb nodes emitted (always @* should not fold into Assign)"
+
+    def sigs(nid: int, direction: str) -> set[str]:
+        return {
+            by[e["endpoint"]]["name"]
+            for e in model["edges"]
+            if e["port"] == nid and e["dir"] == direction
+        }
+
+    # A real continuous assign reads at least one signal and drives an output.
+    assert any(
+        sigs(a["id"], "in") and sigs(a["id"], "out") for a in assigns
+    ), "no assign node with both inputs and an output"
+
+
 def test_legacy_clocked_always_is_ff(model: dict) -> None:
     """A legacy `always @(posedge clk)` inside a leaf core yields FF nodes — not
     only the top-level `always_ff` lane registers."""

@@ -205,7 +205,9 @@ async function renderSchematic(graph: SchematicGraph) {
       arrow.onclick = () => selectNode(pid);
       g.appendChild(arrow);
 
-      if (sp) {
+      // A comb/assign node is logic, not a module: its pins are bare wire stubs, so
+      // skip the per-pin signal-name labels (the wire already carries that name).
+      if (sp && node?.kind !== "Comb" && node?.kind !== "Assign") {
         const t = document.createElementNS(SVGNS, "text");
         t.setAttribute("class", "pin-label");
         t.setAttribute("x", String(west ? edgeX + LABEL_PAD : edgeX - LABEL_PAD));

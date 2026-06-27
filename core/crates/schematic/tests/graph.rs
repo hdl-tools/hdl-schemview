@@ -298,6 +298,70 @@ fn leaf_instance_is_drillable() {
 }
 
 #[test]
+fn leaf_core_shows_wired_internal_logic() {
+    // Drilling into a leaf module (picorv32 core — no child instances) renders its
+    // internal logic at process granularity: Comb + Ff boxes wired through the
+    // scope-level signals they share, plus the core's own boundary pins (#33).
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].core").expect("core scope graph");
+
+    let combs = g
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Comb)
+        .count();
+    let assigns = g
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Assign)
+        .count();
+    let ffs: Vec<_> = g
+        .nodes
+        .iter()
+        .filter(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .collect();
+    assert!(combs > 0, "drilled core has no comb (always @*) boxes");
+    assert!(assigns > 0, "drilled core has no assign nodes");
+    assert!(
+        ffs.len() >= 10,
+        "drilled core should expose its clocked-always FFs, got {}",
+        ffs.len()
+    );
+
+    // The core's clock input appears as a boundary pin.
+    assert!(
+        g.nodes
+            .iter()
+            .any(|n| n.kind == svxprobe_model::NodeKind::Port && n.label == "clk"),
+        "no clk boundary pin in the drilled core"
+    );
+
+    // The internal logic is actually wired (signal-join), not floating boxes.
+    assert!(!g.edges.is_empty(), "no internal wires in the drilled core");
+
+    // Every FF gets its own clk pin (guards the per-(box,signal) allocator, #32).
+    let clk_pins: Vec<NodeId> = ffs
+        .iter()
+        .filter_map(|ff| ff.ports.iter().find(|p| p.name == "clk").map(|p| p.id))
+        .collect();
+    let uniq: std::collections::HashSet<NodeId> = clk_pins.iter().copied().collect();
+    assert_eq!(uniq.len(), clk_pins.len(), "two FFs share a clk pin");
+
+    // No wire joins two pins of the *same* box (no self-loop).
+    let mut pin_box = std::collections::HashMap::new();
+    for n in &g.nodes {
+        for p in &n.ports {
+            pin_box.insert(p.id, n.id);
+        }
+    }
+    for e in &g.edges {
+        if let (Some(&sb), Some(&tb)) = (pin_box.get(&e.source), pin_box.get(&e.target)) {
+            assert_ne!(sb, tb, "edge {} joins two pins of one box", e.id);
+        }
+    }
+}
+
+#[test]
 fn cone_reaches_the_driver() {
     let d = design();
     // bus.valid is driven by core.mem_valid; its cone should reach the core box.

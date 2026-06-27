@@ -4196,12 +4196,12 @@
     },
     {
       "id": 135,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb135",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign135",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb135",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign135",
       "def_range": {
         "file": 2,
         "start": {
@@ -4224,12 +4224,12 @@
     },
     {
       "id": 136,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb136",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign136",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb136",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign136",
       "def_range": {
         "file": 2,
         "start": {
@@ -4901,12 +4901,12 @@
     },
     {
       "id": 160,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk1.$comb160",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk1.$assign160",
       "parent": 159,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$comb160",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$assign160",
       "def_range": {
         "file": 2,
         "start": {
@@ -4929,12 +4929,12 @@
     },
     {
       "id": 161,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk1.$comb161",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk1.$assign161",
       "parent": 159,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$comb161",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$assign161",
       "def_range": {
         "file": 2,
         "start": {
@@ -4957,12 +4957,12 @@
     },
     {
       "id": 162,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk1.$comb162",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk1.$assign162",
       "parent": 159,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$comb162",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$assign162",
       "def_range": {
         "file": 2,
         "start": {
@@ -4985,12 +4985,12 @@
     },
     {
       "id": 163,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk1.$comb163",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk1.$assign163",
       "parent": 159,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$comb163",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk1.$assign163",
       "def_range": {
         "file": 2,
         "start": {
@@ -5074,12 +5074,12 @@
     },
     {
       "id": 166,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk2.$comb166",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk2.$assign166",
       "parent": 165,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$comb166",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$assign166",
       "def_range": {
         "file": 2,
         "start": {
@@ -5102,12 +5102,12 @@
     },
     {
       "id": 167,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk2.$comb167",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk2.$assign167",
       "parent": 165,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$comb167",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$assign167",
       "def_range": {
         "file": 2,
         "start": {
@@ -5130,12 +5130,12 @@
     },
     {
       "id": 168,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk2.$comb168",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk2.$assign168",
       "parent": 165,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$comb168",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$assign168",
       "def_range": {
         "file": 2,
         "start": {
@@ -5158,12 +5158,12 @@
     },
     {
       "id": 169,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.genblk2.$comb169",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.genblk2.$assign169",
       "parent": 165,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$comb169",
+      "symbol_key": "picorv32_soc.g_lane[0].core.genblk2.$assign169",
       "def_range": {
         "file": 2,
         "start": {
@@ -5774,12 +5774,12 @@
     },
     {
       "id": 191,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb191",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign191",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb191",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign191",
       "def_range": {
         "file": 2,
         "start": {
@@ -5858,12 +5858,12 @@
     },
     {
       "id": 194,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb194",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign194",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb194",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign194",
       "def_range": {
         "file": 2,
         "start": {
@@ -5886,12 +5886,12 @@
     },
     {
       "id": 195,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb195",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign195",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb195",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign195",
       "def_range": {
         "file": 2,
         "start": {
@@ -5914,12 +5914,12 @@
     },
     {
       "id": 196,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb196",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign196",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb196",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign196",
       "def_range": {
         "file": 2,
         "start": {
@@ -5942,12 +5942,12 @@
     },
     {
       "id": 197,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb197",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign197",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb197",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign197",
       "def_range": {
         "file": 2,
         "start": {
@@ -5970,12 +5970,12 @@
     },
     {
       "id": 198,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb198",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign198",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb198",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign198",
       "def_range": {
         "file": 2,
         "start": {
@@ -8210,12 +8210,12 @@
     },
     {
       "id": 278,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb278",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign278",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb278",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign278",
       "def_range": {
         "file": 2,
         "start": {
@@ -8266,12 +8266,12 @@
     },
     {
       "id": 280,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb280",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign280",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb280",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign280",
       "def_range": {
         "file": 2,
         "start": {
@@ -9806,12 +9806,12 @@
     },
     {
       "id": 335,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb335",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign335",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb335",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign335",
       "def_range": {
         "file": 2,
         "start": {
@@ -10734,12 +10734,12 @@
     },
     {
       "id": 368,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[0].core.$comb368",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[0].core.$assign368",
       "parent": 26,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[0].core.$comb368",
+      "symbol_key": "picorv32_soc.g_lane[0].core.$assign368",
       "def_range": {
         "file": 2,
         "start": {
@@ -14911,12 +14911,12 @@
     },
     {
       "id": 503,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb503",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign503",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb503",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign503",
       "def_range": {
         "file": 2,
         "start": {
@@ -14939,12 +14939,12 @@
     },
     {
       "id": 504,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb504",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign504",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb504",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign504",
       "def_range": {
         "file": 2,
         "start": {
@@ -15616,12 +15616,12 @@
     },
     {
       "id": 528,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk1.$comb528",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk1.$assign528",
       "parent": 527,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$comb528",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$assign528",
       "def_range": {
         "file": 2,
         "start": {
@@ -15644,12 +15644,12 @@
     },
     {
       "id": 529,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk1.$comb529",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk1.$assign529",
       "parent": 527,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$comb529",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$assign529",
       "def_range": {
         "file": 2,
         "start": {
@@ -15672,12 +15672,12 @@
     },
     {
       "id": 530,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk1.$comb530",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk1.$assign530",
       "parent": 527,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$comb530",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$assign530",
       "def_range": {
         "file": 2,
         "start": {
@@ -15700,12 +15700,12 @@
     },
     {
       "id": 531,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk1.$comb531",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk1.$assign531",
       "parent": 527,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$comb531",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk1.$assign531",
       "def_range": {
         "file": 2,
         "start": {
@@ -15789,12 +15789,12 @@
     },
     {
       "id": 534,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk2.$comb534",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk2.$assign534",
       "parent": 533,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$comb534",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$assign534",
       "def_range": {
         "file": 2,
         "start": {
@@ -15817,12 +15817,12 @@
     },
     {
       "id": 535,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk2.$comb535",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk2.$assign535",
       "parent": 533,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$comb535",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$assign535",
       "def_range": {
         "file": 2,
         "start": {
@@ -15845,12 +15845,12 @@
     },
     {
       "id": 536,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk2.$comb536",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk2.$assign536",
       "parent": 533,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$comb536",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$assign536",
       "def_range": {
         "file": 2,
         "start": {
@@ -15873,12 +15873,12 @@
     },
     {
       "id": 537,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.genblk2.$comb537",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.genblk2.$assign537",
       "parent": 533,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$comb537",
+      "symbol_key": "picorv32_soc.g_lane[1].core.genblk2.$assign537",
       "def_range": {
         "file": 2,
         "start": {
@@ -16489,12 +16489,12 @@
     },
     {
       "id": 559,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb559",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign559",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb559",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign559",
       "def_range": {
         "file": 2,
         "start": {
@@ -16573,12 +16573,12 @@
     },
     {
       "id": 562,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb562",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign562",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb562",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign562",
       "def_range": {
         "file": 2,
         "start": {
@@ -16601,12 +16601,12 @@
     },
     {
       "id": 563,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb563",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign563",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb563",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign563",
       "def_range": {
         "file": 2,
         "start": {
@@ -16629,12 +16629,12 @@
     },
     {
       "id": 564,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb564",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign564",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb564",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign564",
       "def_range": {
         "file": 2,
         "start": {
@@ -16657,12 +16657,12 @@
     },
     {
       "id": 565,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb565",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign565",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb565",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign565",
       "def_range": {
         "file": 2,
         "start": {
@@ -16685,12 +16685,12 @@
     },
     {
       "id": 566,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb566",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign566",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb566",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign566",
       "def_range": {
         "file": 2,
         "start": {
@@ -18925,12 +18925,12 @@
     },
     {
       "id": 646,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb646",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign646",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb646",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign646",
       "def_range": {
         "file": 2,
         "start": {
@@ -18981,12 +18981,12 @@
     },
     {
       "id": 648,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb648",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign648",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb648",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign648",
       "def_range": {
         "file": 2,
         "start": {
@@ -20521,12 +20521,12 @@
     },
     {
       "id": 703,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb703",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign703",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb703",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign703",
       "def_range": {
         "file": 2,
         "start": {
@@ -21449,12 +21449,12 @@
     },
     {
       "id": 736,
-      "kind": "Comb",
-      "name": "comb",
-      "path": "picorv32_soc.g_lane[1].core.$comb736",
+      "kind": "Assign",
+      "name": "assign",
+      "path": "picorv32_soc.g_lane[1].core.$assign736",
       "parent": 394,
       "children": [],
-      "symbol_key": "picorv32_soc.g_lane[1].core.$comb736",
+      "symbol_key": "picorv32_soc.g_lane[1].core.$assign736",
       "def_range": {
         "file": 2,
         "start": {

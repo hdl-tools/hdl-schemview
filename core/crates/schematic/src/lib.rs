@@ -126,7 +126,10 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
     if let Some(n) = design.node(scope) {
         for &c in &n.children {
             match design.node(c).map(|x| x.kind) {
-                Some(NodeKind::Instance) | Some(NodeKind::Ff) => out.push(c),
+                Some(NodeKind::Instance)
+                | Some(NodeKind::Ff)
+                | Some(NodeKind::Comb)
+                | Some(NodeKind::Assign) => out.push(c),
                 Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
                 _ => {}
             }
@@ -153,6 +156,15 @@ fn box_of(
 
 fn is_kind(design: &Design, id: NodeId, kind: NodeKind) -> bool {
     design.node(id).map(|n| n.kind) == Some(kind)
+}
+
+/// A process-level logic node (inferred register / combinational process /
+/// continuous assign) — the boxes the signal-join pass wires through shared nets.
+fn is_logic_box(design: &Design, id: NodeId) -> bool {
+    matches!(
+        design.node(id).map(|n| n.kind),
+        Some(NodeKind::Ff) | Some(NodeKind::Comb) | Some(NodeKind::Assign)
+    )
 }
 
 /// Last segment of a path (used to label unnamed generate blocks).
@@ -321,6 +333,45 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
     })
 }
 
+/// A combinational-logic box — an `always_comb`/`always @*` process (`Comb`) or a
+/// continuous `assign` (`Assign`). Like an FF it has no model `Port` children, so
+/// synthesize a pin per wired signal (reads on the west, assigns on the east) from
+/// its edges; pin ids come from `pins` keyed by `(box, signal)` so boxes sharing a
+/// net keep distinct pins. The kind is carried through so the frontend can draw a
+/// process box vs an assign function node.
+fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<SchNode> {
+    let n = design.node(bx)?;
+    let ports: Vec<SchPort> = design
+        .edges_of(bx)
+        .iter()
+        .filter(|e| e.port == bx)
+        .map(|e| {
+            let sig = design.node(e.endpoint);
+            SchPort {
+                id: pins.pin(bx, e.endpoint),
+                name: sig.map(|s| s.name.clone()).unwrap_or_default(),
+                side: side_of(e.dir),
+                width: sig.and_then(|s| width_of(&s.type_)),
+            }
+        })
+        .collect();
+    let label = if n.kind == NodeKind::Assign {
+        "assign"
+    } else {
+        "comb"
+    };
+    Some(SchNode {
+        id: bx,
+        kind: n.kind,
+        label: label.into(),
+        path: n.path.clone(),
+        expandable: false,
+        ports,
+        module: None,
+        constant: None,
+    })
+}
+
 /// A boundary I/O pin for one of the scope's own ports. Rendered as a frame pin
 /// (no box). Its single pin faces the design — inputs enter from the west frame
 /// (pin on the east), outputs leave at the east frame (pin on the west) — so the
@@ -367,10 +418,10 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     let mut pins = PinAlloc::new();
     let mut nodes: Vec<SchNode> = Vec::new();
     for &b in &boxes {
-        let node = if is_kind(design, b, NodeKind::Ff) {
-            make_ff_box(design, b, scope_path, &mut pins)
-        } else {
-            make_box(design, b, scope_path)
+        let node = match design.node(b).map(|n| n.kind) {
+            Some(NodeKind::Ff) => make_ff_box(design, b, scope_path, &mut pins),
+            Some(NodeKind::Comb) | Some(NodeKind::Assign) => make_logic_box(design, b, &mut pins),
+            _ => make_box(design, b, scope_path),
         };
         nodes.extend(node);
     }
@@ -428,16 +479,13 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     let mut edges = Vec::new();
     let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for (i, e) in design.edges().iter().enumerate() {
-        // An FF wires through its synthesized pin (allocated per (ff, signal) in
-        // make_ff_box above); other edges resolve both ends to in-scope boxes/pins.
-        let src_res = if is_kind(design, e.port, NodeKind::Ff) {
-            box_set
-                .contains(&e.port)
-                .then(|| (e.port, pins.pin(e.port, e.endpoint)))
-        } else {
-            resolve(e.port)
-        };
-        if let (Some((sb, src)), Some((tb, tgt))) = (src_res, resolve(e.endpoint)) {
+        // Logic boxes wire through the scope-level signals they read and assign;
+        // that is done by the signal-join pass below. Here we draw only the
+        // structural (instance) connections, both ends resolving to in-scope boxes.
+        if is_logic_box(design, e.port) {
+            continue;
+        }
+        if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
             // Collapse parallel connections that land on the same two anchors
             // (e.g. both lanes' clk meeting one boundary pin).
             if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {
@@ -453,11 +501,79 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             }
         }
     }
+    let mut next_edge = design.edges().len() as u32;
+
+    // Signal-join wiring: connect the scope's logic boxes (Ff/Comb) through the
+    // signals they share — the internal logic of a leaf module, whose endpoints are
+    // scope-level Vars/Nets the structural pass drops. For each signal, cross its
+    // drivers (edges out) with its loads (edges in) over the per-(box,signal) pins;
+    // the scope's own ports fold in (an input drives its signal, an output loads
+    // it). A no-op when the scope has no logic boxes, so hierarchical views are
+    // untouched.
+    let has_logic = boxes.iter().any(|&b| is_logic_box(design, b));
+    if has_logic {
+        // (pin id, resolved bit-select) for each end of a signal.
+        type Anchor = (NodeId, Option<String>);
+        let mut drivers: std::collections::HashMap<NodeId, Vec<Anchor>> =
+            std::collections::HashMap::new();
+        let mut loads: std::collections::HashMap<NodeId, Vec<Anchor>> =
+            std::collections::HashMap::new();
+        for e in design.edges() {
+            if !is_logic_box(design, e.port) || !box_set.contains(&e.port) {
+                continue;
+            }
+            // Join a boundary signal under its boundary pin so a port and its
+            // backing net share a bucket; other signals key on the signal node.
+            let key = *boundary_of.get(&e.endpoint).unwrap_or(&e.endpoint);
+            let anchor = (pins.pin(e.port, e.endpoint), e.select.clone());
+            if e.dir == Dir::Out {
+                drivers.entry(key).or_default().push(anchor);
+            } else {
+                loads.entry(key).or_default().push(anchor);
+            }
+        }
+        for &p in &own_ports {
+            match design.node(p).and_then(|n| n.dir) {
+                Some(Dir::Out) => loads.entry(p).or_default().push((p, None)),
+                Some(Dir::In) => drivers.entry(p).or_default().push((p, None)),
+                _ => {
+                    drivers.entry(p).or_default().push((p, None));
+                    loads.entry(p).or_default().push((p, None));
+                }
+            }
+        }
+        // BTreeSet for a deterministic wire order across runs.
+        let signals: std::collections::BTreeSet<NodeId> =
+            drivers.keys().chain(loads.keys()).copied().collect();
+        for sig in signals {
+            let (Some(ds), Some(ls)) = (drivers.get(&sig), loads.get(&sig)) else {
+                continue;
+            };
+            let label = design.node(sig).map(|n| relative_to(&n.path, scope_path));
+            for &(dpin, ref dsel) in ds {
+                for &(lpin, ref lsel) in ls {
+                    // No self-loop (a box reading and writing the same signal); dedup
+                    // against the shared `seen` set.
+                    if dpin == lpin || !seen.insert((dpin.min(lpin), dpin.max(lpin))) {
+                        continue;
+                    }
+                    let select = dsel.clone().or_else(|| lsel.clone());
+                    let net = label.clone().map(|b| with_select(b, &select));
+                    edges.push(SchEdge {
+                        id: next_edge,
+                        source: dpin,
+                        target: lpin,
+                        net,
+                    });
+                    next_edge += 1;
+                }
+            }
+        }
+    }
 
     // Constant tie-offs: a small source node outside each box, wired to every
     // input the model records as driven by a literal. ELK lays these out left of
     // the consumer and routes other wires around them.
-    let mut next_edge = design.edges().len() as u32;
     for &b in &boxes {
         let Some(bn) = design.node(b) else { continue };
         for &pid in &bn.children {
