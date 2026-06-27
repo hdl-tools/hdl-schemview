@@ -107,12 +107,17 @@ pub enum Dir {
 
 /// A port-connection edge: a module `port` wired to an external `endpoint`
 /// (net / var / port / interface instance).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Edge {
     pub id: u32,
     pub port: NodeId,
     pub endpoint: NodeId,
     pub dir: Dir,
+    /// Resolved bit-select on the connected expression (e.g. `[0]` or `[7:4]`),
+    /// used to label the wire with the bit it carries. `None` for a whole-signal
+    /// connection. Emitted by the elaboration harness; never inferred.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<String>,
 }
 
 /// The deserialized Node-model document (matches `model.schema.json`).
@@ -340,6 +345,7 @@ mod tests {
                 port: 1,
                 endpoint: 2,
                 dir: Dir::Out,
+                select: None,
             }],
         };
         let d = Design::from_document(doc);
