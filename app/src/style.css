@@ -6,6 +6,8 @@
   /* schematic */
   --canvas:#1e1e1e;
   --box:#2d3b52; --box-stroke:#46608f;
+  --comb:#2c4a40; --comb-stroke:#4f9b80;
+  --assign:#23425a; --assign-stroke:#3f86c0;
   --label:#eaeefb; --sublabel:#9fb4d8;
   --pin:#9cc4ff; --pin-out:#ffd479;
   --wire:#7f93b5; --wire-label:#c7d3ea;
@@ -16,6 +18,8 @@
   --crumb:#eceef3; --crumb-fg:#1d4ed8; --muted:#8893a6; --hl:#fff3c4; --wavebg:#fbfbfd;
   --canvas:#ffffff;
   --box:#eef2fb; --box-stroke:#5b6b8c;
+  --comb:#e6f5ef; --comb-stroke:#4f9b80;
+  --assign:#e3eefb; --assign-stroke:#3f86c0;
   --label:#1a2233; --sublabel:#55617a;
   --pin:#2f5fb0; --pin-out:#b56a00;
   --wire:#5a6a86; --wire-label:#33415c;
@@ -48,7 +52,6 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 
 /* schematic primitives */
 .box { fill:var(--box); stroke:var(--box-stroke); cursor:pointer; }
-.box.sel { stroke:var(--sel); stroke-width:2.5; }
 .box-label { fill:var(--label); font-size:12px; font-weight:600; }
 .box-sublabel { fill:var(--sublabel); font-size:10px; }
 .pin { cursor:pointer; }
@@ -57,6 +60,11 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }
 .const-label { fill:var(--sublabel); font-size:9px; font-family:ui-monospace, monospace; cursor:pointer; }
 .box.ff { fill:var(--box); stroke:var(--box-stroke); }
+/* Combinational logic: comb is a rectangle, assign a stadium — each its own tint. */
+.box.comb { fill:var(--comb); stroke:var(--comb-stroke); }
+.box.assign { fill:var(--assign); stroke:var(--assign-stroke); }
+/* Selection stroke wins over every per-kind stroke above (declared last). */
+.box.sel { stroke:var(--sel); stroke-width:2.5; }
 .ff-clk { fill:none; stroke:var(--label); stroke-width:1.3; }
 .ff-rst { fill:var(--canvas); stroke:var(--label); stroke-width:1.3; }
 .wire { stroke:var(--wire); fill:none; stroke-width:1.5; }

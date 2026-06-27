@@ -128,6 +128,56 @@ function ffChild(n: SchNode): ElkChild {
   };
 }
 
+// A continuous assign, laid out as a stadium (rounded-end capsule): inputs spread
+// down the west wall, a single output centred on the east. Height grows with the
+// input count; width is kept >= height so the capsule's end caps (radius H/2) are
+// valid, with extra room for the "assign" label in the flat middle.
+function assignChild(n: SchNode): ElkChild {
+  const west = n.ports.filter((p) => p.side !== "east");
+  const east = n.ports.filter((p) => p.side === "east");
+  const rows = Math.max(west.length, 1);
+  const h = Math.max(34, 14 + rows * 16);
+  const w = Math.max(h + 44, "assign".length * PIN_CH + h);
+  const ports: ElkPort[] = [];
+  // Inputs spread within an inset band so they land on the curved wall, not the caps.
+  // Each port's x is pushed in to the capsule edge at its height (matching the pin
+  // triangle in renderAssign) so wires terminate on the rounded wall, not in space.
+  const r = h / 2;
+  const capInset = (y: number) => r - Math.sqrt(Math.max(0, r * r - Math.min(Math.abs(y - r), r) ** 2));
+  const top = 10;
+  const span = Math.max(0, h - 2 * top);
+  west.forEach((p, i) => {
+    const y = west.length > 1 ? top + (span * i) / (west.length - 1) : h / 2;
+    ports.push({
+      id: portId(p.id),
+      width: 6,
+      height: 6,
+      x: capInset(y),
+      y,
+      layoutOptions: { "elk.port.side": "WEST" },
+    });
+  });
+  // The assigned LHS — normally one output, centred on the east cap.
+  east.forEach((p) =>
+    ports.push({
+      id: portId(p.id),
+      width: 6,
+      height: 6,
+      x: w,
+      y: h / 2,
+      layoutOptions: { "elk.port.side": "EAST" },
+    }),
+  );
+  return {
+    id: nodeId(n.id),
+    width: w,
+    height: h,
+    labels: [{ text: "assign" }],
+    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    ports,
+  };
+}
+
 /// Pure mapping: SchematicGraph -> ELK graph (no geometry yet).
 export function toElk(graph: SchematicGraph): ElkGraph {
   const portOwner = new Set<number>();
@@ -137,6 +187,8 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     // Inferred register: a fixed-size FF symbol with explicitly-placed pins —
     // clock + reset + conditions along the bottom, Q on the right centre.
     if (n.kind === "FF") return ffChild(n);
+    // Continuous assign: a stadium capsule (inputs west, output east).
+    if (n.kind === "Assign") return assignChild(n);
     // Boundary I/O pin: a small node sized to its label, with its single port
     // already sided toward the design.
     if (n.kind === "Port") {

@@ -76,16 +76,16 @@ describe("toElk", () => {
     expect(c.height).toBeGreaterThan(58);
   });
 
-  it("keeps comb/assign nodes compact despite long signal names", () => {
-    // Logic nodes draw bare pin stubs (no per-pin labels), so their width must not
-    // reserve room for the connected signal names — only the short title.
-    const make = (kind: "Comb" | "Assign"): SchematicGraph => ({
+  it("keeps comb nodes compact despite long signal names", () => {
+    // Comb draws bare pin stubs (no per-pin labels), so its width must not reserve
+    // room for the connected signal names — only the short title.
+    const g: SchematicGraph = {
       root: "s",
       nodes: [
         {
           id: 1,
-          kind,
-          label: kind === "Comb" ? "comb" : "assign",
+          kind: "Comb",
+          label: "comb",
           path: "s.x",
           expandable: false,
           ports: Array.from({ length: 6 }, (_, i) => ({
@@ -96,11 +96,39 @@ describe("toElk", () => {
         },
       ],
       edges: [],
+    };
+    const c = toElk(g).children[0];
+    // Sized from the title, not the long pin names; well under the 150 box floor.
+    expect(c.width).toBeLessThan(100);
+  });
+
+  it("lays out an assign node as a valid capsule, sized by inputs not names", () => {
+    const make = (name: string): SchematicGraph => ({
+      root: "s",
+      nodes: [
+        {
+          id: 1,
+          kind: "Assign",
+          label: "assign",
+          path: "s.a",
+          expandable: false,
+          ports: [
+            { id: 10, name, side: "west" },
+            { id: 11, name, side: "west" },
+            { id: 12, name, side: "west" },
+            { id: 13, name, side: "east" },
+          ],
+        },
+      ],
+      edges: [],
     });
-    for (const kind of ["Comb", "Assign"] as const) {
-      const c = toElk(make(kind)).children[0];
-      // Sized from the title, not the long pin names; well under the 150 box floor.
-      expect(c.width).toBeLessThan(100);
-    }
+    const c = toElk(make("x")).children[0];
+    // Capsule end caps (radius H/2) are only valid when width >= height.
+    expect(c.width).toBeGreaterThanOrEqual(c.height);
+    const sides = c.ports.map((p) => p.layoutOptions["elk.port.side"]);
+    expect(sides.filter((s) => s === "EAST").length).toBe(1); // single output
+    expect(sides.filter((s) => s === "WEST").length).toBe(3); // inputs spread
+    // Width is driven by input count, not the (unrendered) signal-name length.
+    expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(c.width);
   });
 });
