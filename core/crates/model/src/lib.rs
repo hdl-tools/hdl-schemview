@@ -29,9 +29,13 @@ pub enum NodeKind {
     Param,
     ModuleDef,
     GenBlock,
-    /// Inferred sequential register (an `always_ff` block).
+    /// Inferred sequential register (an edge-sensitive `always_ff` / clocked
+    /// `always` block).
     #[serde(rename = "FF")]
     Ff,
+    /// Combinational process (an `always_comb` / `always @*` / continuous
+    /// `assign`).
+    Comb,
 }
 
 /// A point in a source file.

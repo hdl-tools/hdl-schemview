@@ -100,6 +100,38 @@ def test_inferred_ff(model: dict) -> None:
     assert "clk" in sigs(lane[0]["id"], "in"), "FF not clocked"
 
 
+def test_inferred_comb(model: dict) -> None:
+    """Combinational logic (`always @*` / `always_comb` / continuous `assign`)
+    becomes Comb nodes wired to the signals it reads (in) and assigns (out)."""
+    by = {n["id"]: n for n in model["nodes"]}
+    combs = [n for n in model["nodes"] if n["kind"] == "Comb"]
+    assert combs, "no Comb nodes emitted"
+
+    def sigs(cid: int, direction: str) -> set[str]:
+        return {
+            by[e["endpoint"]]["name"]
+            for e in model["edges"]
+            if e["port"] == cid and e["dir"] == direction
+        }
+
+    # At least one comb block is wired on both sides (reads something, drives
+    # something) — real RTL has no free-floating combinational logic.
+    assert any(
+        sigs(c["id"], "in") and sigs(c["id"], "out") for c in combs
+    ), "no comb box with both inputs and an output"
+
+
+def test_legacy_clocked_always_is_ff(model: dict) -> None:
+    """A legacy `always @(posedge clk)` inside a leaf core yields FF nodes — not
+    only the top-level `always_ff` lane registers."""
+    core_ffs = [
+        n
+        for n in model["nodes"]
+        if n["kind"] == "FF" and "g_lane[0].core.$ff" in n["path"]
+    ]
+    assert core_ffs, "no FF nodes inside the core (legacy clocked always unmodeled)"
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]
