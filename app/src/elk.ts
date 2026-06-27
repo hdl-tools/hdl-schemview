@@ -53,6 +53,12 @@ const PIN_HALF = 4; // pin triangle half-height (it extends ±4 around its py)
 
 const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 1 : 0);
 
+// Process-level logic nodes (combinational process / level latch / continuous
+// assign). They draw bare pin stubs and size compactly — distinct from module
+// instances. (FF has its own dedicated symbol, so it is handled separately.)
+export const isLogicKind = (k: string): boolean =>
+  k === "Comb" || k === "Latch" || k === "Assign";
+
 // --- inferred FF symbol ----------------------------------------------------
 export type FfRole = "clk" | "reset" | "q" | "data";
 // Classify an FF pin by side + (conventional) name: Q on the east, clock/reset
@@ -160,11 +166,17 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     }
     const west = n.ports.filter((p) => p.side !== "east");
     const east = n.ports.filter((p) => p.side === "east");
+    const titleLen = Math.max(n.label.length, n.module ? n.module.length + 2 : 0);
+    // Comb/assign nodes draw bare pin stubs (no per-pin labels), so size them
+    // compactly from the title alone. The generic box instead reserves room for the
+    // west+east pin labels side by side — sizing a label-less logic node that way
+    // would widen it to fit signal names that are never drawn.
+    const isLogic = isLogicKind(n.kind);
     const wMax = west.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
     const eMax = east.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
-    const titleLen = Math.max(n.label.length, n.module ? n.module.length + 2 : 0);
-    // Wide enough for the title and for the west+east pin labels side by side.
-    const w = Math.max(150, titleLen * TITLE_CH + 28, (wMax + eMax) * PIN_CH + 56);
+    const w = isLogic
+      ? Math.max(64, titleLen * TITLE_CH + 24)
+      : Math.max(150, titleLen * TITLE_CH + 28, (wMax + eMax) * PIN_CH + 56);
     const rows = Math.max(west.length, east.length, 1);
     // Tall enough for the two-line title band plus one row per pin.
     const h = Math.max(58, 36 + rows * ROW_H);
