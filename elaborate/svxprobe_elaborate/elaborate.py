@@ -186,6 +186,75 @@ class Elaborator:
             pass
         return out
 
+    @staticmethod
+    def _const_bit(expr: Any) -> Optional[str]:
+        """Elaborated constant value of a select bound (`gi` -> `0`), else None.
+        Only constant bounds yield a select; a variable index resolves to no bit."""
+        try:
+            c = expr.constant
+        except Exception:
+            return None
+        if c is None or getattr(c, "bad", False):
+            return None
+        s = str(c)
+        return s if s and s != "None" else None
+
+    @staticmethod
+    def _base_path(node: Any) -> Optional[str]:
+        """Hierarchical path of the symbol an ElementSelect/RangeSelect indexes."""
+        val = getattr(node, "value", None)
+        if val is None:
+            return None
+        p = getattr(getattr(val, "symbol", None), "hierarchicalPath", None)
+        if p:
+            return p
+        getref = getattr(val, "getSymbolReference", None)
+        if callable(getref):
+            try:
+                return getattr(getref(), "hierarchicalPath", None)
+            except Exception:
+                return None
+        return None
+
+    def _select_suffix(self, node: Any) -> Optional[str]:
+        """Bit-select suffix for an ElementSelect/RangeSelect node using its
+        *elaborated constant* bounds: `[0]` or `[7:4]`. None when not constant."""
+        k = _kind_name(node)
+        if "ElementSelect" in k:
+            idx = self._const_bit(getattr(node, "selector", None))
+            return f"[{idx}]" if idx is not None else None
+        if "RangeSelect" in k:
+            msb = self._const_bit(getattr(node, "left", None))
+            lsb = self._const_bit(getattr(node, "right", None))
+            if msb is not None and lsb is not None:
+                return f"[{msb}:{lsb}]"
+        return None
+
+    def _selects_in(self, node: Any) -> dict[str, str]:
+        """Map base-signal path -> resolved bit-select for every constant index
+        in an expression/statement subtree. A signal indexed two different ways
+        in the same subtree is dropped (ambiguous -> bare label, no guess)."""
+        sel: dict[str, str] = {}
+        conflict: set[str] = set()
+
+        def cb(n: Any) -> None:
+            k = _kind_name(n)
+            if "ElementSelect" in k or "RangeSelect" in k:
+                base = self._base_path(n)
+                suf = self._select_suffix(n)
+                if base and suf:
+                    if sel.get(base, suf) != suf:
+                        conflict.add(base)
+                    sel[base] = suf
+
+        try:
+            node.visit(cb)
+        except Exception:
+            pass
+        for b in conflict:
+            sel.pop(b, None)
+        return sel
+
     def _ff_edges(self, ff_id: int, sym: Any, seen: set) -> None:
         """Wire an FF: clock + data signals in, assigned (Q) signals out."""
         body = getattr(sym, "body", None)
@@ -203,6 +272,9 @@ class Elaborator:
         except Exception:
             pass
         data = self._value_refs(sym) - assigned - clock
+        # Resolved bit-selects (e.g. `core_trap[gi]` -> `[0]`) for the signals
+        # this FF touches, so each wire is labelled with the bit it carries.
+        selects = self._selects_in(sym)
 
         def wire(paths: set, direction: str) -> list[int]:
             ids = []
@@ -214,7 +286,7 @@ class Elaborator:
                     and nid != ff_id
                     and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
                 ):
-                    seen.add((ff_id, nid, direction))
+                    seen.add((ff_id, nid, direction, selects.get(p)))
                     ids.append(nid)
             return ids
 
@@ -324,9 +396,11 @@ class Elaborator:
             self._by_path.setdefault(n["path"], []).append((n["id"], n["kind"]))
 
         dir_map = {"In": "in", "Out": "out", "InOut": "inout"}
-        # Collect as a set keyed by (port, endpoint, dir), then sort, so the
-        # output is canonical regardless of pyslang container iteration order.
-        seen_edges: set[tuple[int, int, str]] = set()
+        # Collect as a set keyed by (port, endpoint, dir, select), then sort, so
+        # the output is canonical regardless of pyslang container iteration order.
+        # `select` is the resolved bit-select (e.g. `[0]`) or None for the whole
+        # signal.
+        seen_edges: set[tuple[int, int, str, Optional[str]]] = set()
         for inst_id, sym in self.instances:
             conns = getattr(sym, "portConnections", None)
             if conns is None:
@@ -345,10 +419,11 @@ class Elaborator:
                     str(getattr(port, "direction", "")).split(".")[-1], "inout"
                 )
                 refs = self._expr_refs(expr)
+                selects = self._selects_in(expr)
                 for rp in refs:
                     end_id = self._pick_node(rp, ("Net", "Var", "Port", "Instance"))
                     if end_id is not None and end_id != port_id:
-                        seen_edges.add((port_id, end_id, direction))
+                        seen_edges.add((port_id, end_id, direction, selects.get(rp)))
                 # Input tied to a literal (no net): record the constant on the
                 # port so the schematic can show its driver (e.g. 32'd0).
                 if not refs and port_id != inst_id:
@@ -359,10 +434,14 @@ class Elaborator:
         for ff_id, ff_sym in self.ff_blocks:
             self._ff_edges(ff_id, ff_sym, seen_edges)
 
-        return [
-            {"id": i, "port": p, "endpoint": e, "dir": d}
-            for i, (p, e, d) in enumerate(sorted(seen_edges))
-        ]
+        edges: list[dict[str, Any]] = []
+        ordered = sorted(seen_edges, key=lambda t: (t[0], t[1], t[2], t[3] or ""))
+        for i, (p, e, d, s) in enumerate(ordered):
+            edge: dict[str, Any] = {"id": i, "port": p, "endpoint": e, "dir": d}
+            if s is not None:
+                edge["select"] = s
+            edges.append(edge)
+        return edges
 
     def build(self) -> dict[str, Any]:
         root = self.comp.getRoot()
