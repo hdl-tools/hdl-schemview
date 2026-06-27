@@ -146,9 +146,14 @@ async function renderSchematic(graph: SchematicGraph) {
     rect.setAttribute("width", String(c.width));
     rect.setAttribute("height", String(c.height));
     rect.setAttribute("rx", "4");
+    rect.dataset.nodeId = String(id);
     rect.onclick = () => selectNode(id);
     rect.ondblclick = () => {
       if (node?.expandable) setScope(node.path ?? "", node.label);
+    };
+    rect.oncontextmenu = (e) => {
+      e.preventDefault();
+      crossProbe(id);
     };
     g.appendChild(rect);
 
@@ -273,7 +278,12 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.setAttribute("width", String(W));
   rect.setAttribute("height", String(H));
   rect.setAttribute("rx", "3");
+  rect.dataset.nodeId = String(id);
   rect.onclick = () => selectNode(id);
+  rect.oncontextmenu = (e) => {
+    e.preventDefault();
+    crossProbe(id);
+  };
   g.appendChild(rect);
 
   const t = document.createElementNS(SVGNS, "text");
@@ -364,13 +374,36 @@ function pathOf(id: number): string | null {
   return state.graph?.nodes.find((n) => n.id === id)?.path ?? null;
 }
 
-async function selectNode(id: number) {
+// Single-click selection: highlight the node in the schematic only. This is
+// deliberately synchronous and non-destructive — it moves the `.sel` class in
+// place rather than re-rendering, so a following double-click still lands on the
+// same element and drills reliably. (The old async re-render here wiped the SVG
+// mid-double-click and destroyed the drill target → intermittent drilling, #47.)
+// Source/waveform cross-probe no longer fires on single-click; it moves to
+// right-click — see `crossProbe`.
+function selectNode(id: number) {
   state.selected = id;
+  applySelection();
+}
+
+// Reflect `state.selected` by moving the `.sel` class only, leaving the rest of
+// the DOM intact so any pending double-click target survives.
+function applySelection() {
+  const host = $("schematic");
+  host.querySelectorAll(".box.sel").forEach((el) => el.classList.remove("sel"));
+  if (state.selected != null) {
+    host.querySelector(`[data-node-id="${state.selected}"]`)?.classList.add("sel");
+  }
+}
+
+// Right-click a box to cross-probe it to source + waveform. A polished drop-down
+// menu is the later-stage enhancement; this keeps cross-probing reachable now
+// that single-click is schematic-only (#47).
+async function crossProbe(id: number) {
   const path = pathOf(id);
   if (!path) return;
   const resp = await api.probeNode(path, context());
   if (resp) applyProbe(resp);
-  if (state.graph) await renderSchematic(state.graph);
 }
 
 // -- apply a cross-probe result to source + waveform -----------------------
