@@ -70,15 +70,28 @@ export function ffRole(p: SchPort): FfRole {
   return "data";
 }
 export const FF_H = 46;
-export const ffWidth = (dataCount: number) => Math.max(56, (dataCount + 1) * 20 + 24);
+export const FF_W = 56; // default FF box width
+const FF_MARGIN = 12; // edge inset for the bottom (south) pin row
+const FF_PITCH = 16; // minimum spacing between adjacent bottom pins
 
-// A fixed-size FF: clock on the left wall (low), reset centred on the bottom
-// with conditions reflowed either side, Q on the right centre (FIXED_POS so the
-// renderer can match glyphs).
+// Width needed to host `slots` evenly-spaced bottom pins at >= FF_PITCH, never
+// below the default. `slots` counts data pins plus the reset (which takes the
+// centre slot). Small FFs stay at FF_W; only a genuinely wide pin row grows it.
+export const ffWidth = (slots: number) =>
+  slots <= 1 ? FF_W : Math.max(FF_W, 2 * FF_MARGIN + (slots - 1) * FF_PITCH);
+
+// A flip-flop: clock on the left wall (low), Q on the right centre, and the data
+// pins spread evenly across the whole bottom edge with the reset held dead-centre
+// (the renderer draws the reset bubble there). FIXED_POS so the renderer can match
+// glyphs to ports.
 function ffChild(n: SchNode): ElkChild {
   const by = (r: FfRole) => n.ports.filter((p) => ffRole(p) === r);
   const data = by("data");
-  const W = ffWidth(data.length);
+  const reset = by("reset");
+  const hasReset = reset.length > 0;
+  // The reset occupies one of the evenly-spaced bottom slots (the centre one).
+  const slots = data.length + (hasReset ? 1 : 0);
+  const W = ffWidth(slots);
   const south = (id: number, x: number): ElkPort => ({
     id: portId(id),
     width: 6,
@@ -106,18 +119,21 @@ function ffChild(n: SchNode): ElkChild {
       layoutOptions: { "elk.port.side": "EAST" },
     });
   for (const p of by("clk")) ports.push(west(p.id, FF_H - 11));
-  for (const p of by("reset")) ports.push(south(p.id, W / 2));
-  // Conditions reflow into two bands either side of the centre reset bubble:
-  // [margin, centre-gap] on the left, [centre+gap, W-margin] on the right.
-  const margin = 12;
-  const gap = 12; // clearance each side of the centre reset bubble
-  const place = (arr: typeof data, lo: number, hi: number) =>
-    arr.forEach((p, i) =>
-      ports.push(south(p.id, arr.length > 1 ? lo + ((hi - lo) * i) / (arr.length - 1) : (lo + hi) / 2)),
-    );
-  const half = Math.ceil(data.length / 2);
-  place(data.slice(0, half), margin, W / 2 - gap);
-  place(data.slice(half), W / 2 + gap, W - margin);
+
+  // One evenly-spaced row of `slots` positions across [margin, W - margin]. The
+  // centre slot is reserved for the reset (snapped to exactly W/2); the data pins
+  // fill the remaining slots in order, so the row reads as a single even spread.
+  const lo = FF_MARGIN;
+  const hi = W - FF_MARGIN;
+  const slotX = (i: number) => (slots > 1 ? lo + ((hi - lo) * i) / (slots - 1) : W / 2);
+  const mid = hasReset ? Math.round((slots - 1) / 2) : -1;
+  let di = 0;
+  for (let i = 0; i < slots; i++) {
+    if (i === mid) continue; // reserved for the centred reset
+    ports.push(south(data[di++].id, slotX(i)));
+  }
+  if (hasReset) ports.push(south(reset[0].id, W / 2));
+
   return {
     id: nodeId(n.id),
     width: W,

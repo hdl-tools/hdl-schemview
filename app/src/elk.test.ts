@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { toElk, nodeId, portId, fitZoom } from "./elk";
-import type { SchematicGraph } from "./types";
+import { toElk, nodeId, portId, fitZoom, FF_W } from "./elk";
+import type { SchematicGraph, SchPort } from "./types";
+
+// Build an FF child from a bare port list (FF dispatches to ffChild in toElk).
+const ffChildOf = (ports: SchPort[]) =>
+  toElk({
+    root: "s",
+    nodes: [{ id: 1, kind: "FF", label: "FF", path: "s.r", expandable: false, ports }],
+    edges: [],
+  }).children[0];
+
+const southXs = (c: any): number[] =>
+  c.ports
+    .filter((p: any) => p.layoutOptions["elk.port.side"] === "SOUTH")
+    .map((p: any) => p.x as number)
+    .sort((a: number, b: number) => a - b);
 
 const graph: SchematicGraph = {
   root: "top.scope",
@@ -130,6 +144,40 @@ describe("toElk", () => {
     expect(sides.filter((s) => s === "WEST").length).toBe(3); // inputs spread
     // Width is driven by input count, not the (unrendered) signal-name length.
     expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(c.width);
+  });
+});
+
+describe("ffChild", () => {
+  const clk: SchPort = { id: 1, name: "clk", side: "west" };
+  const q: SchPort = { id: 9, name: "q", side: "east" };
+  const data = (id: number): SchPort => ({ id, name: `d${id}`, side: "west" });
+
+  it("keeps the default width for a small FF", () => {
+    const c = ffChildOf([clk, data(2), q]); // one data pin
+    expect(c.width).toBe(FF_W);
+  });
+
+  it("grows only when the data pins exceed the default width", () => {
+    const many = Array.from({ length: 10 }, (_, i) => data(20 + i));
+    const c = ffChildOf([clk, ...many, q]);
+    expect(c.width).toBeGreaterThan(FF_W);
+  });
+
+  it("spreads data pins evenly across the bottom edge", () => {
+    const c = ffChildOf([clk, data(2), data(3), data(4), data(5), q]); // 4 data
+    const xs = southXs(c);
+    expect(xs).toHaveLength(4);
+    const gaps = xs.slice(1).map((x, i) => x - xs[i]);
+    gaps.forEach((g) => expect(g).toBeCloseTo(gaps[0]));
+  });
+
+  it("centers the reset and keeps data symmetric about it", () => {
+    const rst: SchPort = { id: 8, name: "rst_n", side: "west" };
+    const c = ffChildOf([clk, rst, data(2), data(3), q]); // 2 data + reset
+    const W = c.width;
+    const byId = (sid: number) => c.ports.find((p: any) => p.id === portId(sid));
+    expect(byId(8)!.x).toBe(W / 2); // reset dead-centre
+    expect(byId(2)!.x! + byId(3)!.x!).toBeCloseTo(W); // data mirror about centre
   });
 });
 
