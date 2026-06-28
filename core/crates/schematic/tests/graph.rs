@@ -73,6 +73,54 @@ fn scope_graph_has_boxes_and_wires() {
 }
 
 #[test]
+fn wires_carry_the_net_canonical_path() {
+    // A clicked wire cross-probes its net to source/waveform by a pure model
+    // lookup, so each structural edge must carry the connecting net's *canonical*
+    // path (no scope-relative trimming, no bit-select) — resolvable straight back
+    // through `nodes_at_path`. (#14: clickable wires that jump to source.)
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+
+    let bus_wire = g
+        .edges
+        .iter()
+        .find(|e| e.net.as_deref().is_some_and(|s| s.starts_with("bus.")))
+        .expect("a bus wire");
+    let path = bus_wire
+        .net_path
+        .as_deref()
+        .expect("bus wire carries a net_path");
+    // It is the absolute model path (scope-qualified), not the relative label.
+    assert!(
+        path.starts_with("picorv32_soc.g_lane[0].bus."),
+        "net_path should be the canonical path, got {path:?}"
+    );
+    // And it resolves straight back to a real model node (the lookup #14 relies on).
+    assert!(
+        !d.nodes_at_path(path).is_empty(),
+        "net_path {path:?} did not resolve to any node"
+    );
+
+    // Bit-selected wires keep the bare signal path (the select is wire-level, not a
+    // node): `core_trap[0]`'s label carries the bit, its net_path does not.
+    let top = scope_graph(&d, "picorv32_soc").expect("top scope graph");
+    let ct = top
+        .edges
+        .iter()
+        .find(|e| {
+            e.net
+                .as_deref()
+                .is_some_and(|s| s.starts_with("core_trap["))
+        })
+        .expect("a core_trap bit-select wire");
+    assert_eq!(
+        ct.net_path.as_deref(),
+        Some("picorv32_soc.core_trap"),
+        "bit-select wire's net_path should be the bare signal path"
+    );
+}
+
+#[test]
 fn bus_wires_carry_bit_select_labels() {
     // `core_trap` is `logic[1:0]`; at the top scope each lane's FF and core tap a
     // distinct bit, so the wires must be labelled `core_trap[0]` / `core_trap[1]`

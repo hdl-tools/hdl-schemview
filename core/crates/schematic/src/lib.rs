@@ -101,6 +101,12 @@ pub struct SchEdge {
     /// or `core_trap`), used to label the wire. `None` if unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub net: Option<String>,
+    /// Canonical model path of the connecting net/signal node (e.g.
+    /// `picorv32_soc.g_lane[0].bus.valid`) — no scope-relative trimming and no
+    /// bit-select. Lets a wire click cross-probe to source/waveform as a pure
+    /// `nodes_at_path` lookup. `None` for synthetic wires (constant tie-offs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_path: Option<String>,
 }
 
 /// A renderable, layout-agnostic schematic graph for one scope or cone.
@@ -492,14 +498,16 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             // Collapse parallel connections that land on the same two anchors
             // (e.g. both lanes' clk meeting one boundary pin).
             if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {
-                let net = design
-                    .node(e.endpoint)
-                    .map(|n| with_select(relative_to(&n.path, scope_path), &e.select));
+                let endpoint = design.node(e.endpoint);
+                let net =
+                    endpoint.map(|n| with_select(relative_to(&n.path, scope_path), &e.select));
+                let net_path = endpoint.map(|n| n.path.clone());
                 edges.push(SchEdge {
                     id: i as u32,
                     source: src,
                     target: tgt,
                     net,
+                    net_path,
                 });
             }
         }
@@ -553,6 +561,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                 continue;
             };
             let label = design.node(sig).map(|n| relative_to(&n.path, scope_path));
+            let net_path = design.node(sig).map(|n| n.path.clone());
             for &(dpin, ref dsel) in ds {
                 for &(lpin, ref lsel) in ls {
                     // No self-loop (a box reading and writing the same signal); dedup
@@ -567,6 +576,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                         source: dpin,
                         target: lpin,
                         net,
+                        net_path: net_path.clone(),
                     });
                     next_edge += 1;
                 }
@@ -590,6 +600,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                     source: CONST_ID_BASE + pid,
                     target: pid,
                     net: None,
+                    net_path: None,
                 });
                 next_edge += 1;
             }
@@ -630,14 +641,16 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
                 if !keep || !seen_edge_ids.insert(e.id) {
                     continue;
                 }
-                let net = design
-                    .node(e.endpoint)
-                    .map(|n| with_select(last_segment(&n.path).to_string(), &e.select));
+                let endpoint = design.node(e.endpoint);
+                let net =
+                    endpoint.map(|n| with_select(last_segment(&n.path).to_string(), &e.select));
+                let net_path = endpoint.map(|n| n.path.clone());
                 edges.push(SchEdge {
                     id: e.id,
                     source: e.port,
                     target: e.endpoint,
                     net,
+                    net_path,
                 });
                 let other = if e.port == node { e.endpoint } else { e.port };
                 if let Some(parent_inst) = nearest_instance(design, other) {
