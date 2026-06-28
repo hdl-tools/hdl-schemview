@@ -97,3 +97,10 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #picker { position:fixed; right:10px; bottom:10px; background:var(--panel); border:1px solid var(--border); padding:6px; display:none; max-width:340px; }
 #picker .alt { color:var(--crumb-fg); cursor:pointer; padding:2px; }
 #picker .alt:hover { background:var(--border); }
+
+/* Right-click context menu (source pane). */
+#ctxmenu { position:fixed; display:none; z-index:50; background:var(--panel); border:1px solid var(--border); padding:3px; min-width:160px; box-shadow:0 2px 8px rgba(0,0,0,0.35); }
+#ctxmenu .ctx-item { padding:4px 10px; cursor:pointer; white-space:nowrap; font-size:12px; }
+#ctxmenu .ctx-item:hover { background:var(--accent); color:#fff; }
+#ctxmenu .ctx-item.disabled { color:var(--muted); cursor:default; }
+#ctxmenu .ctx-item.disabled:hover { background:transparent; color:var(--muted); }

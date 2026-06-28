@@ -11,7 +11,15 @@ import {
   wireLabelPlacement,
 } from "./elk";
 import type { Pt } from "./elk";
-import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
+import type {
+  NodeRef,
+  ProbeResponse,
+  SchematicGraph,
+  SchNode,
+  SchPort,
+  ValueChange,
+  WaveLink,
+} from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -47,6 +55,11 @@ const viewCache = new Map<string, ViewState>();
 // follow a vertical wire (#27) and stays on the visible portion of its wire as
 // the view pans/zooms (#28).
 let labelItems: { el: SVGTextElement; segs: [Pt, Pt][] }[] = [];
+
+// The source pane's current file + per-line byte offsets (LF-based, matching the
+// model's source ranges), so a right-click resolves to a file byte offset for
+// `probe_source` (#19). Rebuilt by renderSource.
+let sourceCtx: { file: number; lineStarts: number[] } | null = null;
 
 const context = () => (state.stack.length ? state.stack[state.stack.length - 1].path : null);
 
@@ -831,14 +844,28 @@ async function renderSource(file: number, line: number) {
   let lines = state.source.get(file);
   if (!lines) {
     const text = await api.sourceText(file);
-    lines = text.split("\n");
+    // Normalize CRLF/CR to LF so a line is one newline byte — keeps computed byte
+    // offsets aligned with the model's source ranges (slang counts LF), regardless
+    // of the on-disk line endings on this platform.
+    lines = text.split(/\r\n|\r|\n/);
     state.source.set(file, lines);
   }
+  // Byte offset at the start of each line (LF newline = 1 byte), for right-click
+  // → byte-offset resolution via probe_source.
+  const lineStarts = new Array<number>(lines.length);
+  let off = 0;
+  for (let i = 0; i < lines.length; i++) {
+    lineStarts[i] = off;
+    off += lines[i].length + 1;
+  }
+  sourceCtx = { file, lineStarts };
+
   const host = $("source");
   host.innerHTML = "";
   lines.forEach((text, i) => {
     const div = document.createElement("div");
     div.className = "line" + (i + 1 === line ? " hl" : "");
+    div.dataset.lineIndex = String(i);
     div.innerHTML = `<span class="ln">${i + 1}</span>`;
     div.appendChild(document.createTextNode(text));
     host.appendChild(div);
@@ -898,6 +925,145 @@ function renderPicker(resp: ProbeResponse) {
   pick.style.display = "block";
 }
 
+// -- source right-click → schematic / waveform (#19) -----------------------
+
+// Resolve a screen point in the source pane to a file byte offset, using the
+// caret position under the cursor plus the line's precomputed start offset.
+function sourceOffsetAt(x: number, y: number): number | null {
+  if (!sourceCtx) return null;
+  const doc = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  let node: Node | null = null;
+  let col = 0;
+  if (doc.caretRangeFromPoint) {
+    const r = doc.caretRangeFromPoint(x, y);
+    if (r) [node, col] = [r.startContainer, r.startOffset];
+  } else if (doc.caretPositionFromPoint) {
+    const p = doc.caretPositionFromPoint(x, y);
+    if (p) [node, col] = [p.offsetNode, p.offset];
+  }
+  if (!node) return null;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
+  const lineDiv = el?.closest<HTMLElement>(".line");
+  if (!lineDiv?.dataset.lineIndex) return null;
+  const start = sourceCtx.lineStarts[Number(lineDiv.dataset.lineIndex)];
+  // A click on the line-number gutter resolves to the start of the line's code.
+  return el?.closest(".ln") ? start : start + col;
+}
+
+function closeContextMenu() {
+  $("ctxmenu").style.display = "none";
+}
+
+interface MenuItem {
+  label: string;
+  enabled: boolean;
+  onClick: () => void;
+}
+
+function openContextMenu(x: number, y: number, items: MenuItem[]) {
+  const menu = $("ctxmenu");
+  menu.innerHTML = "";
+  for (const item of items) {
+    const d = document.createElement("div");
+    d.className = "ctx-item" + (item.enabled ? "" : " disabled");
+    d.textContent = item.label;
+    if (item.enabled) {
+      d.onclick = () => {
+        closeContextMenu();
+        item.onClick();
+      };
+    }
+    menu.appendChild(d);
+  }
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.style.display = "block";
+}
+
+// Right-click in the source pane: resolve the signal/object under the cursor and
+// offer "Show in schematic" / "Add to waveform" (the latter disabled when the
+// object has no trace signal).
+async function onSourceContextMenu(ev: MouseEvent) {
+  ev.preventDefault();
+  const offset = sourceOffsetAt(ev.clientX, ev.clientY);
+  if (offset == null || !sourceCtx) return;
+  const resp = await api.probeSource(sourceCtx.file, offset, context());
+  if (!resp) return; // nothing resolvable at this position
+  openContextMenu(ev.clientX, ev.clientY, [
+    {
+      label: "Show in schematic",
+      enabled: true,
+      onClick: () => showInSchematic(resp.anchor),
+    },
+    {
+      label: resp.wave.in_trace ? "Add to waveform" : "Add to waveform (not in trace)",
+      enabled: resp.wave.in_trace,
+      onClick: () => addToWaveform(resp.wave),
+    },
+  ]);
+}
+
+// Breadcrumb frames for every ancestor of a scope path. All ancestors of a
+// navigable scope (Instance/GenBlock) are themselves navigable, so each frame is
+// a valid drill target.
+function framesForScope(path: string): ScopeFrame[] {
+  const out: ScopeFrame[] = [];
+  let acc = "";
+  for (const seg of path.split(".")) {
+    acc = acc ? `${acc}.${seg}` : seg;
+    out.push({ path: acc, label: seg });
+  }
+  return out;
+}
+
+// Navigate the schematic to show `anchor`: drill into it if it is itself a scope,
+// else open the nearest enclosing scope and highlight the box/wire it maps to.
+async function showInSchematic(anchor: NodeRef) {
+  const segs = anchor.path.split(".");
+  for (let n = segs.length; n >= 1; n--) {
+    const scopePath = segs.slice(0, n).join(".");
+    let graph: SchematicGraph | null = null;
+    try {
+      graph = await api.scopeGraph(scopePath);
+    } catch {
+      continue; // not a navigable scope — walk up
+    }
+    rememberCurrentView();
+    state.stack = framesForScope(scopePath);
+    state.graph = graph;
+    state.selected = null;
+    renderBreadcrumb();
+    // Keep the current zoom level (don't zoom-to-fit), so the item is shown at the
+    // zoom the user is already working at; scroll it into view below.
+    await renderSchematic(graph, { k: zoom.k, scrollLeft: 0, scrollTop: 0 });
+    // Highlight the anchor within the opened scope (a box by id, a net by path)
+    // and centre it; when we drilled into the anchor itself there is nothing to
+    // highlight.
+    if (scopePath !== anchor.path) {
+      selectNode(anchor.id);
+      selectWire(anchor.path);
+      const host = $("schematic");
+      const el =
+        host.querySelector<SVGGraphicsElement>(`[data-node-id="${anchor.id}"]`) ??
+        host.querySelector<SVGGraphicsElement>(".wire.sel");
+      el?.scrollIntoView({ block: "center", inline: "center" });
+    }
+    return;
+  }
+}
+
+// Show the signal in the waveform pane. Single-trace for now; becomes additive
+// once the multi-signal viewer lands (#15).
+async function addToWaveform(wave: WaveLink) {
+  if (!wave.in_trace) return;
+  $("wave-name").textContent = wave.full_name;
+  const values = await api.signalValues(wave.signal_ref);
+  renderWave(values);
+}
+
 // -- bootstrap -------------------------------------------------------------
 
 // Dark is the default; the toggle flips to a light schematic theme and persists.
@@ -931,6 +1097,12 @@ function init() {
   $("load").addEventListener("click", load);
   initTheme();
   setupZoom();
+  // Source right-click menu (#19), and dismissals.
+  $("source").addEventListener("contextmenu", onSourceContextMenu);
+  document.addEventListener("click", closeContextMenu);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeContextMenu();
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
