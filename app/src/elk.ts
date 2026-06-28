@@ -73,6 +73,9 @@ export const FF_H = 46;
 export const FF_W = 56; // default FF box width
 const FF_MARGIN = 12; // edge inset for the bottom (south) pin row
 const FF_PITCH = 16; // minimum spacing between adjacent bottom pins
+const FF_Q_PITCH = 16; // minimum spacing between adjacent east (output) pins
+const FF_Q_TOP = 12; // top inset of the east output column
+const FF_Q_BOT = 12; // bottom inset of the east output column
 
 // Width needed to host `slots` evenly-spaced bottom pins at >= FF_PITCH, never
 // below the default. `slots` counts data pins plus the reset (which takes the
@@ -80,24 +83,31 @@ const FF_PITCH = 16; // minimum spacing between adjacent bottom pins
 export const ffWidth = (slots: number) =>
   slots <= 1 ? FF_W : Math.max(FF_W, 2 * FF_MARGIN + (slots - 1) * FF_PITCH);
 
-// A flip-flop: clock on the left wall (low), Q on the right centre, and the data
-// pins spread evenly across the whole bottom edge with the reset held dead-centre
-// (the renderer draws the reset bubble there). FIXED_POS so the renderer can match
-// glyphs to ports.
+// A flip-flop: clock on the left wall (low), the data pins spread evenly across
+// the bottom edge with the reset held dead-centre, and one east pin per distinct
+// output spread down the right wall — so a register driving several signals shows
+// each as its own output rather than one fanned-out pin. The box grows tall enough
+// to host the output column. FIXED_POS so the renderer can match glyphs to ports.
 function ffChild(n: SchNode): ElkChild {
   const by = (r: FfRole) => n.ports.filter((p) => ffRole(p) === r);
   const data = by("data");
   const reset = by("reset");
+  const qs = by("q");
   const hasReset = reset.length > 0;
   // The reset occupies one of the evenly-spaced bottom slots (the centre one).
   const slots = data.length + (hasReset ? 1 : 0);
   const W = ffWidth(slots);
+  // Tall enough to spread every output down the east wall at >= FF_Q_PITCH.
+  const H =
+    qs.length > 1
+      ? Math.max(FF_H, FF_Q_TOP + (qs.length - 1) * FF_Q_PITCH + FF_Q_BOT)
+      : FF_H;
   const south = (id: number, x: number): ElkPort => ({
     id: portId(id),
     width: 6,
     height: 6,
     x,
-    y: FF_H,
+    y: H,
     layoutOptions: { "elk.port.side": "SOUTH" },
   });
   const west = (id: number, y: number): ElkPort => ({
@@ -109,16 +119,20 @@ function ffChild(n: SchNode): ElkChild {
     layoutOptions: { "elk.port.side": "WEST" },
   });
   const ports: ElkPort[] = [];
-  for (const p of by("q"))
+  // Outputs: one east pin each, spread down the right wall (a single output stays
+  // centred, matching the classic FF look).
+  const span = H - FF_Q_TOP - FF_Q_BOT;
+  qs.forEach((p, i) =>
     ports.push({
       id: portId(p.id),
       width: 6,
       height: 6,
       x: W,
-      y: FF_H / 2,
+      y: qs.length > 1 ? FF_Q_TOP + (span * i) / (qs.length - 1) : H / 2,
       layoutOptions: { "elk.port.side": "EAST" },
-    });
-  for (const p of by("clk")) ports.push(west(p.id, FF_H - 11));
+    }),
+  );
+  for (const p of by("clk")) ports.push(west(p.id, H - 11));
 
   // One evenly-spaced row of `slots` positions across [margin, W - margin]. The
   // centre slot is reserved for the reset (snapped to exactly W/2); the data pins
@@ -137,7 +151,7 @@ function ffChild(n: SchNode): ElkChild {
   return {
     id: nodeId(n.id),
     width: W,
-    height: FF_H,
+    height: H,
     labels: [{ text: "FF" }],
     layoutOptions: { "elk.portConstraints": "FIXED_POS" },
     ports,

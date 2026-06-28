@@ -5,6 +5,7 @@ import {
   portId,
   fitZoom,
   FF_W,
+  FF_H,
   wireLabelPlacement,
   clampSegmentToRect,
 } from "./elk";
@@ -177,6 +178,24 @@ describe("ffChild", () => {
     expect(xs).toHaveLength(4);
     const gaps = xs.slice(1).map((x, i) => x - xs[i]);
     gaps.forEach((g) => expect(g).toBeCloseTo(gaps[0]));
+  });
+
+  it("gives each output its own east pin, spread down the wall", () => {
+    const out = (id: number): SchPort => ({ id, name: `o${id}`, side: "east" });
+    const c = ffChildOf([clk, out(20), out(21), out(22)]); // 3 distinct outputs
+    const eastYs = c.ports
+      .filter((p) => p.layoutOptions["elk.port.side"] === "EAST")
+      .map((p) => p.y as number);
+    expect(eastYs).toHaveLength(3);
+    expect(new Set(eastYs).size).toBe(3); // all distinct — not collapsed onto one
+    expect(c.height).toBeGreaterThan(FF_H); // grew to host the output column
+  });
+
+  it("keeps a single output centred at the default height", () => {
+    const c = ffChildOf([clk, q]); // one output
+    const east = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "EAST");
+    expect(east).toHaveLength(1);
+    expect(east[0].y).toBe(FF_H / 2);
   });
 
   it("centers the reset and keeps data symmetric about it", () => {
