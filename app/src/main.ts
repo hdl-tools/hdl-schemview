@@ -1,7 +1,16 @@
 // hdl-schemview frontend: three panes (schematic / source / waveform) linked by
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
-import { ffRole, fitZoom, isLogicKind, layout, nodeId } from "./elk";
+import {
+  clampSegmentToRect,
+  ffRole,
+  fitZoom,
+  isLogicKind,
+  layout,
+  nodeId,
+  wireLabelPlacement,
+} from "./elk";
+import type { Pt } from "./elk";
 import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -32,6 +41,12 @@ const state = {
 // there. Only a first-ever visit falls through to zoom-to-fit. Cleared on
 // model reload (a new design invalidates old viewports).
 const viewCache = new Map<string, ViewState>();
+
+// Net labels with the wire segments they ride, rebuilt each render. Their
+// position/rotation is (re)computed by `placeWireLabels` so a label rotates to
+// follow a vertical wire (#27) and stays on the visible portion of its wire as
+// the view pans/zooms (#28).
+let labelItems: { el: SVGTextElement; segs: [Pt, Pt][] }[] = [];
 
 const context = () => (state.stack.length ? state.stack[state.stack.length - 1].path : null);
 
@@ -114,11 +129,12 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const root = document.createElementNS(SVGNS, "g");
   svg.appendChild(root);
 
-  // 1. Wires (under everything). Collect each net's label to draw last, on top,
-  //    attached to the midpoint of the wire's longest (most legible) segment.
-  //    A net name is drawn only once per view (it may fan out over many wires).
-  const wireLabels: SVGTextElement[] = [];
-  const seenNets = new Set<string>();
+  // 1. Wires (under everything). A net name is drawn once even though the net may
+  //    fan out over many wires; we accumulate *all* of that net's segments under
+  //    the one label so `placeWireLabels` can ride whichever part of the net is on
+  //    screen (orientation + keep-in-view), not just the first wire we saw.
+  labelItems = [];
+  const labelByText = new Map<string, { el: SVGTextElement; segs: [Pt, Pt][] }>();
   // The laid-out ELK edges keep their `e<schId>` ids, so map back to the model
   // edge for the net's canonical path (clicking a wire cross-probes that net).
   const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
@@ -134,7 +150,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
           crossProbePath(netPath);
         }
       : null;
-    const segs: [any, any][] = [];
+    const segs: [Pt, Pt][] = [];
     for (const sec of e.sections ?? []) {
       const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
       const points = pts.map((p: any) => `${p.x},${p.y}`).join(" ");
@@ -157,31 +173,27 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
     }
     const text = e.labels?.[0]?.text;
-    if (text && segs.length && !seenNets.has(text)) {
-      seenNets.add(text);
-      let best = segs[0];
-      let bestLen = -1;
-      for (const [a, b] of segs) {
-        const len = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-        if (len > bestLen) [bestLen, best] = [len, [a, b]];
+    if (text && segs.length) {
+      let item = labelByText.get(text);
+      if (!item) {
+        const t = document.createElementNS(SVGNS, "text");
+        t.setAttribute("class", "wire-label");
+        t.setAttribute("text-anchor", "middle");
+        t.textContent = text;
+        // The label cross-probes the same net as its wire.
+        if (probeWire && netPath) {
+          t.classList.add("clickable");
+          t.dataset.netPath = netPath;
+          t.onclick = probeWire;
+          t.oncontextmenu = probeWire;
+        }
+        item = { el: t, segs: [] };
+        labelByText.set(text, item);
+        labelItems.push(item); // position + rotation set by placeWireLabels
       }
-      const [a, b] = best;
-      const horizontal = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y);
-      const t = document.createElementNS(SVGNS, "text");
-      t.setAttribute("class", "wire-label");
-      t.setAttribute("x", String((a.x + b.x) / 2));
-      t.setAttribute("y", String((a.y + b.y) / 2 + (horizontal ? -3 : 0)));
-      t.setAttribute("text-anchor", "middle");
-      if (!horizontal) t.setAttribute("dominant-baseline", "middle");
-      t.textContent = text;
-      // The label cross-probes the same net as its wire.
-      if (probeWire && netPath) {
-        t.classList.add("clickable");
-        t.dataset.netPath = netPath;
-        t.onclick = probeWire;
-        t.oncontextmenu = probeWire;
-      }
-      wireLabels.push(t);
+      // Accumulate this wire's segments so the single label can follow any part
+      // of the net's fan-out into view.
+      item.segs.push(...segs);
     }
   }
 
@@ -311,7 +323,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   }
 
   // 3. Net labels last, so they stay legible over wires and box edges.
-  for (const t of wireLabels) root.appendChild(t);
+  for (const it of labelItems) root.appendChild(it.el);
 
   // A view change (drill-in / breadcrumb-jump): zoom-to-fit so the whole scope
   // is visible, scrolled top-left — unless we're navigating back, in which case
@@ -321,6 +333,52 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   applyZoom(svg);
   host.scrollLeft = restore ? restore.scrollLeft : 0;
   host.scrollTop = restore ? restore.scrollTop : 0;
+  // Place labels against the final viewport (orientation + visible-portion).
+  placeWireLabels();
+}
+
+// Position each net label on the currently-visible portion of its wire, rotated
+// to run along a vertical segment. Picks the longest segment in view (so the
+// label rides the on-screen part of the wire — #28); falls back to the longest
+// segment overall when the wire is fully off-screen. Cheap; safe to call on every
+// pan/zoom.
+function placeWireLabels() {
+  if (!labelItems.length) return;
+  const host = $("schematic");
+  const k = zoom.k || 1;
+  // Visible region in base (pre-scale) coordinates.
+  const view = {
+    x0: host.scrollLeft / k,
+    y0: host.scrollTop / k,
+    x1: (host.scrollLeft + host.clientWidth) / k,
+    y1: (host.scrollTop + host.clientHeight) / k,
+  };
+  const manhattan = (a: Pt, b: Pt) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  for (const { el, segs } of labelItems) {
+    let best: [Pt, Pt] | null = null;
+    let bestLen = -1;
+    for (const [a, b] of segs) {
+      const vis = clampSegmentToRect(a, b, view);
+      if (!vis) continue;
+      const len = manhattan(vis[0], vis[1]);
+      if (len > bestLen) [bestLen, best] = [len, vis];
+    }
+    // Fully off-screen: keep a stable home on the longest segment overall.
+    if (!best) {
+      for (const [a, b] of segs) {
+        const len = manhattan(a, b);
+        if (len > bestLen) [bestLen, best] = [len, [a, b]];
+      }
+    }
+    if (!best) continue;
+    const p = wireLabelPlacement(best[0], best[1]);
+    el.setAttribute("x", String(p.x));
+    el.setAttribute("y", String(p.y));
+    el.setAttribute("text-anchor", p.anchor);
+    el.setAttribute("dominant-baseline", p.baseline);
+    if (p.rotate) el.setAttribute("transform", `rotate(${p.rotate} ${p.x} ${p.y})`);
+    else el.removeAttribute("transform");
+  }
 }
 
 // A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
@@ -668,23 +726,39 @@ function setZoom(k: number, focus?: { x: number; y: number }) {
   const ratio = zoom.k / prev;
   host.scrollLeft = ox * ratio - fx;
   host.scrollTop = oy * ratio - fy;
+  placeWireLabels();
 }
 
-// Ctrl/⌘ + wheel zooms toward the cursor; plain wheel keeps scrolling.
+// Zoom affects the schematic SVG only — never the page/webview. Ctrl/⌘ + wheel
+// and Ctrl/⌘ + (+/-/0) are intercepted at the document (capture, non-passive) so
+// the browser/webview can't page-zoom the whole window; the gesture is routed to
+// our SVG zoom (toward the cursor for the wheel). Plain wheel still scrolls.
 function setupZoom() {
   const host = $("schematic");
-  host.addEventListener(
+  document.addEventListener(
     "wheel",
     (ev) => {
       if (!ev.ctrlKey && !ev.metaKey) return;
-      ev.preventDefault();
-      setZoom(zoom.k * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), { x: ev.clientX, y: ev.clientY });
+      ev.preventDefault(); // stop page/webview zoom everywhere
+      if (host.contains(ev.target as Node)) {
+        setZoom(zoom.k * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), { x: ev.clientX, y: ev.clientY });
+      }
     },
-    { passive: false },
+    { passive: false, capture: true },
   );
+  document.addEventListener("keydown", (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    if (ev.key === "+" || ev.key === "=") setZoom(zoom.k * 1.25);
+    else if (ev.key === "-" || ev.key === "_") setZoom(zoom.k / 1.25);
+    else if (ev.key === "0") setZoom(1);
+    else return;
+    ev.preventDefault(); // stop the webview's own +/-/0 page zoom
+  });
   $("zoom-in").addEventListener("click", () => setZoom(zoom.k * 1.25));
   $("zoom-out").addEventListener("click", () => setZoom(zoom.k / 1.25));
   $("zoom-reset").addEventListener("click", () => setZoom(1));
+  // Panning (native scroll) re-places net labels onto the visible wire portion.
+  host.addEventListener("scroll", placeWireLabels, { passive: true });
 }
 
 // `node.path` isn't in the layout; look it up from the graph by id.

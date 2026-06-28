@@ -41,11 +41,14 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #breadcrumb span { cursor:pointer; }
 #breadcrumb span:hover { text-decoration:underline; }
 #panes { flex:1; display:flex; min-height:0; }
-#schematic-pane { flex:1; }
-#right { width:46%; display:flex; flex-direction:column; }
-.pane { display:flex; flex-direction:column; min-height:0; border:1px solid var(--border); margin:3px; }
+/* min-width:0 lets the schematic pane shrink to its flex share so a zoomed-up
+   SVG scrolls inside #schematic (overflow:auto) instead of widening the pane and
+   pushing the source/waveform panes off-screen. */
+#schematic-pane { flex:1; min-width:0; }
+#right { width:46%; display:flex; flex-direction:column; min-width:0; }
+.pane { display:flex; flex-direction:column; min-height:0; min-width:0; border:1px solid var(--border); margin:3px; }
 .pane h2 { margin:0; padding:3px 8px; background:var(--panel); font-size:12px; font-weight:600; }
-#schematic { flex:1; overflow:auto; background:var(--canvas); user-select:none; -webkit-user-select:none; }
+#schematic { flex:1; min-width:0; min-height:0; overflow:auto; background:var(--canvas); user-select:none; -webkit-user-select:none; }
 #schematic svg { display:block; }
 #source { flex:1; overflow:auto; font-family:ui-monospace, monospace; font-size:12px; }
 #source .line { padding:0 8px; white-space:pre; }
