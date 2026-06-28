@@ -64,7 +64,10 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .pin { cursor:pointer; }
 .pin-in { fill:var(--pin); }
 .pin-out { fill:var(--pin-out); }
+/* Selected pin: accent fill/outline (declared after pin-in/out so it wins). */
+.pin.sel { fill:var(--sel); stroke:var(--sel); }
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }
+.pin-label.sel { fill:var(--sel); font-weight:600; }
 .const-label { fill:var(--sublabel); font-size:9px; font-family:ui-monospace, monospace; cursor:pointer; }
 .box.ff { fill:var(--box); stroke:var(--box-stroke); }
 /* Combinational logic: comb is a rectangle, assign a stadium — each its own tint.

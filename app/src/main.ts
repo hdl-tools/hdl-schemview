@@ -315,7 +315,17 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
           ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
           : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
       );
+      // A pin selects + highlights (left) and cross-probes to source + waveform
+      // (right) by its own model path; if the pin has no path, fall back to the
+      // containing box so right-click is never a dead gesture.
+      const probePin = (e: Event) => {
+        e.preventDefault();
+        if (sp?.path) crossProbePath(sp.path);
+        else crossProbe(id);
+      };
+      arrow.dataset.nodeId = String(pid);
       arrow.onclick = () => selectNode(pid);
+      arrow.oncontextmenu = probePin;
       g.appendChild(arrow);
 
       // A logic node (comb/latch/assign) is a process, not a module: its pins are
@@ -328,7 +338,9 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         t.setAttribute("y", String(py + 3));
         t.setAttribute("text-anchor", west ? "start" : "end");
         t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+        t.dataset.nodeId = String(pid);
         t.onclick = () => selectNode(pid);
+        t.oncontextmenu = probePin;
         g.appendChild(t);
       }
     }
@@ -641,7 +653,14 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
         ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
         : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
     );
+    const probePin = (e: Event) => {
+      e.preventDefault();
+      if (sp?.path) crossProbePath(sp.path);
+      else crossProbe(id);
+    };
+    arrow.dataset.nodeId = String(pid);
     arrow.onclick = () => selectNode(pid);
+    arrow.oncontextmenu = probePin;
     g.appendChild(arrow);
     if (sp) {
       const t = document.createElementNS(SVGNS, "text");
@@ -650,7 +669,9 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
       t.setAttribute("y", String(py + 3));
       t.setAttribute("text-anchor", west ? "start" : "end");
       t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+      t.dataset.nodeId = String(pid);
       t.onclick = () => selectNode(pid);
+      t.oncontextmenu = probePin;
       g.appendChild(t);
     }
   }
@@ -815,12 +836,18 @@ function selectNode(id: number) {
 }
 
 // Reflect `state.selected` by moving the `.sel` class only, leaving the rest of
-// the DOM intact so any pending double-click target survives.
+// the DOM intact so any pending double-click target survives. Boxes and pins both
+// carry `data-node-id`, so both highlight; wire selection (`.wire.sel`) is a
+// separate channel and left untouched.
 function applySelection() {
   const host = $("schematic");
-  host.querySelectorAll(".box.sel").forEach((el) => el.classList.remove("sel"));
+  host
+    .querySelectorAll(".box.sel, .pin.sel, .pin-label.sel")
+    .forEach((el) => el.classList.remove("sel"));
   if (state.selected != null) {
-    host.querySelector(`[data-node-id="${state.selected}"]`)?.classList.add("sel");
+    host
+      .querySelectorAll(`[data-node-id="${state.selected}"]`)
+      .forEach((el) => el.classList.add("sel"));
   }
 }
 

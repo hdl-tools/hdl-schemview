@@ -6,6 +6,8 @@ export interface SchPort {
   id: number;
   name: string;
   side: Side;
+  /** Canonical model path of the signal this pin represents; right-click cross-probes it. */
+  path?: string;
   /** Bit-range like "[31:0]" for a bus pin, absent for a scalar. */
   width?: string;
 }

@@ -27,6 +27,11 @@ pub struct SchPort {
     pub id: NodeId,
     pub name: String,
     pub side: Side,
+    /// Canonical model path of the signal this pin represents (the port's own path,
+    /// or for a synthesized logic pin the carried signal's path). Lets a right-click
+    /// on a pin cross-probe to source via `probe_node`. Empty for synthetic pins
+    /// with no model node (e.g. constant tie-offs).
+    pub path: String,
     /// Bit-range of the pin (`[31:0]`) parsed from its declared type, or `None`
     /// for a scalar. Shown next to the pin label.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -265,6 +270,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 id: pid,
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),
                 side,
+                path: node.map(|n| n.path.clone()).unwrap_or_default(),
                 width: node.and_then(|n| width_of(&n.type_)),
             }
         })
@@ -301,6 +307,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
             id,
             name: lit.to_string(),
             side: Side::East,
+            path: String::new(), // synthetic constant source — no model node
             width: None,
         }],
         module: None,
@@ -324,6 +331,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
                 id: pins.pin(ff, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
+                path: sig.map(|s| s.path.clone()).unwrap_or_default(),
                 width: sig.and_then(|s| width_of(&s.type_)),
             }
         })
@@ -362,6 +370,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
                 id: pins.pin(bx, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
+                path: sig.map(|s| s.path.clone()).unwrap_or_default(),
                 width: sig.and_then(|s| width_of(&s.type_)),
             }
         })
@@ -403,6 +412,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             id: port,
             name: n.name.clone(),
             side,
+            path: n.path.clone(),
             width: width_of(&n.type_),
         }],
         module: None,
