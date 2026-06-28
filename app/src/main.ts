@@ -1,11 +1,19 @@
 // hdl-schemview frontend: three panes (schematic / source / waveform) linked by
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
-import { ffRole, isLogicKind, layout, nodeId } from "./elk";
+import { ffRole, fitZoom, isLogicKind, layout, nodeId } from "./elk";
 import type { ProbeResponse, SchematicGraph, SchNode, SchPort, ValueChange } from "./types";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
+
+// A saved viewport: zoom factor + scroll offsets, remembered per scope so
+// breadcrumb-back restores the view you left rather than re-fitting.
+interface ViewState {
+  k: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
 
 interface ScopeFrame {
   path: string;
@@ -19,6 +27,12 @@ const state = {
   source: new Map<number, string[]>(),
 };
 
+// Saved viewport per scope path, surviving stack pops so revisiting a scope
+// (breadcrumb-back or re-drilling a sibling) restores the view you last had
+// there. Only a first-ever visit falls through to zoom-to-fit. Cleared on
+// model reload (a new design invalidates old viewports).
+const viewCache = new Map<string, ViewState>();
+
 const context = () => (state.stack.length ? state.stack[state.stack.length - 1].path : null);
 
 // -- load ------------------------------------------------------------------
@@ -31,18 +45,34 @@ async function load() {
     const top = await api.loadDesign(model, trace, ["TOP", "tb", "soc_pkg"], srcRoot);
     $("status").textContent = `loaded ${top}`;
     state.stack = [];
+    viewCache.clear();
     await setScope(top, top);
   } catch (e) {
     $("status").textContent = `error: ${e}`;
   }
 }
 
+// A scope with a cached viewport is restored to it; a first-time scope is
+// zoom-to-fit and scrolled top-left (see renderSchematic).
 async function setScope(path: string, label: string, push = true) {
   const graph = await api.scopeGraph(path);
   state.graph = graph;
   if (push) state.stack.push({ path, label });
   renderBreadcrumb();
-  await renderSchematic(graph);
+  await renderSchematic(graph, viewCache.get(path));
+}
+
+// Snapshot the current schematic viewport so it can be restored later.
+function captureView(): ViewState {
+  const host = $("schematic");
+  return { k: zoom.k, scrollLeft: host.scrollLeft, scrollTop: host.scrollTop };
+}
+
+// Stash the on-screen scope's viewport (keyed by path) before navigating away,
+// so returning to it restores zoom + scroll instead of re-fitting.
+function rememberCurrentView() {
+  const cur = state.stack[state.stack.length - 1];
+  if (cur) viewCache.set(cur.path, captureView());
 }
 
 function renderBreadcrumb() {
@@ -52,6 +82,7 @@ function renderBreadcrumb() {
     const s = document.createElement("span");
     s.textContent = f.label;
     s.onclick = () => {
+      rememberCurrentView();
       state.stack = state.stack.slice(0, i);
       setScope(f.path, f.label);
     };
@@ -62,10 +93,11 @@ function renderBreadcrumb() {
 
 // -- schematic -------------------------------------------------------------
 
-// Current zoom factor; persists across re-renders so selection/expansion keeps it.
+// Current zoom factor. Manual zoom (setZoom) mutates it in place; a scope change
+// resets it via renderSchematic's zoom-to-fit (or restores a saved view on back).
 const zoom = { k: 1 };
 
-async function renderSchematic(graph: SchematicGraph) {
+async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const host = $("schematic");
   host.innerHTML = "";
   if (!graph.nodes.length) {
@@ -158,7 +190,10 @@ async function renderSchematic(graph: SchematicGraph) {
     rect.dataset.nodeId = String(id);
     rect.onclick = () => selectNode(id);
     rect.ondblclick = () => {
-      if (node?.expandable) setScope(node.path ?? "", node.label);
+      if (node?.expandable) {
+        rememberCurrentView();
+        setScope(node.path ?? "", node.label);
+      }
     };
     rect.oncontextmenu = (e) => {
       e.preventDefault();
@@ -234,8 +269,14 @@ async function renderSchematic(graph: SchematicGraph) {
   // 3. Net labels last, so they stay legible over wires and box edges.
   for (const t of wireLabels) root.appendChild(t);
 
+  // A view change (drill-in / breadcrumb-jump): zoom-to-fit so the whole scope
+  // is visible, scrolled top-left — unless we're navigating back, in which case
+  // restore the viewport we left. (Manual zoom via setZoom is unaffected after.)
+  zoom.k = restore ? restore.k : fitZoom(baseW, baseH, host.clientWidth, host.clientHeight);
   host.appendChild(svg);
   applyZoom(svg);
+  host.scrollLeft = restore ? restore.scrollLeft : 0;
+  host.scrollTop = restore ? restore.scrollTop : 0;
 }
 
 // A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
