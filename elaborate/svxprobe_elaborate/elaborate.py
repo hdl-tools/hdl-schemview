@@ -43,7 +43,22 @@ _KIND_MAP = {
     # simulator-dumped parameter (not a real signal) from an unmatched signal,
     # independent of whether the trace format tags it as a parameter.
     "Parameter": "Param",
+    # An interface's modport (a named view of the bundle). A modport-specialized
+    # interface port on a consumer (`mem_if.mem bus`) is an `InterfacePort`, which
+    # we model as an `Interface` node carrying the selected view (see `_add`).
+    # ModportPort symbols are views of existing signals and are intentionally not
+    # emitted.
+    "Modport": "Modport",
+    "InterfacePort": "Interface",
 }
+
+
+def _is_interface_instance(sym: Any) -> bool:
+    """True if `sym` is an instance whose definition is an `interface` (not a
+    module) — so it can be retagged from the generic `Instance` to `Interface`."""
+    defn = getattr(getattr(sym, "body", None), "definition", None)
+    dk = str(getattr(defn, "definitionKind", "")).split(".")[-1]
+    return dk == "Interface"
 
 
 def _kind_name(sym: Any) -> str:
@@ -137,11 +152,19 @@ class Elaborator:
             "type": None,
             "dir": None,
             "const": None,
+            "modport": None,
             "drivers": [],
             "loads": [],
         }
-        if kind == "Instance":
-            # def_range = the module definition; inst_range = the instantiation site.
+        # A modport-specialized interface port records the view it selects (e.g.
+        # `mem_if.mem bus` -> "mem"); a plain interface instance leaves it null.
+        mp = getattr(sym, "modport", None)
+        if isinstance(mp, str) and mp:
+            node["modport"] = mp
+        if kind in ("Instance", "Interface"):
+            # def_range = the module/interface definition; inst_range = the
+            # instantiation site. A consuming interface *port* has no body/defn,
+            # so these fall back to the port's own syntax range.
             defn = getattr(getattr(sym, "body", None), "definition", None)
             if defn is not None:
                 node["def_range"] = self._range_from_syntax(defn) or self._point_range(
@@ -440,8 +463,15 @@ class Elaborator:
 
         my_id = parent
         if kind is not None:
+            # An interface instance is a slang `Instance` whose definition is an
+            # interface; retag it so the schematic can draw a signal bundle.
+            if kind == "Instance" and _is_interface_instance(sym):
+                kind = "Interface"
             my_id = self._add(sym, kind, parent)
-            if kind == "Instance":
+            # Both module and interface instances carry port connections (an
+            # interface has its own ports, e.g. `.clk`), so collect both for edge
+            # extraction. The slang symbol kind is `Instance` for each.
+            if kname == "Instance":
                 self.instances.append((my_id, sym))
 
         members = self._members(sym)

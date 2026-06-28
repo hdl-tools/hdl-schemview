@@ -9,6 +9,7 @@
   --comb:#2c4a40; --comb-stroke:#4f9b80;
   --assign:#23425a; --assign-stroke:#3f86c0;
   --latch:#3a2c4a; --latch-stroke:#9b80c0;
+  --iface:#15433f; --iface-stroke:#2fa39a;
   --label:#eaeefb; --sublabel:#9fb4d8;
   --pin:#9cc4ff; --pin-out:#ffd479;
   --wire:#7f93b5; --wire-label:#c7d3ea;
@@ -22,6 +23,7 @@
   --comb:#e6f5ef; --comb-stroke:#4f9b80;
   --assign:#e3eefb; --assign-stroke:#3f86c0;
   --latch:#efe6f5; --latch-stroke:#9b80c0;
+  --iface:#e0f3f0; --iface-stroke:#2a8f86;
   --label:#1a2233; --sublabel:#55617a;
   --pin:#2f5fb0; --pin-out:#b56a00;
   --wire:#5a6a86; --wire-label:#33415c;
@@ -67,6 +69,9 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .box.comb { fill:var(--comb); stroke:var(--comb-stroke); }
 .box.assign { fill:var(--assign); stroke:var(--assign-stroke); }
 .box.latch { fill:var(--latch); stroke:var(--latch-stroke); }
+/* Interface bundle: a distinct teal box; the dog-ear flap reads as a fold. */
+.box.iface { fill:var(--iface); stroke:var(--iface-stroke); }
+.iface-fold { fill:var(--iface-stroke); stroke:var(--iface-stroke); opacity:0.55; }
 /* Selection stroke wins over every per-kind stroke above (declared last). */
 .box.sel { stroke:var(--sel); stroke-width:2.5; }
 .ff-clk { fill:none; stroke:var(--label); stroke-width:1.3; }

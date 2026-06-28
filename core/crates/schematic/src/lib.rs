@@ -133,6 +133,7 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
         for &c in &n.children {
             match design.node(c).map(|x| x.kind) {
                 Some(NodeKind::Instance)
+                | Some(NodeKind::Interface)
                 | Some(NodeKind::Ff)
                 | Some(NodeKind::Comb)
                 | Some(NodeKind::Latch)
@@ -202,7 +203,10 @@ fn with_select(base: String, select: &Option<String>) -> String {
 /// extension) of the file that defines it (`…/picorv32.v` → `picorv32`). This is
 /// a best-effort recovery until the harness emits the real definition name.
 fn module_of(design: &Design, node: &svxprobe_model::Node) -> Option<String> {
-    if node.kind != NodeKind::Instance {
+    // Module instances and interface instances both carry a defining-file sublabel
+    // (e.g. `picorv32`, `mem_if`); a consuming interface port has no def_range and
+    // falls through to `None`.
+    if !matches!(node.kind, NodeKind::Instance | NodeKind::Interface) {
         return None;
     }
     let file = node.def_range?.file;

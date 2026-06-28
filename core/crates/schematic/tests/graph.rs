@@ -146,6 +146,32 @@ fn bus_wires_carry_bit_select_labels() {
 }
 
 #[test]
+fn interface_instance_is_a_bundle_box() {
+    // An interface instance renders as its own box, carrying the Interface kind
+    // (so the frontend draws a bundle shape) and its interface type as the module
+    // sublabel (mem_if). It is a leaf bundle, not a navigable scope.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+
+    let bus = g
+        .nodes
+        .iter()
+        .find(|n| n.label == "bus")
+        .expect("a bus box in the lane scope");
+    assert_eq!(
+        bus.kind,
+        svxprobe_model::NodeKind::Interface,
+        "bus is an interface"
+    );
+    assert_eq!(
+        bus.module.as_deref(),
+        Some("mem_if"),
+        "interface type sublabel"
+    );
+    assert!(!bus.expandable, "an interface bundle is not drillable");
+}
+
+#[test]
 fn constant_tied_inputs_show_their_literal() {
     let d = design();
     let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();

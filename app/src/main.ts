@@ -210,6 +210,11 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       renderLatch(root, c, node, id);
       continue;
     }
+    // SystemVerilog interface instance / interface port: a folded-corner bundle.
+    if (node?.kind === "Interface") {
+      renderInterface(root, c, node, id);
+      continue;
+    }
 
     const portById = new Map<number, SchPort>();
     node?.ports.forEach((p) => portById.set(p.id, p));
@@ -477,6 +482,98 @@ function renderLatch(parent: SVGElement, c: any, node: SchNode, id: number) {
     );
     arrow.onclick = () => selectNode(pid);
     g.appendChild(arrow);
+  }
+  parent.appendChild(g);
+}
+
+// A SystemVerilog interface — a signal bundle, drawn as a box with a folded
+// top-right corner (a "dog-ear") so it reads as a bundle rather than a module
+// instance. Carries its interface type as a sublabel (e.g. `(mem_if)`) and any
+// interface ports (e.g. `clk`) as pins. Single-click selects, right-click
+// cross-probes; an interface is a leaf bundle, so there is no drill.
+function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const FOLD = 11; // dog-ear size
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  // Body with the top-right corner cut away (the fold sits there instead).
+  const body = document.createElementNS(SVGNS, "path");
+  body.setAttribute("class", "box iface" + (state.selected === id ? " sel" : ""));
+  body.setAttribute(
+    "d",
+    `M4,0 L${W - FOLD},0 L${W},${FOLD} L${W},${H - 4} Q${W},${H} ${W - 4},${H} ` +
+      `L4,${H} Q0,${H} 0,${H - 4} L0,4 Q0,0 4,0 Z`,
+  );
+  body.dataset.nodeId = String(id);
+  body.onclick = () => selectNode(id);
+  body.oncontextmenu = (e) => {
+    e.preventDefault();
+    crossProbe(id);
+  };
+  g.appendChild(body);
+
+  // The folded-over corner flap.
+  const fold = document.createElementNS(SVGNS, "path");
+  fold.setAttribute("class", "iface-fold");
+  fold.setAttribute("d", `M${W - FOLD},0 L${W - FOLD},${FOLD} L${W},${FOLD} Z`);
+  fold.style.pointerEvents = "none";
+  g.appendChild(fold);
+
+  const cx = W / 2;
+  const cy = H / 2;
+  const name = document.createElementNS(SVGNS, "text");
+  name.setAttribute("class", "box-label");
+  name.setAttribute("x", String(cx));
+  name.setAttribute("y", String(node.module ? cy - 4 : cy + 4));
+  name.setAttribute("text-anchor", "middle");
+  name.textContent = c.labels?.[0]?.text ?? node.label;
+  name.style.pointerEvents = "none";
+  g.appendChild(name);
+  if (node.module) {
+    const mod = document.createElementNS(SVGNS, "text");
+    mod.setAttribute("class", "box-sublabel");
+    mod.setAttribute("x", String(cx));
+    mod.setAttribute("y", String(cy + 12));
+    mod.setAttribute("text-anchor", "middle");
+    mod.textContent = `(${node.module})`;
+    mod.style.pointerEvents = "none";
+    g.appendChild(mod);
+  }
+
+  // Interface ports (e.g. clk), drawn like a module box's pins.
+  const PIN = 8;
+  const LABEL_PAD = 11;
+  for (const p of c.ports ?? []) {
+    const pid = Number(String(p.id).slice(1));
+    const sp = portById.get(pid);
+    const py = p.y ?? 0;
+    const west = sp ? sp.side !== "east" : (p.x ?? 0) < W / 2;
+    const edgeX = west ? 0 : W;
+    const arrow = document.createElementNS(SVGNS, "path");
+    arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+    arrow.setAttribute(
+      "d",
+      west
+        ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
+        : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
+    );
+    arrow.onclick = () => selectNode(pid);
+    g.appendChild(arrow);
+    if (sp) {
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("class", "pin-label");
+      t.setAttribute("x", String(west ? edgeX + LABEL_PAD : edgeX - LABEL_PAD));
+      t.setAttribute("y", String(py + 3));
+      t.setAttribute("text-anchor", west ? "start" : "end");
+      t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+      t.onclick = () => selectNode(pid);
+      g.appendChild(t);
+    }
   }
   parent.appendChild(g);
 }
