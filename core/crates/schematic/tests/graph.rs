@@ -40,6 +40,16 @@ fn scope_graph_has_boxes_and_wires() {
     assert_eq!(mem_addr.width.as_deref(), Some("[31:0]"), "mem_addr width");
     let clk = core.ports.iter().find(|p| p.name == "clk").unwrap();
     assert_eq!(clk.width, None, "scalar pin has no width");
+    // Each pin carries its canonical model path so a right-click can cross-probe
+    // it to source via probe_node.
+    assert_eq!(
+        clk.path, "picorv32_soc.g_lane[0].core.clk",
+        "pin carries its model path"
+    );
+    assert!(
+        d.nodes_at_path(&clk.path).contains(&clk.id),
+        "pin path resolves back to the port node"
+    );
 
     // Pin side follows the declared direction: input clk west, output east.
     assert_eq!(clk.side, Side::West, "input clk on the west");

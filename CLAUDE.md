@@ -100,7 +100,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 **Schematic** (`core/crates/schematic/src/lib.rs`):
 - `SchematicGraph { root, nodes: Vec<SchNode>, edges: Vec<SchEdge> }`
 - `SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>, module: Option<String> }`
-- `SchPort { id, name, side: Side, width: Option<String> }` — `width` like `[31:0]`, else `None`.
+- `SchPort { id, name, side: Side, path: String, width: Option<String> }` — `path` is the pin's canonical model path (empty for synthetic const pins) so a right-click cross-probes it; `width` like `[31:0]`, else `None`.
 - `SchEdge { id, source, target, net: Option<String>, net_path: Option<String> }` — `net_path` is the connecting net's canonical model path (absolute, no bit-select), so a wire click cross-probes via `probe_node`; `None` for synthetic constant tie-offs.
 - `Side { West, East }` — drives ELK port placement.
 
