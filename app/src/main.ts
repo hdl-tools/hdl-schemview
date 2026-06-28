@@ -17,9 +17,9 @@ import type {
   SchematicGraph,
   SchNode,
   SchPort,
-  ValueChange,
   WaveLink,
 } from "./types";
+import { drawTrack, maxTime, TRACK_H, type WaveTrace } from "./wave";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -42,6 +42,10 @@ const state = {
   stack: [] as ScopeFrame[],
   selected: null as number | null,
   source: new Map<number, string[]>(),
+  // Signals pinned to the waveform pane, in lane order (top → bottom). Appended via
+  // the schematic/source right-click menu; reordered/removed via the per-lane
+  // controls. Cleared on model reload (#15).
+  waves: [] as WaveTrace[],
 };
 
 // Saved viewport per scope path, surviving stack pops so revisiting a scope
@@ -74,6 +78,9 @@ async function load() {
     $("status").textContent = `loaded ${top}`;
     state.stack = [];
     viewCache.clear();
+    // A new design invalidates the old traces (signal_refs are model-specific).
+    state.waves = [];
+    renderWaves();
     await setScope(top, top);
   } catch (e) {
     $("status").textContent = `error: ${e}`;
@@ -154,13 +161,23 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   for (const e of laid.edges ?? []) {
     const sch = edgeById.get(Number(String(e.id).slice(1)));
     const netPath = sch?.net_path;
-    // Cross-probe the net to source + waveform; usable as both a left-click and a
-    // right-click handler (a wire has no drill/double-click, so either is safe).
-    const probeWire = netPath
+    // Left-click a wire: highlight the net and show it in source. Right-click:
+    // highlight + open the action menu (append to waveform / show in source).
+    const wireLeft = netPath
       ? (ev: Event) => {
           ev.preventDefault();
           selectWire(netPath);
-          crossProbePath(netPath);
+          api
+            .probeNode(netPath, context())
+            .then((r) => r && showInSource(r))
+            .catch((e) => ($("status").textContent = `error: ${e}`));
+        }
+      : null;
+    const wireMenu = netPath
+      ? (ev: MouseEvent) => {
+          ev.preventDefault();
+          selectWire(netPath);
+          crossProbePath(netPath, ev);
         }
       : null;
     const segs: [Pt, Pt][] = [];
@@ -175,12 +192,12 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // A wire is a 1.5px line; lay a transparent fat hit-line over it so the net
       // is comfortably clickable. Boxes are drawn after wires, so a box still wins
       // where a wire passes under it.
-      if (probeWire) {
+      if (wireLeft) {
         const hit = document.createElementNS(SVGNS, "polyline");
         hit.setAttribute("class", "wire-hit");
         hit.setAttribute("points", points);
-        hit.onclick = probeWire;
-        hit.oncontextmenu = probeWire;
+        hit.onclick = wireLeft;
+        hit.oncontextmenu = wireMenu;
         root.appendChild(hit);
       }
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
@@ -194,11 +211,11 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         t.setAttribute("text-anchor", "middle");
         t.textContent = text;
         // The label cross-probes the same net as its wire.
-        if (probeWire && netPath) {
+        if (wireLeft && netPath) {
           t.classList.add("clickable");
           t.dataset.netPath = netPath;
-          t.onclick = probeWire;
-          t.oncontextmenu = probeWire;
+          t.onclick = wireLeft;
+          t.oncontextmenu = wireMenu;
         }
         item = { el: t, segs: [] };
         labelByText.set(text, item);
@@ -266,7 +283,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     };
     rect.oncontextmenu = (e) => {
       e.preventDefault();
-      crossProbe(id);
+      crossProbe(id, e);
     };
     g.appendChild(rect);
 
@@ -318,10 +335,10 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // A pin selects + highlights (left) and cross-probes to source + waveform
       // (right) by its own model path; if the pin has no path, fall back to the
       // containing box so right-click is never a dead gesture.
-      const probePin = (e: Event) => {
+      const probePin = (e: MouseEvent) => {
         e.preventDefault();
-        if (sp?.path) crossProbePath(sp.path);
-        else crossProbe(id);
+        if (sp?.path) crossProbePath(sp.path, e);
+        else crossProbe(id, e);
       };
       arrow.dataset.nodeId = String(pid);
       arrow.onclick = () => selectNode(pid);
@@ -430,9 +447,9 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   );
   // A real boundary I/O pin selects (left) and cross-probes to source + waveform
   // (right), like a box; a constant tie-off is inert.
-  const probePin = (ev: Event) => {
+  const probePin = (ev: MouseEvent) => {
     ev.preventDefault();
-    crossProbe(id);
+    crossProbe(id, ev);
   };
   if (!isConst) {
     arrow.onclick = () => selectNode(id);
@@ -474,7 +491,7 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.onclick = () => selectNode(id);
   rect.oncontextmenu = (e) => {
     e.preventDefault();
-    crossProbe(id);
+    crossProbe(id, e);
   };
   g.appendChild(rect);
 
@@ -542,7 +559,7 @@ function renderLatch(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.onclick = () => selectNode(id);
   rect.oncontextmenu = (e) => {
     e.preventDefault();
-    crossProbe(id);
+    crossProbe(id, e);
   };
   g.appendChild(rect);
 
@@ -604,7 +621,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   body.onclick = () => selectNode(id);
   body.oncontextmenu = (e) => {
     e.preventDefault();
-    crossProbe(id);
+    crossProbe(id, e);
   };
   g.appendChild(body);
 
@@ -653,10 +670,10 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
         ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
         : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
     );
-    const probePin = (e: Event) => {
+    const probePin = (e: MouseEvent) => {
       e.preventDefault();
-      if (sp?.path) crossProbePath(sp.path);
-      else crossProbe(id);
+      if (sp?.path) crossProbePath(sp.path, e);
+      else crossProbe(id, e);
     };
     arrow.dataset.nodeId = String(pid);
     arrow.onclick = () => selectNode(pid);
@@ -699,7 +716,7 @@ function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.onclick = () => selectNode(id);
   rect.oncontextmenu = (e) => {
     e.preventDefault();
-    crossProbe(id);
+    crossProbe(id, e);
   };
   g.appendChild(rect);
 
@@ -854,16 +871,44 @@ function applySelection() {
 // Right-click a box/pin to cross-probe it to source + waveform. A polished
 // drop-down menu is the later-stage enhancement; this keeps cross-probing
 // reachable now that single-click is schematic-only (#47).
-async function crossProbe(id: number) {
+async function crossProbe(id: number, ev: MouseEvent) {
   const path = pathOf(id);
-  if (path) await crossProbePath(path);
+  if (path) await crossProbePath(path, ev);
 }
 
-// Cross-probe a node by its canonical model path — a pure cross-probe lookup, no
-// id detour. Used for wires (whose net carries a path, not a graph-node id).
-async function crossProbePath(path: string) {
-  const resp = await api.probeNode(path, context());
-  if (resp) applyProbe(resp);
+// Cross-probe a node by its canonical model path and open the action menu at the
+// cursor. Used for wires (whose net carries a path, not a graph-node id) and, via
+// `crossProbe`, for boxes/pins.
+async function crossProbePath(path: string, ev: MouseEvent) {
+  await schematicMenu(ev, path);
+}
+
+// Right-click action menu for a schematic object: resolve it once, then offer
+// "Append to waveform" (when the object has a trace signal) and "Show in source"
+// (when it has a source location). Disabled items annotate why.
+async function schematicMenu(ev: MouseEvent, path: string) {
+  let resp: ProbeResponse | null;
+  try {
+    resp = await api.probeNode(path, context());
+  } catch (e) {
+    $("status").textContent = `error: ${e}`;
+    return;
+  }
+  if (!resp) return;
+  openContextMenu(ev.clientX, ev.clientY, [
+    {
+      label: resp.wave.in_trace
+        ? "Append to waveform"
+        : "Append to waveform (not in trace)",
+      enabled: resp.wave.in_trace,
+      onClick: () => addToWaveform(resp.wave),
+    },
+    {
+      label: resp.source ? "Show in source" : "Show in source (no location)",
+      enabled: !!resp.source,
+      onClick: () => showInSource(resp),
+    },
+  ]);
 }
 
 // Highlight every wire + label carrying `netPath` (the net just clicked), and
@@ -877,16 +922,11 @@ function selectWire(netPath: string) {
 
 // -- apply a cross-probe result to source + waveform -----------------------
 
-async function applyProbe(resp: ProbeResponse) {
+// Show a cross-probe result in the source pane (jump to its location, if any) and
+// list any ambiguous alternatives. Waveform display is now an explicit, additive
+// action (the menu's "Append to waveform"), so it is no longer touched here.
+async function showInSource(resp: ProbeResponse) {
   if (resp.source) await renderSource(resp.source.file, resp.source.line);
-  if (resp.wave.in_trace) {
-    $("wave-name").textContent = resp.wave.full_name;
-    const values = await api.signalValues(resp.wave.signal_ref);
-    renderWave(values);
-  } else {
-    $("wave-name").textContent = "(not in trace)";
-    renderWave([]);
-  }
   renderPicker(resp);
 }
 
@@ -923,39 +963,76 @@ async function renderSource(file: number, line: number) {
   host.querySelector(".hl")?.scrollIntoView({ block: "center" });
 }
 
-function renderWave(values: ValueChange[]) {
-  const canvas = $("wave") as HTMLCanvasElement;
-  const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!values.length) return;
-  const tMax = values[values.length - 1].time || 1;
-  const x = (t: number) => 10 + (t / tMax) * (canvas.width - 20);
-  const digital = values.every((v) => v.value.length <= 1);
-  ctx.strokeStyle = "#7fd";
-  ctx.fillStyle = "#9cf";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  const yHi = 30,
-    yLo = 120,
-    yMid = 75;
-  let prevX = x(values[0].time);
-  let prevY = digital ? (values[0].value === "1" ? yHi : yLo) : yMid;
-  ctx.moveTo(prevX, prevY);
-  for (const v of values) {
-    const cx = x(v.time);
-    if (digital) {
-      const y = v.value === "1" ? yHi : yLo;
-      ctx.lineTo(cx, prevY);
-      ctx.lineTo(cx, y);
-      prevY = y;
-    } else {
-      ctx.lineTo(cx, yMid);
-      ctx.fillText(v.value, cx + 2, yMid - 4);
-    }
-    prevX = cx;
+// Rebuild the waveform pane: one grid row per pinned signal — name | track | reorder
+// (↑/↓) + remove (×). The track cells are per-row canvases drawn by `redrawTracks`
+// on a shared time axis; the grid keeps the time columns aligned across rows (#15).
+function renderWaves() {
+  const list = $("wave-list");
+  list.innerHTML = "";
+  if (!state.waves.length) {
+    list.classList.remove("has-rows");
+    list.textContent = "(no signals)";
+    return;
   }
-  ctx.lineTo(canvas.width - 10, prevY);
-  ctx.stroke();
+  list.classList.add("has-rows");
+  state.waves.forEach((tr, i) => {
+    const name = document.createElement("div");
+    name.className = "wave-row-name";
+    name.textContent = tr.name;
+    name.title = tr.name;
+
+    const cell = document.createElement("div");
+    cell.className = "wave-track-cell";
+    const canvas = document.createElement("canvas");
+    canvas.className = "wave-track";
+    cell.appendChild(canvas);
+
+    const ctrls = document.createElement("div");
+    ctrls.className = "wave-ctrls";
+    ctrls.appendChild(waveBtn("↑", i === 0, () => moveWave(i, -1)));
+    ctrls.appendChild(waveBtn("↓", i === state.waves.length - 1, () => moveWave(i, 1)));
+    ctrls.appendChild(waveBtn("×", false, () => removeWave(i)));
+
+    list.append(name, cell, ctrls);
+  });
+  redrawTracks();
+}
+
+// Size each track canvas to its laid-out cell and draw it on the shared time axis.
+// Reading clientWidth forces the layout needed to get the real column width; called
+// both after a rebuild and on resize (no DOM rebuild needed).
+function redrawTracks() {
+  if (!state.waves.length) return;
+  const canvases = $("wave-list").querySelectorAll<HTMLCanvasElement>(".wave-track");
+  const tMax = maxTime(state.waves);
+  state.waves.forEach((tr, i) => {
+    const canvas = canvases[i];
+    if (!canvas) return;
+    canvas.width = Math.max(1, canvas.clientWidth);
+    canvas.height = TRACK_H;
+    drawTrack(canvas, tr.values, tMax);
+  });
+}
+
+function waveBtn(label: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "wave-btn";
+  b.textContent = label;
+  b.disabled = disabled;
+  b.onclick = onClick;
+  return b;
+}
+
+function moveWave(i: number, dir: number) {
+  const j = i + dir;
+  if (j < 0 || j >= state.waves.length) return;
+  [state.waves[i], state.waves[j]] = [state.waves[j], state.waves[i]];
+  renderWaves();
+}
+
+function removeWave(i: number) {
+  state.waves.splice(i, 1);
+  renderWaves();
 }
 
 function renderPicker(resp: ProbeResponse) {
@@ -969,7 +1046,7 @@ function renderPicker(resp: ProbeResponse) {
     const d = document.createElement("div");
     d.className = "alt";
     d.textContent = alt.path;
-    d.onclick = () => api.probeNode(alt.path, context()).then((r) => r && applyProbe(r));
+    d.onclick = () => api.probeNode(alt.path, context()).then((r) => r && showInSource(r));
     pick.appendChild(d);
   }
   pick.style.display = "block";
@@ -1031,10 +1108,16 @@ function openContextMenu(x: number, y: number, items: MenuItem[]) {
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.style.display = "block";
+  // Keep the menu inside the viewport when opened near the right/bottom edge.
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth)
+    menu.style.left = `${Math.max(0, window.innerWidth - r.width)}px`;
+  if (r.bottom > window.innerHeight)
+    menu.style.top = `${Math.max(0, window.innerHeight - r.height)}px`;
 }
 
 // Right-click in the source pane: resolve the signal/object under the cursor and
-// offer "Show in schematic" / "Add to waveform" (the latter disabled when the
+// offer "Show in schematic" / "Append to waveform" (the latter disabled when the
 // object has no trace signal).
 async function onSourceContextMenu(ev: MouseEvent) {
   ev.preventDefault();
@@ -1049,7 +1132,9 @@ async function onSourceContextMenu(ev: MouseEvent) {
       onClick: () => showInSchematic(resp.anchor),
     },
     {
-      label: resp.wave.in_trace ? "Add to waveform" : "Add to waveform (not in trace)",
+      label: resp.wave.in_trace
+        ? "Append to waveform"
+        : "Append to waveform (not in trace)",
       enabled: resp.wave.in_trace,
       onClick: () => addToWaveform(resp.wave),
     },
@@ -1105,13 +1190,14 @@ async function showInSchematic(anchor: NodeRef) {
   }
 }
 
-// Show the signal in the waveform pane. Single-trace for now; becomes additive
-// once the multi-signal viewer lands (#15).
+// Append the signal as a new waveform lane (deduped by trace ref); a no-op when the
+// object has no trace signal. Lanes stack in append order (#15).
 async function addToWaveform(wave: WaveLink) {
   if (!wave.in_trace) return;
-  $("wave-name").textContent = wave.full_name;
+  if (state.waves.some((w) => w.ref === wave.signal_ref)) return;
   const values = await api.signalValues(wave.signal_ref);
-  renderWave(values);
+  state.waves.push({ ref: wave.signal_ref, name: wave.full_name, values });
+  renderWaves();
 }
 
 // -- bootstrap -------------------------------------------------------------
@@ -1147,12 +1233,15 @@ function init() {
   $("load").addEventListener("click", load);
   initTheme();
   setupZoom();
+  renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source right-click menu (#19), and dismissals.
   $("source").addEventListener("contextmenu", onSourceContextMenu);
   document.addEventListener("click", closeContextMenu);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeContextMenu();
   });
+  // Track canvases are sized from their laid-out cell width; rescale on resize.
+  window.addEventListener("resize", redrawTracks);
 }
 
 document.addEventListener("DOMContentLoaded", init);
