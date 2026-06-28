@@ -320,3 +320,66 @@ export function fitZoom(baseW: number, baseH: number, paneW: number, paneH: numb
   if (baseW <= 0 || baseH <= 0 || paneW <= 0 || paneH <= 0) return 1;
   return Math.min(1, paneW / baseW, paneH / baseH);
 }
+
+// --- wire-label placement --------------------------------------------------
+export interface Pt {
+  x: number;
+  y: number;
+}
+/// A viewport rectangle in base (pre-zoom) coordinates.
+export interface VRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+export interface LabelPlacement {
+  x: number;
+  y: number;
+  /// Degrees to rotate the label about (x, y); 0 for a horizontal segment.
+  rotate: number;
+  anchor: string;
+  baseline: string;
+}
+
+/// Where a net label sits on a wire segment `a`–`b`: centred on the segment,
+/// nudged just above a horizontal wire, and rotated 90° to read *along* a
+/// vertical wire instead of across it (#27).
+export function wireLabelPlacement(a: Pt, b: Pt): LabelPlacement {
+  const horizontal = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y);
+  const x = (a.x + b.x) / 2;
+  const y = (a.y + b.y) / 2;
+  return horizontal
+    ? { x, y: y - 3, rotate: 0, anchor: "middle", baseline: "auto" }
+    : { x, y, rotate: 90, anchor: "middle", baseline: "middle" };
+}
+
+/// Clip segment `a`–`b` to rectangle `r` (Liang–Barsky); returns the visible
+/// sub-segment, or `null` if the segment lies wholly outside. Used to keep a
+/// wire's label anchored to the part of the wire currently on screen (#28).
+export function clampSegmentToRect(a: Pt, b: Pt, r: VRect): [Pt, Pt] | null {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const p = [-dx, dx, -dy, dy];
+  const q = [a.x - r.x0, r.x1 - a.x, a.y - r.y0, r.y1 - a.y];
+  let t0 = 0;
+  let t1 = 1;
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      if (q[i] < 0) return null; // parallel to this edge and outside it
+    } else {
+      const t = q[i] / p[i];
+      if (p[i] < 0) {
+        if (t > t1) return null;
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) return null;
+        if (t < t1) t1 = t;
+      }
+    }
+  }
+  return [
+    { x: a.x + t0 * dx, y: a.y + t0 * dy },
+    { x: a.x + t1 * dx, y: a.y + t1 * dy },
+  ];
+}

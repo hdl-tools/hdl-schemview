@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { toElk, nodeId, portId, fitZoom, FF_W } from "./elk";
+import {
+  toElk,
+  nodeId,
+  portId,
+  fitZoom,
+  FF_W,
+  wireLabelPlacement,
+  clampSegmentToRect,
+} from "./elk";
 import type { SchematicGraph, SchPort } from "./types";
 
 // Build an FF child from a bare port list (FF dispatches to ffChild in toElk).
@@ -178,6 +186,46 @@ describe("ffChild", () => {
     const byId = (sid: number) => c.ports.find((p: any) => p.id === portId(sid));
     expect(byId(8)!.x).toBe(W / 2); // reset dead-centre
     expect(byId(2)!.x! + byId(3)!.x!).toBeCloseTo(W); // data mirror about centre
+  });
+});
+
+describe("wireLabelPlacement", () => {
+  it("keeps a horizontal-segment label upright, nudged above the wire", () => {
+    const p = wireLabelPlacement({ x: 0, y: 100 }, { x: 80, y: 100 });
+    expect(p.rotate).toBe(0);
+    expect(p.x).toBe(40);
+    expect(p.y).toBe(97); // 100 - 3, above the line
+    expect(p.anchor).toBe("middle");
+  });
+
+  it("rotates a vertical-segment label to run along the wire", () => {
+    const p = wireLabelPlacement({ x: 50, y: 0 }, { x: 50, y: 60 });
+    expect(p.rotate).toBe(90);
+    expect(p.x).toBe(50);
+    expect(p.y).toBe(30); // centred on the segment, no vertical nudge
+    expect(p.baseline).toBe("middle");
+  });
+});
+
+describe("clampSegmentToRect", () => {
+  const r = { x0: 0, y0: 0, x1: 100, y1: 100 };
+
+  it("returns a fully-contained segment unchanged", () => {
+    const v = clampSegmentToRect({ x: 10, y: 10 }, { x: 90, y: 10 }, r);
+    expect(v).toEqual([
+      { x: 10, y: 10 },
+      { x: 90, y: 10 },
+    ]);
+  });
+
+  it("clips a segment that runs off the right edge", () => {
+    const v = clampSegmentToRect({ x: 50, y: 20 }, { x: 200, y: 20 }, r)!;
+    expect(v[0]).toEqual({ x: 50, y: 20 });
+    expect(v[1]).toEqual({ x: 100, y: 20 }); // clamped to the rect's right edge
+  });
+
+  it("returns null for a segment wholly outside the rect", () => {
+    expect(clampSegmentToRect({ x: 200, y: 200 }, { x: 300, y: 250 }, r)).toBeNull();
   });
 });
 
