@@ -742,6 +742,21 @@ function setZoom(k: number, focus?: { x: number; y: number }) {
   placeWireLabels();
 }
 
+// Fit the whole current scope into the pane (zoom-to-fit, scrolled to origin) —
+// the view the schematic opens at. Bound to Ctrl/⌘+0 and the zoom-reset button.
+function fitView() {
+  const host = $("schematic");
+  const svg = host.querySelector("svg") as SVGSVGElement | null;
+  if (!svg) return;
+  const bw = Number(svg.dataset.baseW) || 400;
+  const bh = Number(svg.dataset.baseH) || 300;
+  zoom.k = fitZoom(bw, bh, host.clientWidth, host.clientHeight);
+  applyZoom(svg);
+  host.scrollLeft = 0;
+  host.scrollTop = 0;
+  placeWireLabels();
+}
+
 // Zoom affects the schematic SVG only — never the page/webview. Ctrl/⌘ + wheel
 // and Ctrl/⌘ + (+/-/0) are intercepted at the document (capture, non-passive) so
 // the browser/webview can't page-zoom the whole window; the gesture is routed to
@@ -763,13 +778,13 @@ function setupZoom() {
     if (!(ev.ctrlKey || ev.metaKey)) return;
     if (ev.key === "+" || ev.key === "=") setZoom(zoom.k * 1.25);
     else if (ev.key === "-" || ev.key === "_") setZoom(zoom.k / 1.25);
-    else if (ev.key === "0") setZoom(1);
+    else if (ev.key === "0") fitView(); // restore the fitted view
     else return;
     ev.preventDefault(); // stop the webview's own +/-/0 page zoom
   });
   $("zoom-in").addEventListener("click", () => setZoom(zoom.k * 1.25));
   $("zoom-out").addEventListener("click", () => setZoom(zoom.k / 1.25));
-  $("zoom-reset").addEventListener("click", () => setZoom(1));
+  $("zoom-reset").addEventListener("click", fitView); // fit, not actual-size 100%
   // Panning (native scroll) re-places net labels onto the visible wire portion.
   host.addEventListener("scroll", placeWireLabels, { passive: true });
 }
