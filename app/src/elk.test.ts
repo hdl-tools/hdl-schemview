@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toElk, nodeId, portId } from "./elk";
+import { toElk, nodeId, portId, fitZoom } from "./elk";
 import type { SchematicGraph } from "./types";
 
 const graph: SchematicGraph = {
@@ -130,5 +130,27 @@ describe("toElk", () => {
     expect(sides.filter((s) => s === "WEST").length).toBe(3); // inputs spread
     // Width is driven by input count, not the (unrendered) signal-name length.
     expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(c.width);
+  });
+});
+
+describe("fitZoom", () => {
+  it("shrinks a large graph to fit the viewport", () => {
+    // 2000x1500 graph into an 800x600 pane: limited by the tighter of the two
+    // ratios (both 0.4 here), well under 1.
+    expect(fitZoom(2000, 1500, 800, 600)).toBeCloseTo(0.4);
+  });
+
+  it("picks the tighter axis ratio", () => {
+    // Wide-but-short graph: width is the binding constraint.
+    expect(fitZoom(1600, 300, 800, 600)).toBeCloseTo(0.5);
+  });
+
+  it("never magnifies a small graph past 100%", () => {
+    expect(fitZoom(200, 150, 800, 600)).toBe(1);
+  });
+
+  it("falls back to 100% when the pane is unmeasurable", () => {
+    // jsdom/hidden panes report 0 for clientWidth/Height — don't divide by zero.
+    expect(fitZoom(2000, 1500, 0, 0)).toBe(1);
   });
 });

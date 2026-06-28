@@ -295,3 +295,12 @@ const elk = new ELK();
 export async function layout(graph: SchematicGraph): Promise<any> {
   return elk.layout(toElk(graph) as any);
 }
+
+/// Zoom factor that fits a laid-out graph (`baseW`x`baseH`) inside a pane
+/// (`paneW`x`paneH`), clamped to <= 1 so small scopes render at natural size
+/// rather than being magnified. Returns 1 when the pane is unmeasurable
+/// (e.g. a hidden or not-yet-laid-out host reports 0) to avoid div-by-zero.
+export function fitZoom(baseW: number, baseH: number, paneW: number, paneH: number): number {
+  if (baseW <= 0 || baseH <= 0 || paneW <= 0 || paneH <= 0) return 1;
+  return Math.min(1, paneW / baseW, paneH / baseH);
+}
