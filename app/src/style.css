@@ -50,11 +50,16 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .pane h2 { margin:0; padding:3px 8px; background:var(--panel); font-size:12px; font-weight:600; }
 #schematic { flex:1; min-width:0; min-height:0; overflow:auto; background:var(--canvas); user-select:none; -webkit-user-select:none; }
 #schematic svg { display:block; }
+/* Source absorbs the column's spare height and scrolls internally (min-height:0 via
+   .pane), so a long file never grows the column and pushes the waveform off-screen. */
+#source-pane { flex:1; }
 #source { flex:1; overflow:auto; font-family:ui-monospace, monospace; font-size:12px; }
 #source .line { padding:0 8px; white-space:pre; }
 #source .line .ln { color:var(--muted); display:inline-block; width:42px; text-align:right; margin-right:8px; user-select:none; }
 #source .line.hl { background:var(--hl); }
-#wave-pane { height:200px; }
+/* Pinned height: never grows or shrinks, so the waveform stays visible regardless
+   of how large the source file is. */
+#wave-pane { flex:0 0 200px; }
 /* One grid row per signal: name | track | controls. A single grid keeps the time
    axis (the 1fr track column) aligned across every row; the list scrolls. */
 #wave-list { flex:1; overflow:auto; padding:2px 0; color:var(--muted); font-size:11px; }
