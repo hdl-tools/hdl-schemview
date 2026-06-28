@@ -611,6 +611,19 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         }
     }
 
+    // Hide dangling output pins on synthesized logic boxes — an FF/comb/assign
+    // output that nothing in this scope reads — mirroring make_box's pruning of
+    // unconnected module ports, so a register driving several signals shows only
+    // the outputs that actually go somewhere.
+    let wired: std::collections::HashSet<NodeId> =
+        edges.iter().flat_map(|e| [e.source, e.target]).collect();
+    for node in &mut nodes {
+        if is_logic_box(design, node.id) {
+            node.ports
+                .retain(|p| p.side != Side::East || wired.contains(&p.id));
+        }
+    }
+
     Some(SchematicGraph {
         root: scope_path.to_string(),
         nodes,

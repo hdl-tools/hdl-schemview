@@ -276,7 +276,7 @@ fn top_scope_has_boundary_io_pins() {
 }
 
 #[test]
-fn inferred_ff_is_a_box_with_clock_and_output() {
+fn inferred_ff_shows_clock_and_hides_dangling_output() {
     let d = design();
     let top = scope_graph(&d, "picorv32_soc").expect("top graph");
     let ffs: Vec<_> = top
@@ -292,12 +292,13 @@ fn inferred_ff_is_a_box_with_clock_and_output() {
         .find(|p| p.name == "clk")
         .expect("FF clock pin");
     assert_eq!(clk.side, Side::West, "clock on the west");
-    let q = ff
-        .ports
-        .iter()
-        .find(|p| p.name == "lane_state")
-        .expect("FF output pin");
-    assert_eq!(q.side, Side::East, "Q on the east");
+    // `lane_state` is written by the FF but read by nothing in the scope, so its
+    // dangling output pin is hidden (like unconnected module ports).
+    assert!(
+        ff.ports.iter().all(|p| p.side != Side::East),
+        "dangling lane_state output should be hidden: {:?}",
+        ff.ports.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
     // The FF clock pin is wired into the design (to the boundary clk).
     assert!(
         top.edges
@@ -412,6 +413,14 @@ fn leaf_core_shows_wired_internal_logic() {
 
     // The internal logic is actually wired (signal-join), not floating boxes.
     assert!(!g.edges.is_empty(), "no internal wires in the drilled core");
+
+    // Connected FF outputs (read by other logic in the core) are still shown —
+    // only *dangling* outputs are pruned.
+    assert!(
+        ffs.iter()
+            .any(|ff| ff.ports.iter().any(|p| p.side == Side::East)),
+        "no FF shows a (connected) output pin in the drilled core"
+    );
 
     // Every FF gets its own clk pin (guards the per-(box,signal) allocator, #32).
     let clk_pins: Vec<NodeId> = ffs

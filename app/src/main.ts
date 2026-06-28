@@ -498,6 +498,14 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
       circ.setAttribute("cy", String(H + 3));
       circ.setAttribute("r", "3");
       g.appendChild(circ);
+    } else if (role === "q") {
+      // One output stub per distinct output, so a register driving several
+      // signals shows each output individually (base on the east wall, apex in).
+      const py = p.y ?? 0;
+      const tri = document.createElementNS(SVGNS, "path");
+      tri.setAttribute("class", "pin pin-out");
+      tri.setAttribute("d", `M${W},${py - 4} L${W},${py + 4} L${W - 8},${py} Z`);
+      g.appendChild(tri);
     }
   }
   parent.appendChild(g);
