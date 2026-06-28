@@ -26,3 +26,19 @@ result-*
 # Editor / OS
 .DS_Store
 *.swp
+# Added by code-review-graph
+.code-review-graph/
+
+# AI cached
+.claude
+.gemini
+.kiro
+.qoder
+.vscode
+.cursorrules
+.mcp.json
+.opencode.json
+.windsurfrules
+AGENTS.md
+GEMINI.md
+QODER.md

@@ -171,6 +171,11 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       renderAssign(root, c, node, id);
       continue;
     }
+    // Level-sensitive latch: a storage box with a level-enable marker.
+    if (node?.kind === "Latch") {
+      renderLatch(root, c, node, id);
+      continue;
+    }
 
     const portById = new Map<number, SchPort>();
     node?.ports.forEach((p) => portById.set(p.id, p));
@@ -372,6 +377,60 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
       circ.setAttribute("r", "3");
       g.appendChild(circ);
     }
+  }
+  parent.appendChild(g);
+}
+
+// A level-sensitive latch: a storage rectangle (like the FF) but transparent on an
+// active level rather than a clock edge. Distinguished from the FF by its "LE"
+// caption (the FF carries an edge wedge instead) and from the comb rectangle by its
+// own tint. Pins are bare stubs like the other logic nodes.
+function renderLatch(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const rect = document.createElementNS(SVGNS, "rect");
+  rect.setAttribute("class", "box latch" + (state.selected === id ? " sel" : ""));
+  rect.setAttribute("width", String(W));
+  rect.setAttribute("height", String(H));
+  rect.setAttribute("rx", "3");
+  rect.dataset.nodeId = String(id);
+  rect.onclick = () => selectNode(id);
+  rect.oncontextmenu = (e) => {
+    e.preventDefault();
+    crossProbe(id);
+  };
+  g.appendChild(rect);
+
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "box-label");
+  t.setAttribute("x", String(W / 2));
+  t.setAttribute("y", String(H / 2 + 1));
+  t.setAttribute("text-anchor", "middle");
+  t.style.pointerEvents = "none";
+  t.textContent = "LE";
+  g.appendChild(t);
+
+  // Bare pin stubs (no per-pin labels), like the other logic nodes.
+  const PIN = 8;
+  for (const p of c.ports ?? []) {
+    const pid = Number(String(p.id).slice(1));
+    const sp = node.ports.find((q) => q.id === pid);
+    const py = p.y ?? 0;
+    const west = sp ? sp.side !== "east" : (p.x ?? 0) < W / 2;
+    const edgeX = west ? 0 : W;
+    const arrow = document.createElementNS(SVGNS, "path");
+    arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+    arrow.setAttribute(
+      "d",
+      west
+        ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
+        : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
+    );
+    arrow.onclick = () => selectNode(pid);
+    g.appendChild(arrow);
   }
   parent.appendChild(g);
 }
