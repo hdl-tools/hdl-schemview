@@ -104,16 +104,16 @@ function ffChild(n: SchNode): ElkChild {
       : FF_H;
   const south = (id: number, x: number): ElkPort => ({
     id: portId(id),
-    width: 6,
-    height: 6,
+    width: 0,
+    height: 0,
     x,
     y: H,
     layoutOptions: { "elk.port.side": "SOUTH" },
   });
   const west = (id: number, y: number): ElkPort => ({
     id: portId(id),
-    width: 6,
-    height: 6,
+    width: 0,
+    height: 0,
     x: 0,
     y,
     layoutOptions: { "elk.port.side": "WEST" },
@@ -125,8 +125,8 @@ function ffChild(n: SchNode): ElkChild {
   qs.forEach((p, i) =>
     ports.push({
       id: portId(p.id),
-      width: 6,
-      height: 6,
+      width: 0,
+      height: 0,
       x: W,
       y: qs.length > 1 ? FF_Q_TOP + (span * i) / (qs.length - 1) : H / 2,
       layoutOptions: { "elk.port.side": "EAST" },
@@ -180,8 +180,8 @@ function assignChild(n: SchNode): ElkChild {
     const y = west.length > 1 ? top + (span * i) / (west.length - 1) : h / 2;
     ports.push({
       id: portId(p.id),
-      width: 6,
-      height: 6,
+      width: 0,
+      height: 0,
       x: capInset(y),
       y,
       layoutOptions: { "elk.port.side": "WEST" },
@@ -191,8 +191,8 @@ function assignChild(n: SchNode): ElkChild {
   east.forEach((p) =>
     ports.push({
       id: portId(p.id),
-      width: 6,
-      height: 6,
+      width: 0,
+      height: 0,
       x: w,
       y: h / 2,
       layoutOptions: { "elk.port.side": "EAST" },
@@ -209,6 +209,12 @@ function assignChild(n: SchNode): ElkChild {
 }
 
 /// Pure mapping: SchematicGraph -> ELK graph (no geometry yet).
+///
+/// Ports are given zero width/height on purpose: with a sized port ELK anchors
+/// the edge to the port box's *outer* edge (≈ the port size outside the wall) and
+/// vertical centre, which left wires floating ~8px off the pins. A zero-size port
+/// makes ELK route the edge to exactly the `(x, y)` we set — the box wall, where
+/// the renderer draws the pin — so wires meet their pins.
 export function toElk(graph: SchematicGraph): ElkGraph {
   const portOwner = new Set<number>();
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
@@ -240,8 +246,8 @@ export function toElk(graph: SchematicGraph): ElkGraph {
         layoutOptions,
         ports: n.ports.map((p) => ({
           id: portId(p.id),
-          width: 6,
-          height: 6,
+          width: 0,
+          height: 0,
           layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
         })),
       };
@@ -273,8 +279,8 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     const shift = Math.max(0, Math.min(pitch, h - PIN_HALF - bottomY));
     const sidePort = (p: SchPort, i: number, x: number): ElkPort => ({
       id: portId(p.id),
-      width: 8,
-      height: 8,
+      width: 0,
+      height: 0,
       x,
       y: base + shift + i * pitch,
       layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
