@@ -119,14 +119,41 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   //    A net name is drawn only once per view (it may fan out over many wires).
   const wireLabels: SVGTextElement[] = [];
   const seenNets = new Set<string>();
+  // The laid-out ELK edges keep their `e<schId>` ids, so map back to the model
+  // edge for the net's canonical path (clicking a wire cross-probes that net).
+  const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
   for (const e of laid.edges ?? []) {
+    const sch = edgeById.get(Number(String(e.id).slice(1)));
+    const netPath = sch?.net_path;
+    // Cross-probe the net to source + waveform; usable as both a left-click and a
+    // right-click handler (a wire has no drill/double-click, so either is safe).
+    const probeWire = netPath
+      ? (ev: Event) => {
+          ev.preventDefault();
+          selectWire(netPath);
+          crossProbePath(netPath);
+        }
+      : null;
     const segs: [any, any][] = [];
     for (const sec of e.sections ?? []) {
       const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
+      const points = pts.map((p: any) => `${p.x},${p.y}`).join(" ");
       const path = document.createElementNS(SVGNS, "polyline");
-      path.setAttribute("class", "wire");
-      path.setAttribute("points", pts.map((p: any) => `${p.x},${p.y}`).join(" "));
+      path.setAttribute("class", netPath ? "wire clickable" : "wire");
+      path.setAttribute("points", points);
+      if (netPath) path.dataset.netPath = netPath;
       root.appendChild(path);
+      // A wire is a 1.5px line; lay a transparent fat hit-line over it so the net
+      // is comfortably clickable. Boxes are drawn after wires, so a box still wins
+      // where a wire passes under it.
+      if (probeWire) {
+        const hit = document.createElementNS(SVGNS, "polyline");
+        hit.setAttribute("class", "wire-hit");
+        hit.setAttribute("points", points);
+        hit.onclick = probeWire;
+        hit.oncontextmenu = probeWire;
+        root.appendChild(hit);
+      }
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
     }
     const text = e.labels?.[0]?.text;
@@ -147,6 +174,13 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       t.setAttribute("text-anchor", "middle");
       if (!horizontal) t.setAttribute("dominant-baseline", "middle");
       t.textContent = text;
+      // The label cross-probes the same net as its wire.
+      if (probeWire && netPath) {
+        t.classList.add("clickable");
+        t.dataset.netPath = netPath;
+        t.onclick = probeWire;
+        t.oncontextmenu = probeWire;
+      }
       wireLabels.push(t);
     }
   }
@@ -306,7 +340,16 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
       ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
       : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
   );
-  if (!isConst) arrow.onclick = () => selectNode(id);
+  // A real boundary I/O pin selects (left) and cross-probes to source + waveform
+  // (right), like a box; a constant tie-off is inert.
+  const probePin = (ev: Event) => {
+    ev.preventDefault();
+    crossProbe(id);
+  };
+  if (!isConst) {
+    arrow.onclick = () => selectNode(id);
+    arrow.oncontextmenu = probePin;
+  }
   g.appendChild(arrow);
 
   const t = document.createElementNS(SVGNS, "text");
@@ -315,7 +358,10 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   t.setAttribute("y", String(py + 3));
   t.setAttribute("text-anchor", input ? "end" : "start");
   t.textContent = sp?.width ? `${sp.name}${sp.width}` : (sp?.name ?? node.label);
-  if (!isConst) t.onclick = () => selectNode(id);
+  if (!isConst) {
+    t.onclick = () => selectNode(id);
+    t.oncontextmenu = probePin;
+  }
   g.appendChild(t);
 
   parent.appendChild(g);
@@ -571,14 +617,28 @@ function applySelection() {
   }
 }
 
-// Right-click a box to cross-probe it to source + waveform. A polished drop-down
-// menu is the later-stage enhancement; this keeps cross-probing reachable now
-// that single-click is schematic-only (#47).
+// Right-click a box/pin to cross-probe it to source + waveform. A polished
+// drop-down menu is the later-stage enhancement; this keeps cross-probing
+// reachable now that single-click is schematic-only (#47).
 async function crossProbe(id: number) {
   const path = pathOf(id);
-  if (!path) return;
+  if (path) await crossProbePath(path);
+}
+
+// Cross-probe a node by its canonical model path — a pure cross-probe lookup, no
+// id detour. Used for wires (whose net carries a path, not a graph-node id).
+async function crossProbePath(path: string) {
   const resp = await api.probeNode(path, context());
   if (resp) applyProbe(resp);
+}
+
+// Highlight every wire + label carrying `netPath` (the net just clicked), and
+// clear it from the rest. Box selection (`.box.sel`) is independent and untouched.
+function selectWire(netPath: string) {
+  const host = $("schematic");
+  host.querySelectorAll<SVGElement>(".wire, .wire-label").forEach((el) => {
+    el.classList.toggle("sel", el.dataset.netPath === netPath);
+  });
 }
 
 // -- apply a cross-probe result to source + waveform -----------------------

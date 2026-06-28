@@ -72,11 +72,19 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .ff-clk { fill:none; stroke:var(--label); stroke-width:1.3; }
 .ff-rst { fill:var(--canvas); stroke:var(--label); stroke-width:1.3; }
 .wire { stroke:var(--wire); fill:none; stroke-width:1.5; }
+.wire.clickable { cursor:pointer; }
+/* Transparent fat overlay giving each thin wire a comfortable click target. */
+.wire-hit { stroke:transparent; fill:none; stroke-width:10; cursor:pointer; }
+/* Selected net: same accent as a selected box (declared after .wire so it wins). */
+.wire.sel { stroke:var(--sel); stroke-width:2.5; }
 .wire-label {
   fill:var(--wire-label); font-size:9.5px;
   paint-order:stroke; stroke:var(--canvas); stroke-width:3px; stroke-linejoin:round;
   pointer-events:none;
 }
+/* A wire label sharing its net's click-to-probe needs to receive pointer events. */
+.wire-label.clickable { pointer-events:auto; cursor:pointer; }
+.wire-label.sel { fill:var(--sel); }
 
 #picker { position:fixed; right:10px; bottom:10px; background:var(--panel); border:1px solid var(--border); padding:6px; display:none; max-width:340px; }
 #picker .alt { color:var(--crumb-fg); cursor:pointer; padding:2px; }

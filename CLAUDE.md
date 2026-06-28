@@ -101,7 +101,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 - `SchematicGraph { root, nodes: Vec<SchNode>, edges: Vec<SchEdge> }`
 - `SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>, module: Option<String> }`
 - `SchPort { id, name, side: Side, width: Option<String> }` — `width` like `[31:0]`, else `None`.
-- `SchEdge { id, source, target, net: Option<String> }`
+- `SchEdge { id, source, target, net: Option<String>, net_path: Option<String> }` — `net_path` is the connecting net's canonical model path (absolute, no bit-select), so a wire click cross-probes via `probe_node`; `None` for synthetic constant tie-offs.
 - `Side { West, East }` — drives ELK port placement.
 
 **Model** (`core/crates/model/src/lib.rs`):

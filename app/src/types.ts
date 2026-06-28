@@ -33,6 +33,12 @@ export interface SchEdge {
   target: number;
   /** Connecting net name, relative to the scope (e.g. "bus.valid"). */
   net?: string;
+  /**
+   * Canonical model path of the connecting net (e.g.
+   * "picorv32_soc.g_lane[0].bus.valid") — absolute, no bit-select. Lets a wire
+   * click cross-probe via `probe_node`. Absent for synthetic constant tie-offs.
+   */
+  net_path?: string;
 }
 export interface SchematicGraph {
   root: string;
