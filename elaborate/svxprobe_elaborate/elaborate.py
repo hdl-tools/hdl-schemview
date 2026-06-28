@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 import pyslang
 from pyslang import Bag, SourceManager
+from pyslang.analysis import AnalysisManager
 from pyslang.ast import Compilation, CompilationOptions
 from pyslang.syntax import SyntaxTree
 
@@ -76,6 +77,8 @@ class Elaborator:
         # (logic node id, symbol, role) for process-level logic-edge extraction —
         # inferred registers (`ff`) and combinational blocks (`comb`).
         self.logic_blocks: list[tuple[int, Any, str]] = []
+        # Source locations slang's analysis flags as inferring a latch (set in build).
+        self._inferred_latch_locs: set[tuple[Any, int]] = set()
 
     # -- source-range helpers ------------------------------------------------
     def _file_id(self, path: str) -> int:
@@ -179,11 +182,46 @@ class Elaborator:
                 pass
         return found["v"]
 
-    @staticmethod
-    def _logic_role(sym: Any) -> Optional[str]:
+    def _collect_inferred_latches(self) -> set[tuple[Any, int]]:
+        """Source locations slang's analysis pass flags as inferring a latch — i.e.
+        an ``always_comb`` / ``always_latch`` that holds state on some path. slang
+        only reports this for the *no-latch-contract* forms; a legacy level-sensitive
+        ``always`` that infers a latch is legal Verilog and is **not** flagged, so it
+        stays ``comb`` (we do not second-guess the model with our own heuristic).
+        Best-effort: never block elaboration if the analysis API misbehaves."""
+        locs: set[tuple[Any, int]] = set()
+        try:
+            # The analysis pass requires a fully-elaborated compilation.
+            self.comp.getAllDiagnostics()
+            am = AnalysisManager()
+            am.analyze(self.comp)
+            for d in am.getDiagnostics():
+                if d.code == pyslang.Diags.InferredLatch:
+                    loc = d.location
+                    locs.add((loc.buffer, loc.offset))
+        except Exception:
+            pass
+        return locs
+
+    def _infers_latch(self, sym: Any) -> bool:
+        """True if `sym`'s source range contains a slang `InferredLatch` location."""
+        if not self._inferred_latch_locs:
+            return False
+        try:
+            sr = sym.syntax.sourceRange
+            start, end = sr.start, sr.end
+            return any(
+                buf == start.buffer and start.offset <= off <= end.offset
+                for (buf, off) in self._inferred_latch_locs
+            )
+        except Exception:
+            return False
+
+    def _logic_role(self, sym: Any) -> Optional[str]:
         """Classify a process / continuous assign as a logic spine node:
         ``'ff'`` (edge-sensitive sequential), ``'comb'`` (combinational process —
-        ``always_comb`` / ``always @*`` / ``always_latch``), ``'assign'``
+        ``always_comb`` / ``always @*``), ``'latch'`` (``always_latch`` or an
+        ``always_comb`` slang's analysis flags as inferring a latch), ``'assign'``
         (continuous ``assign``), or ``None`` (not logic — e.g. ``initial`` /
         ``final``). ``comb`` and ``assign`` are both combinational but kept distinct
         so the schematic can render a process as a box and an assign as a function
@@ -197,15 +235,17 @@ class Elaborator:
         pk = str(getattr(sym, "procedureKind", "")).split(".")[-1]
         if pk == "AlwaysFF":
             return "ff"
-        if pk == "AlwaysComb":
-            return "comb"
         if pk == "AlwaysLatch":
             return "latch"
+        if pk == "AlwaysComb":
+            # Combinational intent — but slang may have found it infers a latch
+            # (incomplete assignment), which is the truth we render.
+            return "latch" if self._infers_latch(sym) else "comb"
         if pk == "Always":
             # Legacy `always`: edge-sensitive ⇒ sequential, else combinational.
-            # (A level-sensitive legacy `always` that infers a latch via incomplete
-            # assignment is still reported `comb` — detecting that needs more
-            # analysis; only the explicit `always_latch` form is a `latch` here.)
+            # (A level-sensitive legacy `always` that infers a latch is legal Verilog
+            # and is *not* flagged by slang, so it stays `comb` — only the explicit
+            # `always_latch` and a latch-inferring `always_comb` become `latch`.)
             timing = getattr(getattr(sym, "body", None), "timing", None)
             return "ff" if Elaborator._has_edge(timing) else "comb"
         return None  # Initial / Final / other
@@ -520,6 +560,9 @@ class Elaborator:
 
     def build(self) -> dict[str, Any]:
         root = self.comp.getRoot()
+        # Slang's analysis pass flags `always_comb` blocks that infer a latch; used
+        # by `_logic_role` to classify them `Latch` rather than `Comb`.
+        self._inferred_latch_locs = self._collect_inferred_latches()
         for top in root.topInstances:
             self._walk(top, None)
         edges = self._edges()

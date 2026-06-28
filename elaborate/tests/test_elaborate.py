@@ -164,6 +164,36 @@ def test_always_latch_is_distinct_kind(tmp_path) -> None:
     assert ins & {"en", "d"}, ins
 
 
+def _kinds(src: str, tmp_path) -> set[str]:
+    f = tmp_path / "dut.sv"
+    f.write_text(src)
+    return {n["kind"] for n in build_model([str(f)], top="m")["nodes"]}
+
+
+def test_always_comb_inferring_a_latch_is_latch(tmp_path) -> None:
+    """An `always_comb` that accidentally infers a latch (incomplete assignment)
+    is reclassified `Latch` from slang's own analysis-pass `InferredLatch`
+    diagnostic — not a heuristic."""
+    kinds = _kinds("module m(input en, d, output logic q);\n  always_comb if (en) q = d;\nendmodule\n", tmp_path)
+    assert "Latch" in kinds and "Comb" not in kinds, kinds
+
+
+def test_complete_always_comb_stays_comb(tmp_path) -> None:
+    """A fully-assigned `always_comb` is combinational — not flagged, stays `Comb`."""
+    kinds = _kinds(
+        "module m(input en, d, output logic q);\n  always_comb if (en) q = d; else q = 0;\nendmodule\n",
+        tmp_path,
+    )
+    assert "Comb" in kinds and "Latch" not in kinds, kinds
+
+
+def test_legacy_level_always_is_not_reclassified(tmp_path) -> None:
+    """slang does not flag a legacy level-sensitive `always` as inferring a latch
+    (it is legal Verilog), so it stays `Comb` — we do not second-guess the model."""
+    kinds = _kinds("module m(input en, d, output logic q);\n  always @* if (en) q = d;\nendmodule\n", tmp_path)
+    assert "Comb" in kinds and "Latch" not in kinds, kinds
+
+
 def test_legacy_clocked_always_is_ff(model: dict) -> None:
     """A legacy `always @(posedge clk)` inside a leaf core yields FF nodes — not
     only the top-level `always_ff` lane registers."""
