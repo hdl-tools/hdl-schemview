@@ -71,13 +71,18 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 | File | Role |
 | --- | --- |
 | `app/index.html` | Three-pane layout + toolbar/breadcrumb. |
-| `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache). |
+| `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache, pinned waveform traces). |
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
 | `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |
 | `app/src/elk.ts` (+ `elk.test.ts`) | `SchematicGraph` → ELK layout → SVG DOM. |
+| `app/src/wave.ts` (+ `wave.test.ts`) | Multi-signal waveform geometry (lane math, time axis) + per-trace canvas drawing. |
 | `app/src/style.css` | Theme vars. Dark default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
 
-Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D.
+Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D. Right-click
+a schematic box/pin/wire (or a source token) opens an action menu: **Append to
+waveform** (stacks the signal as a new lane) / **Show in source**. The waveform pane
+holds many traces (`state.waves`), stacked in scrollable fixed-height lanes with
+per-lane reorder/remove controls.
 
 ## Tauri commands (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
 
