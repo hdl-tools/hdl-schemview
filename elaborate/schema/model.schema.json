@@ -81,7 +81,7 @@
         "id": { "type": "integer", "minimum": 0 },
         "kind": {
           "type": "string",
-          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign"]
+          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport"]
         },
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },
@@ -99,6 +99,10 @@
         "const": {
           "type": ["string", "null"],
           "description": "Literal value tied to a Port input (e.g. \"32'd0\"); null if driven by a net."
+        },
+        "modport": {
+          "type": ["string", "null"],
+          "description": "View name on a modport-specialized interface port (e.g. \"mem\" for `mem_if.mem bus`); null otherwise."
         },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }

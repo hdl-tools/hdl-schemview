@@ -106,8 +106,8 @@ Delegate to a global `AppState(Mutex<Session>)`.
 
 **Model** (`core/crates/model/src/lib.rs`):
 - `NodeId` = `u32` index into `Document::nodes`.
-- `NodeKind { Instance, Net, Port, Var, Param, ModuleDef, GenBlock }`.
-- `Node { id, name, path, parent, children, kind, symbol_key, def_range, inst_range, type_, drivers, loads }`.
+- `NodeKind { Instance, Net, Port, Var, Param, ModuleDef, GenBlock, Ff, Comb, Latch, Assign, Interface, Modport }` — `Interface` is an interface instance or a modport-specialized interface port; `Modport` a named view of a bundle.
+- `Node { id, name, path, parent, children, kind, symbol_key, def_range, inst_range, type_, dir, const_value, modport, drivers, loads }` — `modport` records the view name on a modport-specialized interface port (e.g. `mem`).
 - `Design { doc, path_index, src_index, conn_index, wave_index }`.
 
 > ⚠️ These serde types are the wire format for the frontend. Any field change in

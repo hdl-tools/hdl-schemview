@@ -15,7 +15,8 @@ export interface SchNode {
    * Model NodeKind, mirrored as a string. Drives the renderer's glyph choice:
    * `Instance`/`GenBlock` → module box, `Port` → boundary pin, `FF` → flip-flop,
    * `Comb` → combinational rectangle, `Assign` → stadium (function) node,
-   * `Latch` → tinted storage box with an "LE" caption.
+   * `Latch` → tinted storage box with an "LE" caption, `Interface` →
+   * folded-corner "bundle" box.
    */
   kind: string;
   label: string;

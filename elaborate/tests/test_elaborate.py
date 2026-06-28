@@ -48,11 +48,43 @@ def test_exercises_four_constructs(model: dict) -> None:
     assert "picorv32_soc.g_lane[0].core" in paths
     assert "picorv32_soc.g_lane[1].core" in paths
 
-    # interface instance per lane
+    # interface instance per lane, modelled as a distinct Interface bundle with
+    # its modports (not an indistinguishable module Instance)
     assert "picorv32_soc.g_lane[0].bus" in paths
+    assert "Interface" in kinds
+    assert "Modport" in kinds
 
     # package-typed signal
     assert "picorv32_soc.g_lane[0].lane_state" in paths
+
+
+def test_interface_instance_is_distinct_kind(model: dict) -> None:
+    """An interface instance is its own `Interface` kind, not an indistinguishable
+    `Instance`, so the schematic can give a signal bundle a distinct shape."""
+    by = {n["path"]: n for n in model["nodes"]}
+    bus = by["picorv32_soc.g_lane[0].bus"]
+    assert bus["kind"] == "Interface", bus["kind"]
+    # A plain module instance stays an Instance.
+    assert by["picorv32_soc.g_lane[0].core"]["kind"] == "Instance"
+
+
+def test_modports_emitted(model: dict) -> None:
+    """The interface's modports emit as `Modport` children (views of the bundle)."""
+    by = {n["path"]: n for n in model["nodes"]}
+    core_mp = by.get("picorv32_soc.g_lane[0].bus.core")
+    mem_mp = by.get("picorv32_soc.g_lane[0].bus.mem")
+    assert core_mp and core_mp["kind"] == "Modport", core_mp
+    assert mem_mp and mem_mp["kind"] == "Modport", mem_mp
+
+
+def test_consuming_interface_port_records_modport(model: dict) -> None:
+    """A modport-specialized interface port (`mem_if.mem bus`) is an `Interface`
+    node recording the view it selects, so the connection resolves to its own node
+    rather than the consumer's box."""
+    by = {n["path"]: n for n in model["nodes"]}
+    port = by.get("picorv32_soc.g_lane[0].memory.bus")
+    assert port and port["kind"] == "Interface", port
+    assert port["modport"] == "mem", port.get("modport")
 
 
 def test_nodes_have_paths_and_keys(model: dict) -> None:
@@ -227,8 +259,9 @@ def test_connectivity_edges(model: dict) -> None:
     assert has_edge(
         "picorv32_soc.g_lane[0].core.mem_valid", "picorv32_soc.g_lane[0].bus.valid"
     )
-    # The memory's interface port anchors to its box, wired to the bus instance.
-    assert has_edge("picorv32_soc.g_lane[0].memory", "picorv32_soc.g_lane[0].bus")
+    # The memory's modport-specialized interface port resolves to its own node
+    # (not the consumer's box) and wires to the interface instance.
+    assert has_edge("picorv32_soc.g_lane[0].memory.bus", "picorv32_soc.g_lane[0].bus")
 
 
 def test_bus_bitselect_on_edges(model: dict) -> None:

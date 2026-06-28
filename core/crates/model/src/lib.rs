@@ -41,6 +41,12 @@ pub enum NodeKind {
     /// Continuous `assign` — a combinational function driving one signal. Kept
     /// distinct from `Comb` so the schematic can render it as a function node.
     Assign,
+    /// A SystemVerilog `interface` instance (a signal bundle) or a
+    /// modport-specialized interface port on a consumer. Distinct from `Instance`
+    /// so the schematic can draw a bundle shape rather than a module box.
+    Interface,
+    /// A named view (`modport`) of an interface bundle.
+    Modport,
 }
 
 /// A point in a source file.
@@ -90,6 +96,10 @@ pub struct Node {
     /// Literal value tied to a `Port` input (e.g. `32'd0`); `None` if net-driven.
     #[serde(rename = "const", default)]
     pub const_value: Option<String>,
+    /// View name on a modport-specialized interface port (e.g. `mem` for
+    /// `mem_if.mem bus`); `None` otherwise.
+    #[serde(default)]
+    pub modport: Option<String>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -287,6 +297,7 @@ mod tests {
             type_: None,
             dir: None,
             const_value: None,
+            modport: None,
             drivers: vec![],
             loads: vec![],
         }
