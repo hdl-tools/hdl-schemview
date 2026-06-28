@@ -13,17 +13,19 @@
       <input id="srcroot" placeholder="source root" />
       <button id="load">Load</button>
       <span id="status"></span>
-      <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
-        <button id="zoom-out" aria-label="Zoom out">−</button>
-        <button id="zoom-reset" title="Fit schematic to view (Ctrl/⌘+0)" aria-label="Fit schematic to view">100%</button>
-        <button id="zoom-in" aria-label="Zoom in">+</button>
-      </span>
       <button id="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">◐</button>
     </header>
     <div id="breadcrumb"></div>
     <main id="panes">
       <section id="schematic-pane" class="pane">
-        <h2>Schematic</h2>
+        <h2>
+          Schematic
+          <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
+            <button id="zoom-out" aria-label="Zoom out">−</button>
+            <button id="zoom-reset" title="Fit schematic to view (Ctrl/⌘+0)" aria-label="Fit schematic to view">100%</button>
+            <button id="zoom-in" aria-label="Zoom in">+</button>
+          </span>
+        </h2>
         <div id="schematic"></div>
       </section>
       <section id="right">
