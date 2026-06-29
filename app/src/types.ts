@@ -78,3 +78,10 @@ export interface ValueChange {
   time: number;
   value: string;
 }
+
+// Trace timescale: each raw ValueChange.time tick equals `factor` of `unit`
+// (normalized short unit: "fs"/"ps"/"ns"/"us"/"ms"/"s", "" when unknown).
+export interface TraceTimescale {
+  factor: number;
+  unit: string;
+}

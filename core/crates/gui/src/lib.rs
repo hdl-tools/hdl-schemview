@@ -12,7 +12,7 @@ use serde::Serialize;
 use svxprobe_matcher::MatchOptions;
 use svxprobe_model::NodeId;
 use svxprobe_schematic::{cone, expand, scope_graph, SchematicGraph};
-use svxprobe_wave::{LoadedWave, ValueChange};
+use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
 /// A reference to a model node, for the frontend.
@@ -135,6 +135,11 @@ impl Session {
 
     pub fn signal_values(&mut self, signal_ref: u32) -> Vec<ValueChange> {
         self.wave.signal_values(signal_ref)
+    }
+
+    /// The trace's timescale (tick → physical time), for time-axis labelling.
+    pub fn trace_timescale(&self) -> Option<TraceTimescale> {
+        self.wave.timescale()
     }
 
     // -- cross-probe --------------------------------------------------------

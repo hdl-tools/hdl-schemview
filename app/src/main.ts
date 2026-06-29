@@ -17,9 +17,27 @@ import type {
   SchematicGraph,
   SchNode,
   SchPort,
+  TraceTimescale,
   WaveLink,
 } from "./types";
-import { drawTrack, maxTime, TRACK_H, type WaveTrace } from "./wave";
+import {
+  defaultDisplayUnit,
+  displayScale,
+  drawTrack,
+  drawRuler,
+  maxTime,
+  nearestEdge,
+  panWindow,
+  TRACK_H,
+  trimBusValue,
+  valueAt,
+  xToTime,
+  zoomWindow,
+  type DisplayUnit,
+  type Markers,
+  type TimeWindow,
+  type WaveTrace,
+} from "./wave";
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -46,6 +64,14 @@ const state = {
   // the schematic/source right-click menu; reordered/removed via the per-lane
   // controls. Cleared on model reload (#15).
   waves: [] as WaveTrace[],
+  // Visible waveform time window (null = full window, derived from maxTime) and the
+  // A (left-click) / B (right-click) markers. Reset on model reload (#16).
+  waveView: null as TimeWindow | null,
+  markers: { a: null, b: null } as Markers,
+  // Trace timescale (tick → physical time) and the chosen display unit for the
+  // ruler/readout. Fetched on load; null timescale → raw-tick display (#16).
+  timescale: null as TraceTimescale | null,
+  waveUnit: "ns" as DisplayUnit,
 };
 
 // Saved viewport per scope path, surviving stack pops so revisiting a scope
@@ -80,6 +106,11 @@ async function load() {
     viewCache.clear();
     // A new design invalidates the old traces (signal_refs are model-specific).
     state.waves = [];
+    state.waveView = null;
+    state.markers = { a: null, b: null };
+    state.timescale = await api.traceTimescale();
+    state.waveUnit = defaultDisplayUnit(state.timescale);
+    syncUnitSelect();
     renderWaves();
     await setScope(top, top);
   } catch (e) {
@@ -963,23 +994,43 @@ async function renderSource(file: number, line: number) {
   host.querySelector(".hl")?.scrollIntoView({ block: "center" });
 }
 
-// Rebuild the waveform pane: one grid row per pinned signal — name | track | reorder
-// (↑/↓) + remove (×). The track cells are per-row canvases drawn by `redrawTracks`
-// on a shared time axis; the grid keeps the time columns aligned across rows (#15).
+const RULER_H = 16;
+
+// The visible time window, defaulting to the full data window when unset.
+function currentView(): TimeWindow {
+  return state.waveView ?? { t0: 0, t1: maxTime(state.waves) };
+}
+
+// Rebuild the waveform pane: a top ruler row, then one grid row per pinned signal —
+// name | value-at-A | track | reorder (↑/↓) + remove (×). Track/ruler cells are
+// canvases drawn by `redrawTracks` on the shared visible window; the grid keeps the
+// time columns aligned across rows (#15, #16).
 function renderWaves() {
   const list = $("wave-list");
   list.innerHTML = "";
   if (!state.waves.length) {
     list.classList.remove("has-rows");
     list.textContent = "(no signals)";
+    updateMarkerReadout();
     return;
   }
   list.classList.add("has-rows");
+  // Ruler row: spacers flank a track-column canvas so it aligns with the tracks.
+  const rulerCell = document.createElement("div");
+  rulerCell.className = "wave-ruler-cell";
+  const ruler = document.createElement("canvas");
+  ruler.className = "wave-ruler";
+  rulerCell.appendChild(ruler);
+  list.append(spacer(), spacer(), rulerCell, spacer());
+
   state.waves.forEach((tr, i) => {
     const name = document.createElement("div");
     name.className = "wave-row-name";
     name.textContent = tr.name;
     name.title = tr.name;
+
+    const value = document.createElement("div");
+    value.className = "wave-row-value";
 
     const cell = document.createElement("div");
     cell.className = "wave-track-cell";
@@ -993,25 +1044,68 @@ function renderWaves() {
     ctrls.appendChild(waveBtn("↓", i === state.waves.length - 1, () => moveWave(i, 1)));
     ctrls.appendChild(waveBtn("×", false, () => removeWave(i)));
 
-    list.append(name, cell, ctrls);
+    list.append(name, value, cell, ctrls);
   });
   redrawTracks();
 }
 
-// Size each track canvas to its laid-out cell and draw it on the shared time axis.
-// Reading clientWidth forces the layout needed to get the real column width; called
-// both after a rebuild and on resize (no DOM rebuild needed).
+function spacer(): HTMLDivElement {
+  const d = document.createElement("div");
+  d.className = "wave-spacer";
+  return d;
+}
+
+// Size each canvas to its laid-out cell and draw on the current window. Reading
+// clientWidth forces the layout needed to get the real column width; called after a
+// rebuild, on resize, and on every zoom/pan/marker change (no DOM rebuild needed).
 function redrawTracks() {
-  if (!state.waves.length) return;
-  const canvases = $("wave-list").querySelectorAll<HTMLCanvasElement>(".wave-track");
-  const tMax = maxTime(state.waves);
+  const list = $("wave-list");
+  const view = currentView();
+  const scale = displayScale(state.timescale, state.waveUnit);
+  const ruler = list.querySelector<HTMLCanvasElement>(".wave-ruler");
+  if (ruler) {
+    ruler.width = Math.max(1, ruler.clientWidth);
+    ruler.height = RULER_H;
+    drawRuler(ruler, view, state.markers, scale);
+  }
+  const canvases = list.querySelectorAll<HTMLCanvasElement>(".wave-track");
+  const valueCells = list.querySelectorAll<HTMLDivElement>(".wave-row-value");
   state.waves.forEach((tr, i) => {
     const canvas = canvases[i];
-    if (!canvas) return;
-    canvas.width = Math.max(1, canvas.clientWidth);
-    canvas.height = TRACK_H;
-    drawTrack(canvas, tr.values, tMax);
+    if (canvas) {
+      canvas.width = Math.max(1, canvas.clientWidth);
+      canvas.height = TRACK_H;
+      drawTrack(canvas, tr.values, view, state.markers);
+    }
+    const vc = valueCells[i];
+    // Value at the primary marker A; the latest value when A is unset. Redundant
+    // leading zeros trimmed, matching the bus-track labels.
+    if (vc) {
+      vc.textContent = trimBusValue(
+        valueAt(tr.values, state.markers.a ?? Number.POSITIVE_INFINITY),
+      );
+    }
   });
+  updateMarkerReadout();
+}
+
+// Header readout: A/B timestamps and their delta, in the selected display unit.
+function updateMarkerReadout() {
+  const { a, b } = state.markers;
+  const scale = displayScale(state.timescale, state.waveUnit);
+  const u = state.timescale ? ` ${state.waveUnit}` : "";
+  const fmt = (t: number) => `${Math.round(t * scale * 100) / 100}${u}`;
+  const parts: string[] = [];
+  if (a != null) parts.push(`A ${fmt(a)}`);
+  if (b != null) parts.push(`B ${fmt(b)}`);
+  if (a != null && b != null) parts.push(`Δ ${fmt(Math.abs(b - a))}`);
+  $("wave-readout").textContent = parts.join("   ");
+}
+
+// Mirror the selected display unit into the header dropdown.
+function syncUnitSelect() {
+  const sel = document.getElementById("wave-unit") as HTMLSelectElement | null;
+  if (sel) sel.value = state.waveUnit;
 }
 
 function waveBtn(label: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
@@ -1224,6 +1318,125 @@ function initTheme() {
   });
 }
 
+// Waveform zoom / pan / marker interaction. Listeners are delegated on #wave-list so
+// they survive the per-change canvas rebuilds. Pixel→time uses each canvas's laid-out
+// rect (drawing width == clientWidth, so 1 CSS px == 1 device px — see redrawTracks).
+function setupWaveInteraction() {
+  const list = $("wave-list");
+  const tMax = () => maxTime(state.waves);
+
+  const zoomBy = (factor: number, pivotT: number) => {
+    state.waveView = zoomWindow(currentView(), factor, pivotT, tMax());
+    redrawTracks();
+  };
+  $("wave-zoom-in").addEventListener("click", () => {
+    const v = currentView();
+    zoomBy(0.8, (v.t0 + v.t1) / 2);
+  });
+  $("wave-zoom-out").addEventListener("click", () => {
+    const v = currentView();
+    zoomBy(1.25, (v.t0 + v.t1) / 2);
+  });
+  $("wave-zoom-reset").addEventListener("click", () => {
+    state.waveView = null;
+    redrawTracks();
+  });
+  $("wave-unit").addEventListener("change", (ev) => {
+    state.waveUnit = (ev.target as HTMLSelectElement).value as DisplayUnit;
+    redrawTracks();
+  });
+
+  // Map a pointer event over a track/ruler canvas to a time, else null.
+  const timeAt = (ev: MouseEvent): number | null => {
+    const canvas = (ev.target as HTMLElement)?.closest<HTMLCanvasElement>(
+      ".wave-track, .wave-ruler",
+    );
+    if (!canvas) return null;
+    const r = canvas.getBoundingClientRect();
+    const v = currentView();
+    return xToTime(ev.clientX - r.left, v.t0, v.t1, r.width);
+  };
+
+  // Marker time: like `timeAt`, but snapped to the nearest signal edge — the clicked
+  // track's edges, or (on the ruler) the nearest edge across all signals.
+  const markerTimeAt = (ev: MouseEvent): number | null => {
+    const canvas = (ev.target as HTMLElement)?.closest<HTMLCanvasElement>(
+      ".wave-track, .wave-ruler",
+    );
+    if (!canvas) return null;
+    const r = canvas.getBoundingClientRect();
+    const v = currentView();
+    const raw = xToTime(ev.clientX - r.left, v.t0, v.t1, r.width);
+    let candidates = state.waves;
+    if (canvas.classList.contains("wave-track")) {
+      const idx = Array.from(list.querySelectorAll(".wave-track")).indexOf(canvas);
+      if (idx >= 0 && state.waves[idx]) candidates = [state.waves[idx]];
+    }
+    let snapped = raw;
+    let bestD = Infinity;
+    for (const tr of candidates) {
+      const e = nearestEdge(tr.values, raw);
+      if (e != null && Math.abs(e - raw) < bestD) {
+        bestD = Math.abs(e - raw);
+        snapped = e;
+      }
+    }
+    return snapped;
+  };
+
+  // Ctrl/⌘ + wheel zooms about the cursor; plain wheel scrolls the signal list.
+  list.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!(ev.ctrlKey || ev.metaKey)) return;
+      const t = timeAt(ev);
+      if (t == null) return;
+      ev.preventDefault();
+      zoomBy(ev.deltaY > 0 ? 1.25 : 0.8, t);
+    },
+    { passive: false },
+  );
+
+  // Drag to pan; a click without drag drops the primary marker A.
+  let drag: { startX: number; moved: boolean; view: TimeWindow; w: number } | null = null;
+  list.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 0) return;
+    const canvas = (ev.target as HTMLElement)?.closest<HTMLCanvasElement>(
+      ".wave-track, .wave-ruler",
+    );
+    if (!canvas) return;
+    drag = { startX: ev.clientX, moved: false, view: currentView(), w: canvas.getBoundingClientRect().width };
+  });
+  window.addEventListener("mousemove", (ev) => {
+    if (!drag) return;
+    const dx = ev.clientX - drag.startX;
+    if (!drag.moved && Math.abs(dx) < 4) return; // threshold: distinguish click vs pan
+    drag.moved = true;
+    const span = drag.view.t1 - drag.view.t0;
+    state.waveView = panWindow(drag.view, -(dx / drag.w) * span, tMax());
+    redrawTracks();
+  });
+  window.addEventListener("mouseup", (ev) => {
+    if (!drag) return;
+    const wasDrag = drag.moved;
+    drag = null;
+    if (wasDrag) return;
+    const t = markerTimeAt(ev);
+    if (t == null) return;
+    state.markers.a = t; // left-click → primary marker A (snapped to nearest edge)
+    redrawTracks();
+  });
+
+  // Right-click over a track/ruler drops the secondary marker B (no browser menu).
+  list.addEventListener("contextmenu", (ev) => {
+    const t = markerTimeAt(ev);
+    if (t == null) return;
+    ev.preventDefault();
+    state.markers.b = t;
+    redrawTracks();
+  });
+}
+
 function init() {
   ($("model") as HTMLInputElement).value =
     "../../fixtures/picorv32_soc/golden/hierarchy.json";
@@ -1233,6 +1446,8 @@ function init() {
   $("load").addEventListener("click", load);
   initTheme();
   setupZoom();
+  setupWaveInteraction();
+  syncUnitSelect();
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source right-click menu (#19), and dismissals.
   $("source").addEventListener("contextmenu", onSourceContextMenu);
