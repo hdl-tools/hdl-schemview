@@ -12,6 +12,8 @@ import {
   valueAtMarker,
   nearestEdge,
   trimBusValue,
+  formatValue,
+  sliceBits,
   tickMarks,
   unitExponent,
   displayScale,
@@ -163,6 +165,50 @@ describe("valueAtMarker", () => {
   });
   it("collapses a no-op transition to a single value", () => {
     expect(valueAtMarker(vc([[0, "5"], [10, "5"]]), 10)).toBe("5");
+  });
+});
+
+describe("formatValue", () => {
+  it("converts binary to hex and trims leading zeros", () => {
+    expect(formatValue("11000", "hex")).toBe("18");
+    expect(formatValue("00011000", "hex")).toBe("18");
+    expect(formatValue("1010", "hex")).toBe("a");
+    expect(formatValue("0000", "hex")).toBe("0");
+  });
+  it("converts binary to octal and decimal", () => {
+    expect(formatValue("1010", "oct")).toBe("12");
+    expect(formatValue("111", "oct")).toBe("7");
+    expect(formatValue("11000", "dec")).toBe("24");
+  });
+  it("passes binary through (trimmed) and single bits", () => {
+    expect(formatValue("00011000", "bin")).toBe("11000");
+    expect(formatValue("1", "hex")).toBe("1");
+    expect(formatValue("", "hex")).toBe("");
+  });
+  it("yields x when a group/value contains unknown bits", () => {
+    expect(formatValue("1x00", "hex")).toBe("x");
+    expect(formatValue("1x00", "dec")).toBe("x");
+  });
+});
+
+describe("sliceBits", () => {
+  it("extracts [hi:lo] honoring MSB→LSB bit order", () => {
+    expect(sliceBits("00011000", 4, 2)).toBe("110");
+    expect(sliceBits("1010", 3, 3)).toBe("1");
+    expect(sliceBits("1010", 1, 0)).toBe("10");
+  });
+  it("clamps out-of-range bounds and rejects hi < lo", () => {
+    expect(sliceBits("1010", 99, 0)).toBe("1010");
+    expect(sliceBits("1010", 2, -5)).toBe("010");
+    expect(sliceBits("1010", 0, 3)).toBe("");
+  });
+});
+
+describe("valueAtMarker with radix", () => {
+  const bus = vc([[0, "00000000"], [10, "00011000"]]);
+  it("formats both sides of the transition in the chosen radix", () => {
+    expect(valueAtMarker(bus, 10, "hex")).toBe("0 -> 18");
+    expect(valueAtMarker(bus, 10, "bin")).toBe("0 -> 11000");
   });
 });
 

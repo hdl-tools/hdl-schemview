@@ -127,9 +127,16 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #picker .alt { color:var(--crumb-fg); cursor:pointer; padding:2px; }
 #picker .alt:hover { background:var(--border); }
 
-/* Right-click context menu (source pane). */
-#ctxmenu { position:fixed; display:none; z-index:50; background:var(--panel); border:1px solid var(--border); padding:3px; min-width:160px; box-shadow:0 2px 8px rgba(0,0,0,0.35); }
-#ctxmenu .ctx-item { padding:4px 10px; cursor:pointer; white-space:nowrap; font-size:12px; }
-#ctxmenu .ctx-item:hover { background:var(--accent); color:#fff; }
-#ctxmenu .ctx-item.disabled { color:var(--muted); cursor:default; }
-#ctxmenu .ctx-item.disabled:hover { background:transparent; color:var(--muted); }
+/* Right-click context menu + one level of submenu (#ctxsubmenu). */
+#ctxmenu, #ctxsubmenu { position:fixed; display:none; z-index:50; background:var(--panel); border:1px solid var(--border); padding:3px; min-width:160px; box-shadow:0 2px 8px rgba(0,0,0,0.35); }
+#ctxmenu .ctx-item, #ctxsubmenu .ctx-item { padding:4px 10px; cursor:pointer; white-space:nowrap; font-size:12px; display:flex; justify-content:space-between; gap:12px; }
+#ctxmenu .ctx-item:hover, #ctxsubmenu .ctx-item:hover { background:var(--accent); color:#fff; }
+#ctxmenu .ctx-item.disabled, #ctxsubmenu .ctx-item.disabled { color:var(--muted); cursor:default; }
+#ctxmenu .ctx-item.disabled:hover, #ctxsubmenu .ctx-item.disabled:hover { background:transparent; color:var(--muted); }
+.ctx-item .ctx-arrow { opacity:0.7; }
+
+/* Sub-bus bit-range popover (#78). */
+#subbus-pop { position:fixed; z-index:60; background:var(--panel); border:1px solid var(--border); padding:6px 8px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,0.35); display:flex; gap:6px; align-items:center; }
+#subbus-pop input { width:48px; background:var(--field); color:var(--fg); border:1px solid var(--border); }
+#subbus-pop button { background:var(--field); color:var(--fg); border:1px solid var(--border); cursor:pointer; padding:1px 6px; }
+#subbus-pop button:hover { background:var(--accent); color:#fff; }

@@ -13,6 +13,7 @@ export interface WaveTrace {
   ref: number;
   name: string;
   values: ValueChange[];
+  radix?: Radix; // per-signal display radix; defaults to hex for multi-bit buses
 }
 
 // Fixed per-track canvas height (px). Must match `.wave-track` height in style.css.
@@ -192,6 +193,48 @@ export function trimBusValue(value: string): string {
   return trimmed === "" ? "0" : trimmed;
 }
 
+// Per-signal value radix. Native trace values are binary strings (MSB→LSB).
+export type Radix = "bin" | "oct" | "dec" | "hex";
+
+// Group a binary string into `bits`-wide digits from the LSB; a group with any
+// non-0/1 bit renders as "x". Used for hex (4) / octal (3).
+function groupRadix(binary: string, bits: number, digits: string): string {
+  const pad = (bits - (binary.length % bits)) % bits;
+  const s = "0".repeat(pad) + binary;
+  let out = "";
+  for (let i = 0; i < s.length; i += bits) {
+    const group = s.slice(i, i + bits);
+    out += /[^01]/.test(group) ? "x" : digits[parseInt(group, 2)];
+  }
+  return out;
+}
+
+// Convert a native binary value string to `radix`, with leading zeros trimmed. Any
+// unknown bit (x/z/…) makes its hex/oct digit — or the whole decimal — "x". Pure.
+export function formatValue(binary: string, radix: Radix): string {
+  if (!binary) return "";
+  switch (radix) {
+    case "bin":
+      return trimBusValue(binary);
+    case "hex":
+      return trimBusValue(groupRadix(binary, 4, "0123456789abcdef"));
+    case "oct":
+      return trimBusValue(groupRadix(binary, 3, "01234567"));
+    case "dec":
+      return /[^01]/.test(binary) ? "x" : BigInt(`0b${binary}`).toString(10);
+  }
+}
+
+// Extract bits [hi:lo] (Verilog order) from a binary string. `bit_string` is
+// MSB→LSB, so bit b sits at char w-1-b. Bounds clamp to [0, w-1]; hi < lo → "". Pure.
+export function sliceBits(binary: string, hi: number, lo: number): string {
+  const w = binary.length;
+  const h = Math.min(hi, w - 1);
+  const l = Math.max(lo, 0);
+  if (h < l) return "";
+  return binary.slice(w - 1 - h, w - l);
+}
+
 // The value-change time closest to `t` (markers snap to edges); null if no samples.
 export function nearestEdge(values: ValueChange[], t: number): number | null {
   if (!values.length) return null;
@@ -210,15 +253,16 @@ export function nearestEdge(values: ValueChange[], t: number): number | null {
 // The value to show at marker time `t`, trimmed for display. When `t` lands exactly
 // on a transition edge, show `prev -> next` (collapsed to one when unchanged); off an
 // edge (or at the first sample) show the single held value.
-export function valueAtMarker(values: ValueChange[], t: number): string {
+export function valueAtMarker(values: ValueChange[], t: number, radix: Radix = "bin"): string {
+  const fmt = (v: string) => formatValue(v, radix);
   const i = values.findIndex((c) => c.time === t);
   if (i > 0) {
-    const prev = trimBusValue(values[i - 1].value);
-    const cur = trimBusValue(values[i].value);
+    const prev = fmt(values[i - 1].value);
+    const cur = fmt(values[i].value);
     return prev === cur ? cur : `${prev} -> ${cur}`;
   }
-  if (i === 0) return trimBusValue(values[0].value);
-  return trimBusValue(valueAt(values, t));
+  if (i === 0) return fmt(values[0].value);
+  return fmt(valueAt(values, t));
 }
 
 // "Nice" 1/2/5×10ⁿ tick step (~one tick per 80px). Pure.
@@ -250,6 +294,7 @@ export function drawTrack(
   values: ValueChange[],
   view: TimeWindow,
   markers: Markers,
+  radix: Radix = "hex",
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -261,7 +306,7 @@ export function drawTrack(
     const geom = { hi: 5, lo: h - 5, mid: h / 2, w };
     const segs = buildSegments(values, view.t1);
     if (isDigital(values)) drawDigital(ctx, segs, xOf, geom);
-    else drawBus(ctx, segs, xOf, geom);
+    else drawBus(ctx, segs, xOf, geom, radix);
   }
   drawMarkerLines(ctx, markers, xOf, w, h);
 }
@@ -389,6 +434,7 @@ function drawBus(
   segs: Segment[],
   xOf: (t: number) => number,
   g: Geom,
+  radix: Radix,
 ): void {
   const s = 3; // half-width of the transition crossover
   ctx.lineWidth = 1.25;
@@ -417,7 +463,7 @@ function drawBus(
       ctx.lineTo(a, g.lo);
       ctx.stroke();
     }
-    const v = trimBusValue(seg.value);
+    const v = formatValue(seg.value, radix);
     const label = v.length <= 10 ? v : `${v.slice(0, 9)}…`;
     ctx.fillStyle = "#cfe0ff";
     if (b - a > ctx.measureText(label).width + 4) ctx.fillText(label, (a + b) / 2, g.mid);

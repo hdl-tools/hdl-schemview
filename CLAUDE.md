@@ -89,6 +89,11 @@ shared time window; left-click sets marker **A**, right-click marker **B**
 value column reads each trace's value at A. A header unit dropdown (`state.waveUnit`,
 ps/ns/µs/ms) rescales the ruler + readout via the trace's real timescale
 (`trace_timescale` → `state.timescale`); marker/window state stays in raw ticks.
+Right-clicking a signal's **name cell** opens a per-signal value-format menu: change
+radix (bin/oct/dec/hex; multi-bit buses default hex via `WaveTrace.radix`) or **create
+a sub-bus** — a derived track of `parent[hi:lo]` (synthetic negative `ref`) built by
+slicing each value's bits. Native trace values are binary strings; `formatValue` and
+`sliceBits` (in `wave.ts`) do the conversion/slicing.
 
 ## Tauri commands (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
 
