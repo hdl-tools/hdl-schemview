@@ -15,6 +15,30 @@ pub struct ValueChange {
     pub value: String,
 }
 
+/// The trace's timescale: each raw `ValueChange::time` tick equals `factor` of
+/// `unit`. `unit` is a normalized short string (`"fs"`, `"ps"`, `"ns"`, `"us"`,
+/// `"ms"`, `"s"`, …; `""` when unknown) so the frontend can scale time labels.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TraceTimescale {
+    pub factor: u32,
+    pub unit: String,
+}
+
+fn unit_str(u: wellen::TimescaleUnit) -> &'static str {
+    use wellen::TimescaleUnit::*;
+    match u {
+        ZeptoSeconds => "zs",
+        AttoSeconds => "as",
+        FemtoSeconds => "fs",
+        PicoSeconds => "ps",
+        NanoSeconds => "ns",
+        MicroSeconds => "us",
+        MilliSeconds => "ms",
+        Seconds => "s",
+        Unknown => "",
+    }
+}
+
 /// A loaded waveform header (hierarchy known; signal bodies lazy).
 pub struct LoadedWave {
     wave: Waveform,
@@ -95,6 +119,14 @@ impl LoadedWave {
     /// Direct access to the wellen hierarchy (for callers that need more).
     pub fn hierarchy(&self) -> &Hierarchy {
         self.wave.hierarchy()
+    }
+
+    /// The trace's timescale (tick → physical time), if the format declares one.
+    pub fn timescale(&self) -> Option<TraceTimescale> {
+        self.wave.hierarchy().timescale().map(|ts| TraceTimescale {
+            factor: ts.factor,
+            unit: unit_str(ts.unit).to_string(),
+        })
     }
 
     /// Load a signal (by its wellen signal-ref index) and return its value

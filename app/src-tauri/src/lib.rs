@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use svxprobe_gui::{ProbeResponse, Session};
 use svxprobe_schematic::SchematicGraph;
-use svxprobe_wave::ValueChange;
+use svxprobe_wave::{TraceTimescale, ValueChange};
 use tauri::State;
 
 /// The loaded session (None until `load_design`).
@@ -94,6 +94,11 @@ fn source_text(state: State<AppState>, file: u32) -> CmdResult<String> {
     with_session(&state, |s| s.source_text(file).map_err(|e| e.to_string()))
 }
 
+#[tauri::command]
+fn trace_timescale(state: State<AppState>) -> CmdResult<Option<TraceTimescale>> {
+    with_session(&state, |s| Ok(s.trace_timescale()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -108,6 +113,7 @@ pub fn run() {
             probe_source,
             signal_values,
             source_text,
+            trace_timescale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running hdl-schemview");

@@ -45,7 +45,7 @@ SystemVerilog RTL
                  ├─ xprobe          → cross-probe resolution
                  └─ wave            → trace ValueChanges (wellen)
                       └─ gui        → Session + serializable DTOs (UI-toolkit-free, CI-testable)
-                           └─ app/src-tauri/src/lib.rs  → 9 #[tauri::command]s over Mutex<Session>
+                           └─ app/src-tauri/src/lib.rs  → 10 #[tauri::command]s over Mutex<Session>
                                 └─ app/src/api.ts         → typed invoke() wrappers
                                      └─ app/src/main.ts    → 3 panes: schematic (SVG/elk.ts), source, waveform (canvas)
 ```
@@ -75,14 +75,20 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
 | `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |
 | `app/src/elk.ts` (+ `elk.test.ts`) | `SchematicGraph` → ELK layout → SVG DOM. |
-| `app/src/wave.ts` (+ `wave.test.ts`) | Multi-signal waveform geometry (lane math, time axis) + per-trace canvas drawing. |
+| `app/src/wave.ts` (+ `wave.test.ts`) | Waveform geometry (time-window mapping, zoom/pan, segments, value-at-time, ruler ticks) + per-trace/ruler canvas drawing. |
 | `app/src/style.css` | Theme vars. Dark default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
 
 Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D. Right-click
 a schematic box/pin/wire (or a source token) opens an action menu: **Append to
 waveform** (stacks the signal as a new lane) / **Show in source**. The waveform pane
-holds many traces (`state.waves`), stacked in scrollable fixed-height lanes with
-per-lane reorder/remove controls.
+holds many traces (`state.waves`), stacked in scrollable fixed-height rows
+(`name | value@A | track`) with per-row reorder/remove controls. The tracks are
+interactive: header buttons + Ctrl/⌘-scroll zoom (`state.waveView`) and drag-pan the
+shared time window; left-click sets marker **A**, right-click marker **B**
+(`state.markers`) — a top ruler shows tick timestamps, the header shows A/B/Δ, and the
+value column reads each trace's value at A. A header unit dropdown (`state.waveUnit`,
+ps/ns/µs/ms) rescales the ruler + readout via the trace's real timescale
+(`trace_timescale` → `state.timescale`); marker/window state stays in raw ticks.
 
 ## Tauri commands (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
 
@@ -99,6 +105,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 | `probe_source` | `file` (id), `offset, context?` | `ProbeResponse \| null` |
 | `signal_values` | `signalRef` | `ValueChange[]` |
 | `source_text` | `file` (id) | `String` |
+| `trace_timescale` | — | `TraceTimescale \| null` (factor + normalized unit) |
 
 ## Key data structures
 
