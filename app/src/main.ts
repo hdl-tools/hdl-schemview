@@ -31,6 +31,7 @@ import {
   TRACK_H,
   trimBusValue,
   valueAt,
+  valueAtMarker,
   xToTime,
   zoomWindow,
   type DisplayUnit,
@@ -1078,12 +1079,13 @@ function redrawTracks() {
       drawTrack(canvas, tr.values, view, state.markers);
     }
     const vc = valueCells[i];
-    // Value at the primary marker A; the latest value when A is unset. Redundant
-    // leading zeros trimmed, matching the bus-track labels.
+    // Value at the primary marker A (prev -> next when A sits on a transition); the
+    // latest value when A is unset. Leading zeros trimmed, like the bus-track labels.
     if (vc) {
-      vc.textContent = trimBusValue(
-        valueAt(tr.values, state.markers.a ?? Number.POSITIVE_INFINITY),
-      );
+      vc.textContent =
+        state.markers.a == null
+          ? trimBusValue(valueAt(tr.values, Number.POSITIVE_INFINITY))
+          : valueAtMarker(tr.values, state.markers.a);
     }
   });
   updateMarkerReadout();
