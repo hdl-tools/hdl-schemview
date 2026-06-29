@@ -19,7 +19,7 @@ export interface WaveTrace {
 }
 
 // Fixed per-track canvas height (px). Must match `.wave-track` height in style.css.
-export const TRACK_H = 28;
+export const TRACK_H = 20;
 
 // NOTE: assumes samples are time-ordered (VCD/FST are); only the last sample's time
 // is read, so an unordered array would mis-scale the axis.
@@ -335,7 +335,7 @@ export function drawTrack(
   ctx.clearRect(0, 0, w, h);
   const xOf = (t: number) => timeToX(t, view.t0, view.t1, w);
   if (values.length) {
-    const geom = { hi: 5, lo: h - 5, mid: h / 2, w };
+    const geom = { hi: 3, lo: h - 3, mid: h / 2, w };
     const segs = buildSegments(values, view.t1);
     if (isDigital(values)) drawDigital(ctx, segs, xOf, geom);
     else drawBus(ctx, segs, xOf, geom, radix, enumMap, showName);
