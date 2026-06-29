@@ -25,17 +25,19 @@ import {
   displayScale,
   drawTrack,
   drawRuler,
+  formatValue,
   maxTime,
   nearestEdge,
   panWindow,
+  sliceBits,
   TRACK_H,
-  trimBusValue,
   valueAt,
   valueAtMarker,
   xToTime,
   zoomWindow,
   type DisplayUnit,
   type Markers,
+  type Radix,
   type TimeWindow,
   type WaveTrace,
 } from "./wave";
@@ -1029,6 +1031,12 @@ function renderWaves() {
     name.className = "wave-row-name";
     name.textContent = tr.name;
     name.title = tr.name;
+    // Right-click the name (not the track — that drops marker B) for per-signal
+    // value formatting: change radix / create a sub-bus (#78).
+    name.oncontextmenu = (e) => {
+      e.preventDefault();
+      openSignalMenu(e, i);
+    };
 
     const value = document.createElement("div");
     value.className = "wave-row-value";
@@ -1072,20 +1080,21 @@ function redrawTracks() {
   const canvases = list.querySelectorAll<HTMLCanvasElement>(".wave-track");
   const valueCells = list.querySelectorAll<HTMLDivElement>(".wave-row-value");
   state.waves.forEach((tr, i) => {
+    const radix = tr.radix ?? "hex";
     const canvas = canvases[i];
     if (canvas) {
       canvas.width = Math.max(1, canvas.clientWidth);
       canvas.height = TRACK_H;
-      drawTrack(canvas, tr.values, view, state.markers);
+      drawTrack(canvas, tr.values, view, state.markers, radix);
     }
     const vc = valueCells[i];
     // Value at the primary marker A (prev -> next when A sits on a transition); the
-    // latest value when A is unset. Leading zeros trimmed, like the bus-track labels.
+    // latest value when A is unset. Formatted in the trace's radix.
     if (vc) {
       vc.textContent =
         state.markers.a == null
-          ? trimBusValue(valueAt(tr.values, Number.POSITIVE_INFINITY))
-          : valueAtMarker(tr.values, state.markers.a);
+          ? formatValue(valueAt(tr.values, Number.POSITIVE_INFINITY), radix)
+          : valueAtMarker(tr.values, state.markers.a, radix);
     }
   });
   updateMarkerReadout();
@@ -1129,6 +1138,99 @@ function moveWave(i: number, dir: number) {
 function removeWave(i: number) {
   state.waves.splice(i, 1);
   renderWaves();
+}
+
+const RADIX_LABELS: { r: Radix; label: string }[] = [
+  { r: "hex", label: "Hex" },
+  { r: "dec", label: "Decimal" },
+  { r: "oct", label: "Octal" },
+  { r: "bin", label: "Binary" },
+];
+
+// Derived sub-bus tracks get unique negative refs so they never collide with real
+// u32 signal_refs (dedup/reorder/remove stay correct).
+let derivedSeq = -1;
+
+// Bit width of a trace when it is a sliceable bit-vector (binary value string), else 0.
+function busWidth(tr: WaveTrace): number {
+  const v = tr.values.find((c) => c.value.length > 0);
+  return v && /^[01xz]+$/i.test(v.value) ? v.value.length : 0;
+}
+
+// Per-signal value-format menu (radix + sub-bus), opened from the name cell (#78).
+function openSignalMenu(ev: MouseEvent, i: number) {
+  const tr = state.waves[i];
+  if (!tr) return;
+  const cur = tr.radix ?? "hex";
+  const radixSubmenu = RADIX_LABELS.map(({ r, label }) => ({
+    label: `${r === cur ? "✓ " : ""}${label}`,
+    enabled: true,
+    onClick: () => {
+      tr.radix = r;
+      redrawTracks();
+    },
+  }));
+  const width = busWidth(tr);
+  openContextMenu(ev.clientX, ev.clientY, [
+    { label: "Change radix", enabled: true, submenu: radixSubmenu },
+    {
+      label: width > 1 ? "Create sub-bus…" : "Create sub-bus… (not a bus)",
+      enabled: width > 1,
+      onClick: () => openSubBusPopover(ev, i, width),
+    },
+  ]);
+}
+
+// Insert a derived track of parent[hi:lo] right after the parent.
+function makeSubBus(i: number, hi: number, lo: number) {
+  const tr = state.waves[i];
+  if (!tr) return;
+  const values = tr.values.map((c) => ({ time: c.time, value: sliceBits(c.value, hi, lo) }));
+  state.waves.splice(i + 1, 0, {
+    ref: derivedSeq--,
+    name: `${tr.name}[${hi}:${lo}]`,
+    values,
+    radix: tr.radix ?? "hex",
+  });
+  renderWaves();
+}
+
+// Small inline popover to pick the [hi:lo] bit range for a sub-bus.
+function openSubBusPopover(ev: MouseEvent, i: number, width: number) {
+  closeContextMenu();
+  document.getElementById("subbus-pop")?.remove();
+  const pop = document.createElement("div");
+  pop.id = "subbus-pop";
+  pop.innerHTML =
+    `<label>bits [<input type="number" class="hi" min="0" max="${width - 1}" value="${width - 1}">` +
+    `:<input type="number" class="lo" min="0" max="${width - 1}" value="0">]</label>`;
+  const ok = document.createElement("button");
+  ok.textContent = "Add";
+  const cancel = document.createElement("button");
+  cancel.textContent = "Cancel";
+  pop.append(ok, cancel);
+  pop.style.left = `${ev.clientX}px`;
+  pop.style.top = `${ev.clientY}px`;
+  document.body.appendChild(pop);
+  const hiIn = pop.querySelector<HTMLInputElement>(".hi")!;
+  const loIn = pop.querySelector<HTMLInputElement>(".lo")!;
+  hiIn.focus();
+  const close = () => pop.remove();
+  cancel.onclick = close;
+  ok.onclick = () => {
+    let hi = Number(hiIn.value);
+    let lo = Number(loIn.value);
+    if (!Number.isFinite(hi) || !Number.isFinite(lo)) return close();
+    if (hi < lo) [hi, lo] = [lo, hi];
+    hi = Math.min(Math.max(hi, 0), width - 1);
+    lo = Math.min(Math.max(lo, 0), width - 1);
+    close();
+    makeSubBus(i, hi, lo);
+  };
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") ok.click();
+    else if (e.key === "Escape") close();
+  });
 }
 
 function renderPicker(resp: ProbeResponse) {
@@ -1178,38 +1280,76 @@ function sourceOffsetAt(x: number, y: number): number | null {
 
 function closeContextMenu() {
   $("ctxmenu").style.display = "none";
+  document.getElementById("ctxsubmenu")?.remove();
 }
 
 interface MenuItem {
   label: string;
   enabled: boolean;
-  onClick: () => void;
+  onClick?: () => void;
+  submenu?: MenuItem[]; // when set, the item opens a nested menu on hover
 }
 
-function openContextMenu(x: number, y: number, items: MenuItem[]) {
-  const menu = $("ctxmenu");
+// Render items into a menu panel. Items with a submenu show a "▸" and open a flyout
+// on hover; leaf items run their onClick and close everything. On the root panel,
+// hovering a leaf dismisses any open submenu (submenu panels skip that so hovering
+// their own items doesn't close them).
+function renderMenuItems(menu: HTMLElement, items: MenuItem[], isRoot: boolean) {
   menu.innerHTML = "";
   for (const item of items) {
+    const hasSub = !!item.submenu?.length;
     const d = document.createElement("div");
     d.className = "ctx-item" + (item.enabled ? "" : " disabled");
-    d.textContent = item.label;
-    if (item.enabled) {
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    d.appendChild(label);
+    if (hasSub) {
+      const arrow = document.createElement("span");
+      arrow.className = "ctx-arrow";
+      arrow.textContent = "▸";
+      d.appendChild(arrow);
+      d.onmouseenter = () => openSubmenu(d, item.submenu!);
+    } else if (item.enabled) {
+      if (isRoot) d.onmouseenter = () => document.getElementById("ctxsubmenu")?.remove();
       d.onclick = () => {
         closeContextMenu();
-        item.onClick();
+        item.onClick?.();
       };
     }
     menu.appendChild(d);
   }
+}
+
+// Position a menu panel at (x, y), clamped into the viewport.
+function placeMenu(menu: HTMLElement, x: number, y: number) {
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.style.display = "block";
-  // Keep the menu inside the viewport when opened near the right/bottom edge.
   const r = menu.getBoundingClientRect();
   if (r.right > window.innerWidth)
     menu.style.left = `${Math.max(0, window.innerWidth - r.width)}px`;
   if (r.bottom > window.innerHeight)
     menu.style.top = `${Math.max(0, window.innerHeight - r.height)}px`;
+}
+
+// Open a one-level flyout to the right of `anchor` (flips left if it would overflow).
+function openSubmenu(anchor: HTMLElement, items: MenuItem[]) {
+  document.getElementById("ctxsubmenu")?.remove();
+  const sub = document.createElement("div");
+  sub.id = "ctxsubmenu";
+  renderMenuItems(sub, items, false);
+  document.body.appendChild(sub);
+  const r = anchor.getBoundingClientRect();
+  placeMenu(sub, r.right, r.top);
+  const sr = sub.getBoundingClientRect();
+  if (sr.right > window.innerWidth) sub.style.left = `${Math.max(0, r.left - sr.width)}px`;
+}
+
+function openContextMenu(x: number, y: number, items: MenuItem[]) {
+  document.getElementById("ctxsubmenu")?.remove();
+  const menu = $("ctxmenu");
+  renderMenuItems(menu, items, true);
+  placeMenu(menu, x, y);
 }
 
 // Right-click in the source pane: resolve the signal/object under the cursor and
@@ -1292,7 +1432,7 @@ async function addToWaveform(wave: WaveLink) {
   if (!wave.in_trace) return;
   if (state.waves.some((w) => w.ref === wave.signal_ref)) return;
   const values = await api.signalValues(wave.signal_ref);
-  state.waves.push({ ref: wave.signal_ref, name: wave.full_name, values });
+  state.waves.push({ ref: wave.signal_ref, name: wave.full_name, values, radix: "hex" });
   renderWaves();
 }
 
