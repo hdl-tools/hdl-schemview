@@ -50,9 +50,34 @@
           "select": { "type": ["string", "null"], "description": "Resolved bit-select on the connected expression, e.g. \"[0]\" or \"[7:4]\"; absent/null when the whole signal is connected." }
         }
       }
+    },
+    "enums": {
+      "type": "object",
+      "description": "Normalized enum table keyed by canonical type string (matching a node's `type`): the value->name members for FSM/enum state display. Enums with non-literal members are omitted.",
+      "additionalProperties": { "$ref": "#/$defs/enumDef" }
     }
   },
   "$defs": {
+    "enumDef": {
+      "type": "object",
+      "required": ["width", "members"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 0, "description": "Bit width of the enum base type." },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "value": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
     "location": {
       "type": "object",
       "required": ["line", "col", "offset"],

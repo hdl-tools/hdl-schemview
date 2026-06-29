@@ -29893,5 +29893,24 @@
       "endpoint": 751,
       "dir": "out"
     }
-  ]
+  ],
+  "enums": {
+    "soc_pkg::lane_state_e": {
+      "width": 2,
+      "members": [
+        {
+          "name": "LANE_RESET",
+          "value": 0
+        },
+        {
+          "name": "LANE_RUN",
+          "value": 1
+        },
+        {
+          "name": "LANE_TRAP",
+          "value": 2
+        }
+      ]
+    }
+  }
 }

@@ -296,3 +296,53 @@ def test_bus_bitselect_on_edges(model: dict) -> None:
             and by[e["endpoint"]]["path"] == "picorv32_soc.clk"
         ):
             assert e.get("select") is None
+
+
+def test_enum_table_emitted(model: dict) -> None:
+    """The fixture's packed enum `lane_state_e` is emitted in the normalized `enums`
+    table, keyed by the same type string carried on its signals (#81)."""
+    enums = model["enums"]
+    assert "soc_pkg::lane_state_e" in enums
+    e = enums["soc_pkg::lane_state_e"]
+    assert e["width"] == 2
+    assert e["members"] == [
+        {"name": "LANE_RESET", "value": 0},
+        {"name": "LANE_RUN", "value": 1},
+        {"name": "LANE_TRAP", "value": 2},
+    ]
+    # The enum-typed signals reference the table via their `type`.
+    lane = next(n for n in model["nodes"] if n["name"] == "lane_state" and n["kind"] == "Var")
+    assert lane["type"] == "soc_pkg::lane_state_e"
+
+
+def test_enum_values_explicit_and_positional(tmp_path) -> None:
+    """Member values come from explicit SV literals, else the positional default
+    (first = 0, otherwise prev + 1)."""
+    src = tmp_path / "e.sv"
+    src.write_text(
+        "package q;\n"
+        "  typedef enum logic [3:0] { S_IDLE, S_GO = 4'h4, S_DONE, S_ERR = 4'hF } st_e;\n"
+        "endpackage\n"
+        "module m; import q::*; st_e s; endmodule\n"
+    )
+    enums = build_model([str(src)], top="m")["enums"]
+    assert enums["q::st_e"]["members"] == [
+        {"name": "S_IDLE", "value": 0},
+        {"name": "S_GO", "value": 4},
+        {"name": "S_DONE", "value": 5},
+        {"name": "S_ERR", "value": 15},
+    ]
+
+
+def test_enum_with_nonliteral_member_is_skipped(tmp_path) -> None:
+    """An enum whose member uses a computed initializer is omitted entirely rather
+    than guessed (no fabricated values)."""
+    src = tmp_path / "bad.sv"
+    src.write_text(
+        "package q;\n"
+        "  localparam int K = 1;\n"
+        "  typedef enum logic [1:0] { A = K, B } bad_e;\n"
+        "endpackage\n"
+        "module m; import q::*; bad_e s; endmodule\n"
+    )
+    assert "q::bad_e" not in build_model([str(src)], top="m")["enums"]

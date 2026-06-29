@@ -23,9 +23,9 @@ import type {
 import {
   defaultDisplayUnit,
   displayScale,
+  displayValue,
   drawTrack,
   drawRuler,
-  formatValue,
   maxTime,
   nearestEdge,
   panWindow,
@@ -1085,16 +1085,21 @@ function redrawTracks() {
     if (canvas) {
       canvas.width = Math.max(1, canvas.clientWidth);
       canvas.height = TRACK_H;
-      drawTrack(canvas, tr.values, view, state.markers, radix);
+      drawTrack(canvas, tr.values, view, state.markers, radix, tr.enumMap, tr.showName);
     }
     const vc = valueCells[i];
     // Value at the primary marker A (prev -> next when A sits on a transition); the
-    // latest value when A is unset. Formatted in the trace's radix.
+    // latest value when A is unset. Formatted as the state name or the trace's radix.
     if (vc) {
       vc.textContent =
         state.markers.a == null
-          ? formatValue(valueAt(tr.values, Number.POSITIVE_INFINITY), radix)
-          : valueAtMarker(tr.values, state.markers.a, radix);
+          ? displayValue(
+              valueAt(tr.values, Number.POSITIVE_INFINITY),
+              radix,
+              tr.enumMap,
+              tr.showName,
+            )
+          : valueAtMarker(tr.values, state.markers.a, radix, tr.enumMap, tr.showName);
     }
   });
   updateMarkerReadout();
@@ -1162,14 +1167,29 @@ function openSignalMenu(ev: MouseEvent, i: number) {
   const tr = state.waves[i];
   if (!tr) return;
   const cur = tr.radix ?? "hex";
-  const radixSubmenu = RADIX_LABELS.map(({ r, label }) => ({
-    label: `${r === cur ? "✓ " : ""}${label}`,
-    enabled: true,
-    onClick: () => {
-      tr.radix = r;
-      redrawTracks();
-    },
-  }));
+  const radixSubmenu: MenuItem[] = [];
+  // Enum signals get a "State name" mode at the top of the submenu (default on).
+  if (tr.enumMap) {
+    radixSubmenu.push({
+      label: `${tr.showName ? "✓ " : ""}State name`,
+      enabled: true,
+      onClick: () => {
+        tr.showName = true;
+        redrawTracks();
+      },
+    });
+  }
+  for (const { r, label } of RADIX_LABELS) {
+    radixSubmenu.push({
+      label: `${!tr.showName && r === cur ? "✓ " : ""}${label}`,
+      enabled: true,
+      onClick: () => {
+        tr.radix = r;
+        tr.showName = false; // picking a numeric radix leaves name mode
+        redrawTracks();
+      },
+    });
+  }
   const width = busWidth(tr);
   openContextMenu(ev.clientX, ev.clientY, [
     { label: "Change radix", enabled: true, submenu: radixSubmenu },
@@ -1432,7 +1452,18 @@ async function addToWaveform(wave: WaveLink) {
   if (!wave.in_trace) return;
   if (state.waves.some((w) => w.ref === wave.signal_ref)) return;
   const values = await api.signalValues(wave.signal_ref);
-  state.waves.push({ ref: wave.signal_ref, name: wave.full_name, values, radix: "hex" });
+  // Enum-typed signals carry a value→name map; show the state name by default.
+  const enumMap = wave.enum_map
+    ? new Map(wave.enum_map.map((m) => [m.value, m.name]))
+    : undefined;
+  state.waves.push({
+    ref: wave.signal_ref,
+    name: wave.full_name,
+    values,
+    radix: "hex",
+    enumMap,
+    showName: enumMap !== undefined,
+  });
   renderWaves();
 }
 

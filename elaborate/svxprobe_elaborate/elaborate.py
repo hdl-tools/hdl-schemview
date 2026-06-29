@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 from typing import Any, Optional
@@ -65,6 +66,46 @@ def _kind_name(sym: Any) -> str:
     return str(sym.kind).replace("SymbolKind.", "")
 
 
+def _parse_sv_int(rhs: str) -> Optional[int]:
+    """Parse a SystemVerilog integer literal (`2'd2`, `4'hA`, `3'b001`, `5`) to an
+    int. Returns None for non-literal initializers (computed expressions) or values
+    with x/z bits — those are not nameable constants, and we never guess."""
+    s = rhs.strip().replace("_", "")
+    m = re.fullmatch(r"(?:\d+)?'[sS]?([dDhHbBoO])([0-9a-fA-FxXzZ?]+)", s)
+    if m:
+        if re.search(r"[xXzZ?]", m.group(2)):
+            return None
+        base = {"d": 10, "h": 16, "b": 2, "o": 8}[m.group(1).lower()]
+        try:
+            return int(m.group(2), base)
+        except ValueError:
+            return None
+    if re.fullmatch(r"[+-]?\d+", s):
+        return int(s)
+    return None
+
+
+def _enum_members(enum_type: Any) -> Optional[list[dict[str, Any]]]:
+    """`[{name, value}]` for an enum type, using SystemVerilog semantics: an explicit
+    literal initializer, else the positional default (first = 0, otherwise prev + 1).
+    Returns None if any member has a non-literal initializer (so we never invent a
+    value)."""
+    out: list[dict[str, Any]] = []
+    nxt = 0
+    for mem in enum_type:
+        syn = getattr(mem, "syntax", None)
+        text = str(syn) if syn is not None else getattr(mem, "name", "")
+        if "=" in text:
+            value = _parse_sv_int(text.split("=", 1)[1])
+            if value is None:
+                return None
+        else:
+            value = nxt
+        out.append({"name": getattr(mem, "name", ""), "value": value})
+        nxt = value + 1
+    return out
+
+
 class Elaborator:
     """Drives a pyslang Compilation and serializes its hierarchy."""
 
@@ -85,6 +126,9 @@ class Elaborator:
         self.comp = Compilation(Bag([opts]))
         self.comp.addSyntaxTree(SyntaxTree.fromFiles(files, self.sm))
         self.nodes: list[dict[str, Any]] = []
+        # Normalized enum table: canonical type string -> {width, members}. Filled as
+        # enum-typed signals are walked; referenced by node["type"] (#81).
+        self.enums: dict[str, dict[str, Any]] = {}
         self._file_ids: dict[str, int] = {}
         self.files: list[dict[str, Any]] = []
         # (instance node id, InstanceSymbol) collected for edge extraction.
@@ -177,6 +221,7 @@ class Elaborator:
                 t = getattr(sym, "type", None)
                 if t is not None:
                     node["type"] = str(t)
+                    self._record_enum(str(t), t)
             if kind == "Port":
                 # Declared direction, so even unconnected pins land on the right
                 # side of the schematic (inputs left, outputs right).
@@ -186,6 +231,23 @@ class Elaborator:
         if parent is not None:
             self.nodes[parent]["children"].append(nid)
         return nid
+
+    def _record_enum(self, type_str: str, t: Any) -> None:
+        """If `t` is (an alias of) an enum, record its value->name members once under
+        `type_str` (the same string stored on the node), keyed so the frontend can map
+        a signal's value to its state name. Skips enums with non-literal members."""
+        if type_str in self.enums:
+            return
+        try:
+            ct = t.canonicalType
+        except Exception:
+            return
+        if not getattr(ct, "isEnum", False):
+            return
+        members = _enum_members(ct)
+        if members is None:
+            return
+        self.enums[type_str] = {"width": int(getattr(ct, "bitWidth", 0)), "members": members}
 
     @staticmethod
     def _has_edge(timing: Any) -> bool:
@@ -603,6 +665,7 @@ class Elaborator:
             "files": self.files,
             "nodes": self.nodes,
             "edges": edges,
+            "enums": self.enums,
         }
 
 
