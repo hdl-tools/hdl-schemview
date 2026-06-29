@@ -67,6 +67,8 @@ export interface WaveLink {
   var_ref: number;
   signal_ref: number;
   full_name: string;
+  // value→name members when the signal is enum-typed (FSM state display, #81).
+  enum_map?: { name: string; value: number }[];
 }
 export interface ProbeResponse {
   anchor: NodeRef;

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use svxprobe_matcher::MatchOptions;
-use svxprobe_model::NodeId;
+use svxprobe_model::{EnumMember, NodeId};
 use svxprobe_schematic::{cone, expand, scope_graph, SchematicGraph};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
@@ -41,6 +41,9 @@ pub struct WaveLink {
     pub var_ref: u32,
     pub signal_ref: u32,
     pub full_name: String,
+    /// value→name members when the signal is enum-typed, for FSM state display (#81).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_map: Option<Vec<EnumMember>>,
 }
 
 /// A full cross-probe answer: the anchor, where each other view goes, and the
@@ -231,13 +234,22 @@ impl Session {
                     .map(|v| v.signal_ref)
                     .unwrap_or(0),
                 full_name,
+                enum_map: self.enum_members(sel.anchor),
             },
             WaveTarget::NotInTrace => WaveLink {
                 in_trace: false,
                 var_ref: 0,
                 signal_ref: 0,
                 full_name: String::new(),
+                enum_map: None,
             },
         }
+    }
+
+    /// The enum members for a node's declared type, when that type is an enum.
+    fn enum_members(&self, node: NodeId) -> Option<Vec<EnumMember>> {
+        let design = self.cross.design();
+        let type_ = design.node(node)?.type_.as_deref()?;
+        design.enum_for_type(type_).map(|e| e.members.clone())
     }
 }

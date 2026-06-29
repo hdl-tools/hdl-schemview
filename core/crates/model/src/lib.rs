@@ -150,6 +150,25 @@ pub struct Document {
     pub nodes: Vec<Node>,
     #[serde(default)]
     pub edges: Vec<Edge>,
+    /// Normalized enum table, keyed by canonical type string (matching a node's
+    /// `type_`): value→name members for FSM/enum state display. Enums with
+    /// non-literal members are omitted by the harness.
+    #[serde(default)]
+    pub enums: HashMap<String, EnumDef>,
+}
+
+/// An enum type's bit width and its value→name members.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumDef {
+    pub width: u32,
+    pub members: Vec<EnumMember>,
+}
+
+/// One enum member: its declared name and encoded integer value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumMember {
+    pub name: String,
+    pub value: u64,
 }
 
 /// Opaque reference to a signal in a loaded waveform. Populated in Phase 1.
@@ -244,6 +263,11 @@ impl Design {
         &self.doc.nodes
     }
 
+    /// The enum definition for a node's `type_` string, if that type is an enum.
+    pub fn enum_for_type(&self, type_: &str) -> Option<&EnumDef> {
+        self.doc.enums.get(type_)
+    }
+
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.doc.nodes.get(id as usize)
     }
@@ -334,6 +358,7 @@ mod tests {
                 node(1, "t.a", NodeKind::Var, Some(rng(0, 4, 8))),
             ],
             edges: vec![],
+            enums: HashMap::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.nodes_at_path("t.a"), &[1]);
@@ -367,11 +392,48 @@ mod tests {
                 dir: Dir::Out,
                 select: None,
             }],
+            enums: HashMap::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.edges().len(), 1);
         assert_eq!(d.edges_of(1).len(), 1);
         assert_eq!(d.edges_of(2)[0].dir, Dir::Out);
         assert!(d.edges_of(0).is_empty());
+    }
+
+    #[test]
+    fn enum_for_type_looks_up_by_type_string() {
+        let mut enums = HashMap::new();
+        enums.insert(
+            "p::e_t".to_string(),
+            EnumDef {
+                width: 2,
+                members: vec![
+                    EnumMember {
+                        name: "A".into(),
+                        value: 0,
+                    },
+                    EnumMember {
+                        name: "B".into(),
+                        value: 1,
+                    },
+                ],
+            },
+        );
+        let doc = Document {
+            schema_version: 1,
+            design: "t".into(),
+            generator: Generator::default(),
+            files: vec![],
+            nodes: vec![node(0, "t.s", NodeKind::Var, None)],
+            edges: vec![],
+            enums,
+        };
+        let d = Design::from_document(doc);
+        let e = d.enum_for_type("p::e_t").expect("enum present");
+        assert_eq!(e.width, 2);
+        assert_eq!(e.members[1].name, "B");
+        assert_eq!(e.members[1].value, 1);
+        assert!(d.enum_for_type("nope").is_none());
     }
 }

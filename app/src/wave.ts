@@ -14,6 +14,8 @@ export interface WaveTrace {
   name: string;
   values: ValueChange[];
   radix?: Radix; // per-signal display radix; defaults to hex for multi-bit buses
+  enumMap?: Map<number, string>; // value→name for enum/FSM signals (#81)
+  showName?: boolean; // when an enumMap is present, show the state name (default true)
 }
 
 // Fixed per-track canvas height (px). Must match `.wave-track` height in style.css.
@@ -225,6 +227,28 @@ export function formatValue(binary: string, radix: Radix): string {
   }
 }
 
+// Decode a binary value to its enum state name, or null when the value has unknown
+// bits (x/z) or isn't a mapped encoding (caller falls back to the numeric radix).
+export function enumName(binary: string, map: Map<number, string>): string | null {
+  if (!binary || /[^01]/.test(binary)) return null;
+  return map.get(parseInt(binary, 2)) ?? null;
+}
+
+// The display string for a value: the enum state name when in name mode and it
+// resolves, otherwise the value formatted in `radix`.
+export function displayValue(
+  binary: string,
+  radix: Radix,
+  enumMap?: Map<number, string>,
+  showName?: boolean,
+): string {
+  if (showName && enumMap) {
+    const name = enumName(binary, enumMap);
+    if (name != null) return name;
+  }
+  return formatValue(binary, radix);
+}
+
 // Extract bits [hi:lo] (Verilog order) from a binary string. `bit_string` is
 // MSB→LSB, so bit b sits at char w-1-b. Bounds clamp to [0, w-1]; hi < lo → "". Pure.
 export function sliceBits(binary: string, hi: number, lo: number): string {
@@ -253,8 +277,14 @@ export function nearestEdge(values: ValueChange[], t: number): number | null {
 // The value to show at marker time `t`, trimmed for display. When `t` lands exactly
 // on a transition edge, show `prev -> next` (collapsed to one when unchanged); off an
 // edge (or at the first sample) show the single held value.
-export function valueAtMarker(values: ValueChange[], t: number, radix: Radix = "bin"): string {
-  const fmt = (v: string) => formatValue(v, radix);
+export function valueAtMarker(
+  values: ValueChange[],
+  t: number,
+  radix: Radix = "bin",
+  enumMap?: Map<number, string>,
+  showName?: boolean,
+): string {
+  const fmt = (v: string) => displayValue(v, radix, enumMap, showName);
   const i = values.findIndex((c) => c.time === t);
   if (i > 0) {
     const prev = fmt(values[i - 1].value);
@@ -295,6 +325,8 @@ export function drawTrack(
   view: TimeWindow,
   markers: Markers,
   radix: Radix = "hex",
+  enumMap?: Map<number, string>,
+  showName?: boolean,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -306,7 +338,7 @@ export function drawTrack(
     const geom = { hi: 5, lo: h - 5, mid: h / 2, w };
     const segs = buildSegments(values, view.t1);
     if (isDigital(values)) drawDigital(ctx, segs, xOf, geom);
-    else drawBus(ctx, segs, xOf, geom, radix);
+    else drawBus(ctx, segs, xOf, geom, radix, enumMap, showName);
   }
   drawMarkerLines(ctx, markers, xOf, w, h);
 }
@@ -435,6 +467,8 @@ function drawBus(
   xOf: (t: number) => number,
   g: Geom,
   radix: Radix,
+  enumMap?: Map<number, string>,
+  showName?: boolean,
 ): void {
   const s = 3; // half-width of the transition crossover
   ctx.lineWidth = 1.25;
@@ -463,7 +497,7 @@ function drawBus(
       ctx.lineTo(a, g.lo);
       ctx.stroke();
     }
-    const v = formatValue(seg.value, radix);
+    const v = displayValue(seg.value, radix, enumMap, showName);
     const label = v.length <= 10 ? v : `${v.slice(0, 9)}…`;
     ctx.fillStyle = "#cfe0ff";
     if (b - a > ctx.measureText(label).width + 4) ctx.fillText(label, (a + b) / 2, g.mid);

@@ -93,7 +93,11 @@ Right-clicking a signal's **name cell** opens a per-signal value-format menu: ch
 radix (bin/oct/dec/hex; multi-bit buses default hex via `WaveTrace.radix`) or **create
 a sub-bus** — a derived track of `parent[hi:lo]` (synthetic negative `ref`) built by
 slicing each value's bits. Native trace values are binary strings; `formatValue` and
-`sliceBits` (in `wave.ts`) do the conversion/slicing.
+`sliceBits` (in `wave.ts`) do the conversion/slicing. **Enum/FSM signals** show the
+**state name** by default: the elaboration emits a normalized `enums` table
+(value→name), surfaced per-signal via `WaveLink.enum_map` → `WaveTrace.enumMap`;
+`enumName`/`displayValue` decode it (x/z or unmapped values fall back to the radix),
+and the radix submenu adds a **State name** toggle.
 
 ## Tauri commands (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
 
@@ -126,6 +130,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 - `NodeKind { Instance, Net, Port, Var, Param, ModuleDef, GenBlock, Ff, Comb, Latch, Assign, Interface, Modport }` — `Interface` is an interface instance or a modport-specialized interface port; `Modport` a named view of a bundle.
 - `Node { id, name, path, parent, children, kind, symbol_key, def_range, inst_range, type_, dir, const_value, modport, drivers, loads }` — `modport` records the view name on a modport-specialized interface port (e.g. `mem`).
 - `Design { doc, path_index, src_index, conn_index, wave_index }`.
+- `Document.enums: HashMap<String, EnumDef>` — normalized enum table keyed by canonical type string (matches `Node.type_`); `EnumDef { width, members: Vec<EnumMember{name, value}> }`. Looked up via `Design::enum_for_type` and surfaced on `WaveLink.enum_map` for FSM state-name display.
 
 > ⚠️ These serde types are the wire format for the frontend. Any field change in
 > `gui`/`schematic` DTOs must be mirrored in `app/src/types.ts`, or the TS layer

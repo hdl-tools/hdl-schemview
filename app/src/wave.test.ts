@@ -13,6 +13,8 @@ import {
   nearestEdge,
   trimBusValue,
   formatValue,
+  enumName,
+  displayValue,
   sliceBits,
   tickMarks,
   unitExponent,
@@ -188,6 +190,46 @@ describe("formatValue", () => {
   it("yields x when a group/value contains unknown bits", () => {
     expect(formatValue("1x00", "hex")).toBe("x");
     expect(formatValue("1x00", "dec")).toBe("x");
+  });
+});
+
+describe("enumName", () => {
+  const map = new Map([
+    [0, "LANE_RESET"],
+    [1, "LANE_RUN"],
+    [2, "LANE_TRAP"],
+  ]);
+  it("decodes a binary value to its state name", () => {
+    expect(enumName("00", map)).toBe("LANE_RESET");
+    expect(enumName("10", map)).toBe("LANE_TRAP");
+  });
+  it("returns null for unmapped or unknown (x/z) values", () => {
+    expect(enumName("11", map)).toBeNull(); // 3 not in map
+    expect(enumName("1x", map)).toBeNull();
+    expect(enumName("", map)).toBeNull();
+  });
+});
+
+describe("displayValue", () => {
+  const map = new Map([[1, "LANE_RUN"]]);
+  it("shows the state name when in name mode and resolvable", () => {
+    expect(displayValue("01", "hex", map, true)).toBe("LANE_RUN");
+  });
+  it("falls back to the radix when not in name mode or unresolvable", () => {
+    expect(displayValue("01", "hex", map, false)).toBe("1");
+    expect(displayValue("11", "hex", map, true)).toBe("3"); // unmapped -> hex
+    expect(displayValue("1x", "hex", map, true)).toBe("x"); // unknown -> radix
+  });
+});
+
+describe("valueAtMarker name mode", () => {
+  const map = new Map([
+    [0, "LANE_RESET"],
+    [1, "LANE_RUN"],
+  ]);
+  const vals = vc([[0, "00"], [10, "01"]]);
+  it("shows state names across a transition", () => {
+    expect(valueAtMarker(vals, 10, "hex", map, true)).toBe("LANE_RESET -> LANE_RUN");
   });
 });
 
