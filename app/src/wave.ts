@@ -207,6 +207,20 @@ export function nearestEdge(values: ValueChange[], t: number): number | null {
   return best;
 }
 
+// The value to show at marker time `t`, trimmed for display. When `t` lands exactly
+// on a transition edge, show `prev -> next` (collapsed to one when unchanged); off an
+// edge (or at the first sample) show the single held value.
+export function valueAtMarker(values: ValueChange[], t: number): string {
+  const i = values.findIndex((c) => c.time === t);
+  if (i > 0) {
+    const prev = trimBusValue(values[i - 1].value);
+    const cur = trimBusValue(values[i].value);
+    return prev === cur ? cur : `${prev} -> ${cur}`;
+  }
+  if (i === 0) return trimBusValue(values[0].value);
+  return trimBusValue(valueAt(values, t));
+}
+
 // "Nice" 1/2/5×10ⁿ tick step (~one tick per 80px). Pure.
 function niceStep(raw: number): number {
   if (raw <= 0) return 1;

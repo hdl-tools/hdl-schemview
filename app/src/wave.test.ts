@@ -9,6 +9,7 @@ import {
   zoomWindow,
   panWindow,
   valueAt,
+  valueAtMarker,
   nearestEdge,
   trimBusValue,
   tickMarks,
@@ -143,6 +144,25 @@ describe("valueAt", () => {
   it("returns empty before the first sample", () => {
     expect(valueAt(vals, -1)).toBe("");
     expect(valueAt([], 5)).toBe("");
+  });
+});
+
+describe("valueAtMarker", () => {
+  const vals = vc([[0, "0"], [10, "1"], [20, "0"]]);
+  it("shows prev -> next when the marker sits on a transition edge", () => {
+    expect(valueAtMarker(vals, 10)).toBe("0 -> 1");
+    expect(valueAtMarker(vals, 20)).toBe("1 -> 0");
+  });
+  it("shows just the value off an edge or at the first sample", () => {
+    expect(valueAtMarker(vals, 15)).toBe("1");
+    expect(valueAtMarker(vals, 0)).toBe("0");
+  });
+  it("trims leading zeros on both sides of the transition", () => {
+    const bus = vc([[0, "00000000"], [10, "00000018"]]);
+    expect(valueAtMarker(bus, 10)).toBe("0 -> 18");
+  });
+  it("collapses a no-op transition to a single value", () => {
+    expect(valueAtMarker(vc([[0, "5"], [10, "5"]]), 10)).toBe("5");
   });
 });
 
