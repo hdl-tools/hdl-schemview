@@ -194,7 +194,8 @@ Nightly — Verilator trace regeneration.
   existing style by hand.
 - **No heuristics** — resolve via model indices (single source of truth).
 - **Roadmap** — Phase 0–2 = model/matcher/cross-probe; Phase 3 = schematic + Tauri app
-  (active area). See `docs/ROADMAP.md`.
+  (done, incl. 3d internal-logic drill-down); Phase 4 = scalability hardening (active
+  area — benchmark → lazy/LoD audit → rkyv cache → redb/SQLite). See `docs/ROADMAP.md`.
 
 ## Commit messages
 

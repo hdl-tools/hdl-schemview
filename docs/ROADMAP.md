@@ -244,7 +244,7 @@ return to the indicated loop-back point rather than proceeding.
 
 #### Phase 3d — Internal-logic schematic (drill into leaf modules) · Size: L
 
-> **Status: in progress.** Epic #35. Drilling into a **leaf** RTL module
+> **Status: DONE.** Epic #35. Drilling into a **leaf** RTL module
 > (no child instances — e.g. `picorv32`) now shows its internal logic as a
 > schematic at **process/statement granularity**: each `always` / `always_ff` /
 > `always_comb` / continuous `assign` is **one** logic box (`Ff`/`Comb`), wired
@@ -252,9 +252,9 @@ return to the indicated loop-back point rather than proceeding.
 > (process-level, *not* gate/operator-level).
 
 - **Part-issues:** #30 quick nav fix (leaf instances drillable) ✅ · #31 harness
-  emits process-level logic nodes (`Comb` + broaden `FF`) + golden + `NodeKind::Comb` ·
+  emits process-level logic nodes (`Comb` + broaden `FF`) + golden + `NodeKind::Comb` ✅ ·
   #32 per-`(box,signal)` pin allocator ✅ · #33 schematic extractor (leaf
-  logic-graph + signal-join wiring) · #34 frontend renders combinational boxes.
+  logic-graph + signal-join wiring) ✅ · #34 frontend renders combinational boxes ✅.
 - **Governing principle:** logic boxes carry their model `NodeId` + `def_range`,
   so cross-probe stays a lookup — no heuristics, no string-matching.
 - **Out of scope:** gate/operator-level netlist decomposition; `initial`/`final`
