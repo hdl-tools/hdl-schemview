@@ -73,9 +73,21 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 /* min-height:0 lets the list shrink to its flex share so it scrolls (overflow:auto)
    when many signals are added, instead of expanding past the fixed-height pane. */
 #wave-list { flex:1; min-height:0; overflow:auto; padding:2px 0; color:var(--muted); font-size:11px; }
-#wave-list.has-rows { display:grid; grid-template-columns:minmax(60px, 240px) minmax(40px, 120px) 1fr max-content; align-items:center; gap:1px 8px; }
-.wave-row-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); font-family:ui-monospace, monospace; padding-left:6px; }
-.wave-row-value { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); font-family:ui-monospace, monospace; text-align:right; }
+/* The name/value column widths are user-resizable (#84): driven by CSS vars set on
+   drag, falling back to the minmax defaults when unset. */
+#wave-list.has-rows { display:grid; grid-template-columns:var(--wave-col-name, minmax(60px, 240px)) var(--wave-col-value, minmax(40px, 120px)) 1fr max-content; align-items:center; gap:1px 10px; }
+/* Fixed 20px height (== the track row) keeps the name/value cells aligned with the
+   waveform AND gives the full-height drag handle something to fill even when the
+   value is short or empty; line-height centres the text. */
+.wave-row-name { position:relative; height:20px; line-height:20px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); font-family:ui-monospace, monospace; padding-left:6px; }
+.wave-row-value { position:relative; height:20px; line-height:20px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); font-family:ui-monospace, monospace; text-align:right; padding-right:8px; }
+/* Drag handle on a column's right edge: a persistent divider line (white in dark
+   mode, dark in light mode so it shows on either background); the accent shows on
+   hover/drag. The value cell's padding-right keeps the value text clear of it, and
+   the column gap separates it from the waveform. */
+.col-resizer { position:absolute; top:0; right:0; width:8px; height:100%; cursor:col-resize; z-index:3; box-shadow:inset -1px 0 0 rgba(255,255,255,0.45); }
+:root[data-theme="light"] .col-resizer { box-shadow:inset -1px 0 0 rgba(0,0,0,0.4); }
+.col-resizer:hover, :root[data-theme="light"] .col-resizer:hover { box-shadow:inset -2px 0 0 var(--accent); }
 .wave-ruler-cell { min-width:0; height:16px; }
 .wave-ruler { width:100%; height:16px; display:block; }
 .wave-track-cell { min-width:0; height:20px; }

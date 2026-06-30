@@ -75,6 +75,9 @@ const state = {
   // ruler/readout. Fetched on load; null timescale → raw-tick display (#16).
   timescale: null as TraceTimescale | null,
   waveUnit: "ns" as DisplayUnit,
+  // User-set widths (px) for the resizable name/value columns; undefined → the CSS
+  // default (minmax). Persisted in localStorage (#84).
+  waveCol: {} as { name?: number; value?: number },
 };
 
 // Saved viewport per scope path, surviving stack pops so revisiting a scope
@@ -1037,9 +1040,15 @@ function renderWaves() {
       e.preventDefault();
       openSignalMenu(e, i);
     };
+    name.appendChild(colResizer("name"));
 
     const value = document.createElement("div");
     value.className = "wave-row-value";
+    // The value text lives in a span so redrawTracks can update it without wiping the
+    // resizer (textContent on the cell would remove all children).
+    const valueLbl = document.createElement("span");
+    valueLbl.className = "wave-val-lbl";
+    value.append(valueLbl, colResizer("value"));
 
     const cell = document.createElement("div");
     cell.className = "wave-track-cell";
@@ -1064,6 +1073,65 @@ function spacer(): HTMLDivElement {
   return d;
 }
 
+// Minimum widths (px) for the resizable columns, to stop them collapsing.
+const COL_MIN = { name: 60, value: 40 };
+
+// A drag handle on a column's right edge; click-hold and drag to resize (#84).
+function colResizer(col: "name" | "value"): HTMLDivElement {
+  const r = document.createElement("div");
+  r.className = "col-resizer";
+  r.onmousedown = (ev) => startColResize(col, ev);
+  return r;
+}
+
+function startColResize(col: "name" | "value", ev: MouseEvent) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const cell = (ev.currentTarget as HTMLElement).parentElement!;
+  const startX = ev.clientX;
+  const startW = cell.getBoundingClientRect().width;
+  const onMove = (e: MouseEvent) => {
+    state.waveCol[col] = Math.max(COL_MIN[col], startW + (e.clientX - startX));
+    applyColWidths();
+  };
+  const onUp = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    persistColWidths();
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
+
+// Push the column widths into CSS custom properties the grid reads (unset → the CSS
+// minmax default).
+function applyColWidths() {
+  const list = $("wave-list");
+  for (const col of ["name", "value"] as const) {
+    const w = state.waveCol[col];
+    if (w) list.style.setProperty(`--wave-col-${col}`, `${w}px`);
+    else list.style.removeProperty(`--wave-col-${col}`);
+  }
+}
+
+function persistColWidths() {
+  try {
+    localStorage.setItem("waveCol", JSON.stringify(state.waveCol));
+  } catch {
+    /* ignore persistence failure */
+  }
+}
+
+function loadColWidths() {
+  try {
+    const saved = localStorage.getItem("waveCol");
+    if (saved) state.waveCol = JSON.parse(saved);
+  } catch {
+    /* ignore malformed/persisted-state failure */
+  }
+  applyColWidths();
+}
+
 // Size each canvas to its laid-out cell and draw on the current window. Reading
 // clientWidth forces the layout needed to get the real column width; called after a
 // rebuild, on resize, and on every zoom/pan/marker change (no DOM rebuild needed).
@@ -1078,7 +1146,7 @@ function redrawTracks() {
     drawRuler(ruler, view, state.markers, scale);
   }
   const canvases = list.querySelectorAll<HTMLCanvasElement>(".wave-track");
-  const valueCells = list.querySelectorAll<HTMLDivElement>(".wave-row-value");
+  const valueLbls = list.querySelectorAll<HTMLElement>(".wave-val-lbl");
   state.waves.forEach((tr, i) => {
     const radix = tr.radix ?? "hex";
     const canvas = canvases[i];
@@ -1087,7 +1155,7 @@ function redrawTracks() {
       canvas.height = TRACK_H;
       drawTrack(canvas, tr.values, view, state.markers, radix, tr.enumMap, tr.showName);
     }
-    const vc = valueCells[i];
+    const vc = valueLbls[i];
     // Value at the primary marker A (prev -> next when A sits on a transition); the
     // latest value when A is unset. Formatted as the state name or the trace's radix.
     if (vc) {
@@ -1621,6 +1689,7 @@ function init() {
   setupZoom();
   setupWaveInteraction();
   syncUnitSelect();
+  loadColWidths();
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source right-click menu (#19), and dismissals.
   $("source").addEventListener("contextmenu", onSourceContextMenu);
