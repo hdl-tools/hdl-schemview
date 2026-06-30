@@ -249,6 +249,16 @@ export function displayValue(
   return formatValue(binary, radix);
 }
 
+// X for a bus segment's value label: centred in the segment's on-screen portion
+// (its intersection with [0, w]), so a wide segment's value stays in view and re-
+// centres as you pan/zoom. null when the visible portion can't fit a label of `labelW`.
+export function visibleLabelX(a: number, b: number, w: number, labelW: number): number | null {
+  const va = Math.max(a, 1);
+  const vb = Math.min(b, w - 1);
+  if (vb - va < labelW + 4) return null;
+  return (va + vb) / 2;
+}
+
 // Extract bits [hi:lo] (Verilog order) from a binary string. `bit_string` is
 // MSB→LSB, so bit b sits at char w-1-b. Bounds clamp to [0, w-1]; hi < lo → "". Pure.
 export function sliceBits(binary: string, hi: number, lo: number): string {
@@ -500,7 +510,8 @@ function drawBus(
     const v = displayValue(seg.value, radix, enumMap, showName);
     const label = v.length <= 10 ? v : `${v.slice(0, 9)}…`;
     ctx.fillStyle = "#cfe0ff";
-    if (b - a > ctx.measureText(label).width + 4) ctx.fillText(label, (a + b) / 2, g.mid);
+    const labelX = visibleLabelX(a, b, g.w, ctx.measureText(label).width);
+    if (labelX != null) ctx.fillText(label, labelX, g.mid);
   });
   // Crossover diagonals at each internal transition.
   ctx.strokeStyle = "#9cf";
