@@ -82,7 +82,8 @@ Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D. Right-c
 a schematic box/pin/wire (or a source token) opens an action menu: **Append to
 waveform** (stacks the signal as a new lane) / **Show in source**. The waveform pane
 holds many traces (`state.waves`), stacked in scrollable fixed-height rows
-(`name | value@A | track`) with per-row reorder/remove controls. The tracks are
+(`name | value@A | track`) with per-row reorder/remove controls; the name/value
+columns are drag-resizable (`state.waveCol`, persisted in `localStorage`). The tracks are
 interactive: header buttons + Ctrl/⌘-scroll zoom (`state.waveView`) and drag-pan the
 shared time window; left-click sets marker **A**, right-click marker **B**
 (`state.markers`) — a top ruler shows tick timestamps, the header shows A/B/Δ, and the
