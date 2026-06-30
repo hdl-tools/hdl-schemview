@@ -3,7 +3,10 @@
 The Tauri GUI (roadmap Phase 3): three linked views — **schematic**, **source**,
 **waveform** — over the cross-probe engine. Click a box/wire in the schematic and
 the source scrolls to its declaration while the waveform shows its signal; an
-ambiguous source position offers a picker; double-click a box to expand it.
+ambiguous source position offers a picker; double-click a box to expand it, or drill
+into a leaf module to see its **internal logic** (process-level FF/comb boxes). The
+waveform pane is interactive: stack many traces, set A/B markers, zoom/pan the shared
+time window, switch per-signal radix, slice sub-buses, and read FSM **state names**.
 
 **Standalone:** Tauri renders the frontend in the OS-native webview
 (WebKitGTK / WebView2 / WKWebView) — **no Chromium or Playwright at runtime**.

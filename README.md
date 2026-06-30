@@ -31,10 +31,14 @@ Get this right and cross-probing is lookups, not guesswork.
 
 **Phases 0–3 done — all three views are linked in a desktop GUI.** The Phase 1
 matcher gate passed (project GO); Phase 2 linked source ↔ waveform; Phase 3 adds
-the schematic and a **Tauri desktop app** ([`app/`](app/)) with three linked panes.
-The execution plan lives in **[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture
-decisions are ADRs in **[docs/decisions/](docs/decisions/)**; the reference
-fixtures and the pinned gate threshold are in **[docs/fixtures.md](docs/fixtures.md)**.
+the schematic and a **Tauri desktop app** ([`app/`](app/)) with three linked panes,
+including drill-down into a leaf module's **internal logic** (process-level FF/comb
+boxes, Phase 3d) and an interactive **waveform** pane (markers, zoom/pan, per-signal
+radix, FSM state names). Next up is **Phase 4 — scalability hardening** (lazy loading,
+schematic level-of-detail, bounded-memory traces). The execution plan lives in
+**[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs in
+**[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned gate
+threshold are in **[docs/fixtures.md](docs/fixtures.md)**.
 
 What exists today:
 
