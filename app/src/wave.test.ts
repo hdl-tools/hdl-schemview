@@ -16,6 +16,7 @@ import {
   enumName,
   displayValue,
   sliceBits,
+  visibleLabelX,
   tickMarks,
   unitExponent,
   displayScale,
@@ -230,6 +231,23 @@ describe("valueAtMarker name mode", () => {
   const vals = vc([[0, "00"], [10, "01"]]);
   it("shows state names across a transition", () => {
     expect(valueAtMarker(vals, 10, "hex", map, true)).toBe("LANE_RESET -> LANE_RUN");
+  });
+});
+
+describe("visibleLabelX", () => {
+  it("centres the label in a fully visible segment", () => {
+    expect(visibleLabelX(10, 100, 200, 20)).toBeCloseTo(55, 6);
+  });
+  it("centres in the visible portion when the segment runs off-screen left", () => {
+    // visible span [1, 50] -> centre 25.5
+    expect(visibleLabelX(-100, 50, 200, 20)).toBeCloseTo(25.5, 6);
+  });
+  it("centres in the viewport for a segment spanning the whole view", () => {
+    expect(visibleLabelX(-100, 300, 200, 20)).toBeCloseTo(100, 6);
+  });
+  it("returns null when the visible portion can't fit the label", () => {
+    expect(visibleLabelX(-100, 10, 200, 20)).toBeNull();
+    expect(visibleLabelX(-200, -10, 200, 20)).toBeNull();
   });
 });
 
