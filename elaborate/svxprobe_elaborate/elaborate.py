@@ -47,8 +47,10 @@ _KIND_MAP = {
     # An interface's modport (a named view of the bundle). A modport-specialized
     # interface port on a consumer (`mem_if.mem bus`) is an `InterfacePort`, which
     # we model as an `Interface` node carrying the selected view (see `_add`).
-    # ModportPort symbols are views of existing signals and are intentionally not
-    # emitted.
+    # ModportPort symbols stay non-spine in general (views of existing signals),
+    # with one exception: on a modport-specialized interface port every member has
+    # one concrete direction, so they emit as that node's directional `Port`
+    # children (see `_add_modport_pins`).
     "Modport": "Modport",
     "InterfacePort": "Interface",
 }
@@ -64,6 +66,18 @@ def _is_interface_instance(sym: Any) -> bool:
 
 def _kind_name(sym: Any) -> str:
     return str(sym.kind).replace("SymbolKind.", "")
+
+
+def _value_sym_path(sym: Any) -> Optional[str]:
+    """Canonical path of a referenced value symbol. A ModportPort is slang's view
+    of an interface member as seen through a modport-qualified port (its own path,
+    e.g. `...bus.mem.valid`, names no model node); resolve it to the underlying
+    signal via slang's `internalSymbol` link — a model lookup, not a name guess."""
+    if sym is None:
+        return None
+    if _kind_name(sym) == "ModportPort":
+        sym = getattr(sym, "internalSymbol", None) or sym
+    return getattr(sym, "hierarchicalPath", None)
 
 
 def _parse_sv_int(rhs: str) -> Optional[int]:
@@ -133,6 +147,9 @@ class Elaborator:
         self.files: list[dict[str, Any]] = []
         # (instance node id, InstanceSymbol) collected for edge extraction.
         self.instances: list[tuple[int, Any]] = []
+        # (pin node id, underlying member path, dir) for each modport member pin,
+        # collected for edge extraction (the pin wires to its bundle member).
+        self.modport_pins: list[tuple[int, str, str]] = []
         # (logic node id, symbol, role) for process-level logic-edge extraction —
         # inferred registers (`ff`) and combinational blocks (`comb`).
         self.logic_blocks: list[tuple[int, Any, str]] = []
@@ -207,9 +224,11 @@ class Elaborator:
             node["modport"] = mp
         if kind in ("Instance", "Interface"):
             # def_range = the module/interface definition; inst_range = the
-            # instantiation site. A consuming interface *port* has no body/defn,
-            # so these fall back to the port's own syntax range.
+            # instantiation site. A consuming interface *port* has no body; its
+            # definition is the interface type itself (`interfaceDef`).
             defn = getattr(getattr(sym, "body", None), "definition", None)
+            if defn is None:
+                defn = getattr(sym, "interfaceDef", None)
             if defn is not None:
                 node["def_range"] = self._range_from_syntax(defn) or self._point_range(
                     defn.location
@@ -231,6 +250,37 @@ class Elaborator:
         if parent is not None:
             self.nodes[parent]["children"].append(nid)
         return nid
+
+    def _add_modport_pins(self, sym: Any, parent: int) -> None:
+        """Directional member pins for a modport-specialized interface port.
+
+        Through a named modport view every bundle member has one concrete
+        direction, so each of the modport's ``ModportPort``s emits as a ``Port``
+        child of the consumer's ``Interface`` node — direction and underlying
+        member taken straight from slang (``direction`` / ``internalSymbol``, no
+        name heuristics). A pin's path *is* the underlying member's canonical
+        path (the pin is a view of that signal), so pin clicks cross-probe to
+        the member's source and waveform as plain path lookups; ``_edges`` wires
+        each pin to its member like an ordinary port connection. A bare
+        interface port (no modport) stays port-less: its members carry both
+        directions, so there is nothing unambiguous to pin.
+        """
+        conn = getattr(sym, "connection", None)
+        modport = conn[1] if isinstance(conn, tuple) and len(conn) == 2 else None
+        if modport is None:
+            return
+        for mp in modport:
+            if _kind_name(mp) != "ModportPort":
+                continue
+            member = getattr(mp, "internalSymbol", None)
+            mpath = getattr(member, "hierarchicalPath", "") if member is not None else ""
+            if not mpath:
+                continue  # no underlying member resolved -> no pin; never guess
+            nid = self._add(mp, "Port", parent)
+            node = self.nodes[nid]
+            node["path"] = mpath
+            node["symbol_key"] = mpath
+            self.modport_pins.append((nid, mpath, node["dir"] or "inout"))
 
     def _record_enum(self, type_str: str, t: Any) -> None:
         """If `t` is (an alias of) an enum, record its value->name members once under
@@ -370,7 +420,7 @@ class Elaborator:
         def cb(n: Any) -> None:
             k = _kind_name(n)
             if "NamedValue" in k or "HierarchicalValue" in k:
-                p = getattr(getattr(n, "symbol", None), "hierarchicalPath", None)
+                p = _value_sym_path(getattr(n, "symbol", None))
                 if p:
                     out.add(p)
 
@@ -399,13 +449,13 @@ class Elaborator:
         val = getattr(node, "value", None)
         if val is None:
             return None
-        p = getattr(getattr(val, "symbol", None), "hierarchicalPath", None)
+        p = _value_sym_path(getattr(val, "symbol", None))
         if p:
             return p
         getref = getattr(val, "getSymbolReference", None)
         if callable(getref):
             try:
-                return getattr(getref(), "hierarchicalPath", None)
+                return _value_sym_path(getref())
             except Exception:
                 return None
         return None
@@ -535,6 +585,9 @@ class Elaborator:
             # extraction. The slang symbol kind is `Instance` for each.
             if kname == "Instance":
                 self.instances.append((my_id, sym))
+            # A modport-specialized interface port pins its members (#64).
+            if kname == "InterfacePort" and self.nodes[my_id]["modport"]:
+                self._add_modport_pins(sym, my_id)
 
         members = self._members(sym)
         if members is None:
@@ -560,13 +613,13 @@ class Elaborator:
         out: list[str] = []
         if expr is None:
             return out
-        path = getattr(getattr(expr, "symbol", None), "hierarchicalPath", None)
+        path = _value_sym_path(getattr(expr, "symbol", None))
         if path:
             out.append(path)
         getref = getattr(expr, "getSymbolReference", None)
         if callable(getref):
             try:
-                path = getattr(getref(), "hierarchicalPath", None)
+                path = _value_sym_path(getref())
             except Exception:
                 path = None
             if path:
@@ -637,6 +690,14 @@ class Elaborator:
                     lit = self._const_str(expr)
                     if lit is not None and self.nodes[port_id]["kind"] == "Port":
                         self.nodes[port_id]["const"] = lit
+
+        # A modport member pin connects to its underlying bundle member — the
+        # same shape as a module port connection, so the schematic can wire and
+        # filter interface pins uniformly with instance pins.
+        for pid, mpath, d in self.modport_pins:
+            end_id = self._pick_node(mpath, ("Net", "Var", "Port"))
+            if end_id is not None and end_id != pid:
+                seen_edges.add((pid, end_id, d, None))
 
         for logic_id, logic_sym, role in self.logic_blocks:
             self._logic_edges(logic_id, logic_sym, role, seen_edges)

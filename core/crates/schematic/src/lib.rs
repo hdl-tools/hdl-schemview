@@ -129,6 +129,19 @@ fn side_of(dir: Dir) -> Side {
     }
 }
 
+/// Mirrored pin side for a boundary-like node: the pin faces the design, so an
+/// input enters from the west frame (pin on the east) and an output leaves at
+/// the east frame (pin on the west). Used by the scope's own boundary pins and
+/// by modport member pins — a modport-qualified interface port is the
+/// consumer's bundled window to the outside, so its `in` members exit east
+/// toward their readers and its `out` members are entered from the west.
+fn boundary_side(dir: Dir) -> Side {
+    match dir {
+        Dir::Out => Side::West,
+        _ => Side::East,
+    }
+}
+
 /// The boxes shown inside a scope: child `Instance`s, with `GenBlock`s dissolved
 /// — their leaf instances are pulled up so e.g. both `g_lane[*].core` sit
 /// together at the top instead of behind a generate-array group box.
@@ -239,6 +252,10 @@ fn width_of(type_: &Option<String>) -> Option<String> {
 /// iterations stay distinct — e.g. `g_lane[0].core` vs `g_lane[1].core`.
 fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
     let n = design.node(bx)?;
+    // A modport-qualified interface port carries directional member pins; the
+    // bundle is the consumer's boundary to the outside, so its pin sides are
+    // mirrored like the scope's own boundary pins (see `boundary_side`).
+    let mirror = n.kind == NodeKind::Interface && n.modport.is_some();
     // Generate blocks have no ports; instances expose their Port children.
     let ports: Vec<SchPort> = n
         .children
@@ -264,7 +281,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                         .find(|e| e.port == pid)
                         .map(|e| e.dir)
                 })
-                .map(side_of)
+                .map(if mirror { boundary_side } else { side_of })
                 .unwrap_or(Side::West);
             SchPort {
                 id: pid,
@@ -398,10 +415,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
 /// layered layout places inputs on the left and outputs on the right.
 fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
     let n = design.node(port)?;
-    let side = match n.dir {
-        Some(Dir::Out) => Side::West,
-        _ => Side::East,
-    };
+    let side = boundary_side(n.dir.unwrap_or(Dir::In));
     Some(SchNode {
         id: port,
         kind: NodeKind::Port,
@@ -481,10 +495,38 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             .filter_map(|&p| make_boundary_pin(design, p)),
     );
 
+    // Modport member pins: an in-scope modport-qualified interface port pins
+    // its bundle members, and each pin's edge points at the underlying member —
+    // a signal that lives *outside* this scope (in the interface instance), so
+    // `box_of` can never anchor it. Map member -> (bundle box, pin) so wires to
+    // bundle signals land on the pin instead of being dropped. BTreeMap keeps
+    // the signal-join fold below deterministic.
+    let mut iface_pin: std::collections::BTreeMap<NodeId, (NodeId, NodeId)> =
+        std::collections::BTreeMap::new();
+    for &b in &boxes {
+        let Some(bn) = design.node(b) else { continue };
+        if bn.kind != NodeKind::Interface || bn.modport.is_none() {
+            continue;
+        }
+        for &pid in &bn.children {
+            if !is_kind(design, pid, NodeKind::Port) {
+                continue;
+            }
+            for e in design.edges_of(pid) {
+                if e.port == pid {
+                    iface_pin.insert(e.endpoint, (b, pid));
+                }
+            }
+        }
+    }
+
     // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
     let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
         if let Some(&bp) = boundary_of.get(&node) {
             return Some((bp, bp));
+        }
+        if let Some(&(b, pin)) = iface_pin.get(&node) {
+            return Some((b, pin));
         }
         let b = box_of(design, node, &box_set)?;
         // Draw to the specific port if the node is a Port directly under the box;
@@ -564,6 +606,20 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                 _ => {
                     drivers.entry(p).or_default().push((p, None));
                     loads.entry(p).or_default().push((p, None));
+                }
+            }
+        }
+        // Modport member pins fold in exactly like the scope's own ports: inside
+        // the consumer, an `in` member drives its readers and an `out` member is
+        // loaded by its driver. Keyed on the underlying member node — the same
+        // key the logic edges above use for bundle signals.
+        for (&sig, &(_, pin)) in &iface_pin {
+            match design.node(pin).and_then(|n| n.dir) {
+                Some(Dir::Out) => loads.entry(sig).or_default().push((pin, None)),
+                Some(Dir::In) => drivers.entry(sig).or_default().push((pin, None)),
+                _ => {
+                    drivers.entry(sig).or_default().push((pin, None));
+                    loads.entry(sig).or_default().push((pin, None));
                 }
             }
         }

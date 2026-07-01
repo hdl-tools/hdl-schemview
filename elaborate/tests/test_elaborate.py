@@ -87,6 +87,43 @@ def test_consuming_interface_port_records_modport(model: dict) -> None:
     assert port["modport"] == "mem", port.get("modport")
 
 
+def test_modport_interface_port_pins(model: dict) -> None:
+    """A modport-specialized interface port emits directional member pins (#64):
+    one `Port` child per ModportPort, direction from the view, path pointing at
+    the underlying bundle member, and an edge wiring pin -> member."""
+    byid = {n["id"]: n for n in model["nodes"]}
+    iface = next(
+        n for n in model["nodes"] if n["path"] == "picorv32_soc.g_lane[0].memory.bus"
+    )
+    pins = {byid[c]["name"]: byid[c] for c in iface["children"]}
+    # The full `mem` view, with slang's per-member directions.
+    dirs = {name: p["dir"] for name, p in pins.items()}
+    assert dirs == {
+        "clk": "in",
+        "valid": "in",
+        "instr": "in",
+        "addr": "in",
+        "wdata": "in",
+        "wstrb": "in",
+        "ready": "out",
+        "rdata": "out",
+    }, dirs
+    # Each pin is a view of the underlying member: same canonical path, and an
+    # edge (same shape as a module port connection) wiring the two.
+    assert pins["valid"]["path"] == "picorv32_soc.g_lane[0].bus.valid"
+    assert pins["valid"]["kind"] == "Port"
+    edge_ends = {
+        (e["port"], byid[e["endpoint"]]["path"], e["dir"]) for e in model["edges"]
+    }
+    assert (pins["valid"]["id"], "picorv32_soc.g_lane[0].bus.valid", "in") in edge_ends
+    assert (pins["ready"]["id"], "picorv32_soc.g_lane[0].bus.ready", "out") in edge_ends
+    # The bare interface *instance* stays port-less: members carry both
+    # directions, so there is nothing unambiguous to pin.
+    bus = next(n for n in model["nodes"] if n["path"] == "picorv32_soc.g_lane[0].bus")
+    assert not any(byid[c]["kind"] == "Port" and byid[c]["name"] == "valid"
+                   for c in bus["children"])
+
+
 def test_nodes_have_paths_and_keys(model: dict) -> None:
     for n in model["nodes"]:
         assert n["path"], f"node {n['id']} has empty path"
