@@ -72,12 +72,13 @@ def _value_sym_path(sym: Any) -> Optional[str]:
     """Canonical path of a referenced value symbol. A ModportPort is slang's view
     of an interface member as seen through a modport-qualified port (its own path,
     e.g. `...bus.mem.valid`, names no model node); resolve it to the underlying
-    signal via slang's `internalSymbol` link — a model lookup, not a name guess."""
+    signal via slang's `internalSymbol` link — a model lookup, not a name guess.
+    Returns None for a ModportPort with no resolvable member (never guess)."""
     if sym is None:
         return None
     if _kind_name(sym) == "ModportPort":
-        sym = getattr(sym, "internalSymbol", None) or sym
-    return getattr(sym, "hierarchicalPath", None)
+        sym = getattr(sym, "internalSymbol", None)
+    return getattr(sym, "hierarchicalPath", None) if sym is not None else None
 
 
 def _parse_sv_int(rhs: str) -> Optional[int]:
@@ -150,6 +151,10 @@ class Elaborator:
         # (pin node id, underlying member path, dir) for each modport member pin,
         # collected for edge extraction (the pin wires to its bundle member).
         self.modport_pins: list[tuple[int, str, str]] = []
+        # Their ids: a pin is a *view* of its member, never the member itself,
+        # so path resolution (`_pick_node`) must not land on a pin while a real
+        # signal exists at the same path.
+        self._modport_pin_ids: set[int] = set()
         # (logic node id, symbol, role) for process-level logic-edge extraction —
         # inferred registers (`ff`) and combinational blocks (`comb`).
         self.logic_blocks: list[tuple[int, Any, str]] = []
@@ -197,9 +202,15 @@ class Elaborator:
         return {"file": self._file_id(self.sm.getFileName(sl)), "start": loc, "end": loc}
 
     # -- node emission -------------------------------------------------------
-    def _add(self, sym: Any, kind: str, parent: Optional[int]) -> int:
+    def _add(
+        self, sym: Any, kind: str, parent: Optional[int], path: Optional[str] = None
+    ) -> int:
+        """Emit a node for `sym`. `path` overrides the node's canonical identity
+        (path + symbol_key) when the symbol is a *view* of another signal — a
+        modport pin carries the path of the member it exposes."""
         nid = len(self.nodes)
-        path = getattr(sym, "hierarchicalPath", "") or ""
+        if path is None:
+            path = getattr(sym, "hierarchicalPath", "") or ""
         node: dict[str, Any] = {
             "id": nid,
             "kind": kind,
@@ -272,15 +283,12 @@ class Elaborator:
         for mp in modport:
             if _kind_name(mp) != "ModportPort":
                 continue
-            member = getattr(mp, "internalSymbol", None)
-            mpath = getattr(member, "hierarchicalPath", "") if member is not None else ""
+            mpath = _value_sym_path(mp)
             if not mpath:
                 continue  # no underlying member resolved -> no pin; never guess
-            nid = self._add(mp, "Port", parent)
-            node = self.nodes[nid]
-            node["path"] = mpath
-            node["symbol_key"] = mpath
-            self.modport_pins.append((nid, mpath, node["dir"] or "inout"))
+            nid = self._add(mp, "Port", parent, path=mpath)
+            self._modport_pin_ids.add(nid)
+            self.modport_pins.append((nid, mpath, self.nodes[nid]["dir"] or "inout"))
 
     def _record_enum(self, type_str: str, t: Any) -> None:
         """If `t` is (an alias of) an enum, record its value->name members once under
@@ -639,15 +647,21 @@ class Elaborator:
         return s if s and s != "None" else None
 
     def _pick_node(self, path: str, prefer: tuple[str, ...]) -> Optional[int]:
-        """Resolve a path to a node id, preferring the given kinds in order."""
+        """Resolve a path to a node id, preferring the given kinds in order.
+
+        Modport pins share their member's path but are views, never the member
+        itself — skip them whenever anything else exists at the path, so logic
+        and connection endpoints land on the real signal regardless of the
+        declaration order of consumer and interface instance."""
         ids = self._by_path.get(path)
         if not ids:
             return None
+        real = [t for t in ids if t[0] not in self._modport_pin_ids] or ids
         for want in prefer:
-            for nid, kind in ids:
+            for nid, kind in real:
                 if kind == want:
                     return nid
-        return ids[0][0]
+        return real[0][0]
 
     def _edges(self) -> list[dict[str, Any]]:
         # path -> [(id, kind)] for resolving connection endpoints.

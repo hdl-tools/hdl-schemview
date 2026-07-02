@@ -498,10 +498,11 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     // Modport member pins: an in-scope modport-qualified interface port pins
     // its bundle members, and each pin's edge points at the underlying member —
     // a signal that lives *outside* this scope (in the interface instance), so
-    // `box_of` can never anchor it. Map member -> (bundle box, pin) so wires to
-    // bundle signals land on the pin instead of being dropped. BTreeMap keeps
-    // the signal-join fold below deterministic.
-    let mut iface_pin: std::collections::BTreeMap<NodeId, (NodeId, NodeId)> =
+    // `box_of` can never anchor it. Map member -> [(bundle box, pin)] so wires
+    // to bundle signals land on the pins instead of being dropped; several
+    // bundles in one scope can view the same member, hence the Vec. BTreeMap
+    // keeps the signal-join fold below deterministic.
+    let mut iface_pin: std::collections::BTreeMap<NodeId, Vec<(NodeId, NodeId)>> =
         std::collections::BTreeMap::new();
     for &b in &boxes {
         let Some(bn) = design.node(b) else { continue };
@@ -514,7 +515,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             }
             for e in design.edges_of(pid) {
                 if e.port == pid {
-                    iface_pin.insert(e.endpoint, (b, pid));
+                    iface_pin.entry(e.endpoint).or_default().push((b, pid));
                 }
             }
         }
@@ -525,8 +526,11 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         if let Some(&bp) = boundary_of.get(&node) {
             return Some((bp, bp));
         }
-        if let Some(&(b, pin)) = iface_pin.get(&node) {
-            return Some((b, pin));
+        // Anchor a bundle member on its pin only when one bundle views it —
+        // with several, a structural edge has no single right pin (each pin
+        // still wires by direction via the signal-join fold below).
+        if let Some([(b, pin)]) = iface_pin.get(&node).map(Vec::as_slice) {
+            return Some((*b, *pin));
         }
         let b = box_of(design, node, &box_set)?;
         // Draw to the specific port if the node is a Port directly under the box;
@@ -599,28 +603,26 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                 loads.entry(key).or_default().push(anchor);
             }
         }
-        for &p in &own_ports {
-            match design.node(p).and_then(|n| n.dir) {
-                Some(Dir::Out) => loads.entry(p).or_default().push((p, None)),
-                Some(Dir::In) => drivers.entry(p).or_default().push((p, None)),
-                _ => {
-                    drivers.entry(p).or_default().push((p, None));
-                    loads.entry(p).or_default().push((p, None));
-                }
+        // Boundary-like anchors fold in by declared direction: an input drives
+        // its signal inside the scope, an output loads it, an inout does both.
+        // Shared by the scope's own ports and by modport member pins keyed on
+        // the underlying member node — the same key the logic edges above use
+        // for bundle signals — so the two stay symmetric by construction.
+        let mut fold_anchor = |key: NodeId, pin: NodeId| match design.node(pin).and_then(|n| n.dir)
+        {
+            Some(Dir::Out) => loads.entry(key).or_default().push((pin, None)),
+            Some(Dir::In) => drivers.entry(key).or_default().push((pin, None)),
+            _ => {
+                drivers.entry(key).or_default().push((pin, None));
+                loads.entry(key).or_default().push((pin, None));
             }
+        };
+        for &p in &own_ports {
+            fold_anchor(p, p);
         }
-        // Modport member pins fold in exactly like the scope's own ports: inside
-        // the consumer, an `in` member drives its readers and an `out` member is
-        // loaded by its driver. Keyed on the underlying member node — the same
-        // key the logic edges above use for bundle signals.
-        for (&sig, &(_, pin)) in &iface_pin {
-            match design.node(pin).and_then(|n| n.dir) {
-                Some(Dir::Out) => loads.entry(sig).or_default().push((pin, None)),
-                Some(Dir::In) => drivers.entry(sig).or_default().push((pin, None)),
-                _ => {
-                    drivers.entry(sig).or_default().push((pin, None));
-                    loads.entry(sig).or_default().push((pin, None));
-                }
+        for (&sig, pins_of_sig) in &iface_pin {
+            for &(_, pin) in pins_of_sig {
+                fold_anchor(sig, pin);
             }
         }
         // BTreeSet for a deterministic wire order across runs.
