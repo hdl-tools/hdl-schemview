@@ -129,6 +129,19 @@ fn side_of(dir: Dir) -> Side {
     }
 }
 
+/// Mirrored pin side for a boundary-like node: the pin faces the design, so an
+/// input enters from the west frame (pin on the east) and an output leaves at
+/// the east frame (pin on the west). Used by the scope's own boundary pins and
+/// by modport member pins — a modport-qualified interface port is the
+/// consumer's bundled window to the outside, so its `in` members exit east
+/// toward their readers and its `out` members are entered from the west.
+fn boundary_side(dir: Dir) -> Side {
+    match dir {
+        Dir::Out => Side::West,
+        _ => Side::East,
+    }
+}
+
 /// The boxes shown inside a scope: child `Instance`s, with `GenBlock`s dissolved
 /// — their leaf instances are pulled up so e.g. both `g_lane[*].core` sit
 /// together at the top instead of behind a generate-array group box.
@@ -239,6 +252,10 @@ fn width_of(type_: &Option<String>) -> Option<String> {
 /// iterations stay distinct — e.g. `g_lane[0].core` vs `g_lane[1].core`.
 fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
     let n = design.node(bx)?;
+    // A modport-qualified interface port carries directional member pins; the
+    // bundle is the consumer's boundary to the outside, so its pin sides are
+    // mirrored like the scope's own boundary pins (see `boundary_side`).
+    let mirror = n.kind == NodeKind::Interface && n.modport.is_some();
     // Generate blocks have no ports; instances expose their Port children.
     let ports: Vec<SchPort> = n
         .children
@@ -264,7 +281,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                         .find(|e| e.port == pid)
                         .map(|e| e.dir)
                 })
-                .map(side_of)
+                .map(if mirror { boundary_side } else { side_of })
                 .unwrap_or(Side::West);
             SchPort {
                 id: pid,
@@ -398,10 +415,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
 /// layered layout places inputs on the left and outputs on the right.
 fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
     let n = design.node(port)?;
-    let side = match n.dir {
-        Some(Dir::Out) => Side::West,
-        _ => Side::East,
-    };
+    let side = boundary_side(n.dir.unwrap_or(Dir::In));
     Some(SchNode {
         id: port,
         kind: NodeKind::Port,
@@ -481,10 +495,42 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             .filter_map(|&p| make_boundary_pin(design, p)),
     );
 
+    // Modport member pins: an in-scope modport-qualified interface port pins
+    // its bundle members, and each pin's edge points at the underlying member —
+    // a signal that lives *outside* this scope (in the interface instance), so
+    // `box_of` can never anchor it. Map member -> [(bundle box, pin)] so wires
+    // to bundle signals land on the pins instead of being dropped; several
+    // bundles in one scope can view the same member, hence the Vec. BTreeMap
+    // keeps the signal-join fold below deterministic.
+    let mut iface_pin: std::collections::BTreeMap<NodeId, Vec<(NodeId, NodeId)>> =
+        std::collections::BTreeMap::new();
+    for &b in &boxes {
+        let Some(bn) = design.node(b) else { continue };
+        if bn.kind != NodeKind::Interface || bn.modport.is_none() {
+            continue;
+        }
+        for &pid in &bn.children {
+            if !is_kind(design, pid, NodeKind::Port) {
+                continue;
+            }
+            for e in design.edges_of(pid) {
+                if e.port == pid {
+                    iface_pin.entry(e.endpoint).or_default().push((b, pid));
+                }
+            }
+        }
+    }
+
     // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
     let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
         if let Some(&bp) = boundary_of.get(&node) {
             return Some((bp, bp));
+        }
+        // Anchor a bundle member on its pin only when one bundle views it —
+        // with several, a structural edge has no single right pin (each pin
+        // still wires by direction via the signal-join fold below).
+        if let Some([(b, pin)]) = iface_pin.get(&node).map(Vec::as_slice) {
+            return Some((*b, *pin));
         }
         let b = box_of(design, node, &box_set)?;
         // Draw to the specific port if the node is a Port directly under the box;
@@ -557,14 +603,26 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                 loads.entry(key).or_default().push(anchor);
             }
         }
+        // Boundary-like anchors fold in by declared direction: an input drives
+        // its signal inside the scope, an output loads it, an inout does both.
+        // Shared by the scope's own ports and by modport member pins keyed on
+        // the underlying member node — the same key the logic edges above use
+        // for bundle signals — so the two stay symmetric by construction.
+        let mut fold_anchor = |key: NodeId, pin: NodeId| match design.node(pin).and_then(|n| n.dir)
+        {
+            Some(Dir::Out) => loads.entry(key).or_default().push((pin, None)),
+            Some(Dir::In) => drivers.entry(key).or_default().push((pin, None)),
+            _ => {
+                drivers.entry(key).or_default().push((pin, None));
+                loads.entry(key).or_default().push((pin, None));
+            }
+        };
         for &p in &own_ports {
-            match design.node(p).and_then(|n| n.dir) {
-                Some(Dir::Out) => loads.entry(p).or_default().push((p, None)),
-                Some(Dir::In) => drivers.entry(p).or_default().push((p, None)),
-                _ => {
-                    drivers.entry(p).or_default().push((p, None));
-                    loads.entry(p).or_default().push((p, None));
-                }
+            fold_anchor(p, p);
+        }
+        for (&sig, pins_of_sig) in &iface_pin {
+            for &(_, pin) in pins_of_sig {
+                fold_anchor(sig, pin);
             }
         }
         // BTreeSet for a deterministic wire order across runs.

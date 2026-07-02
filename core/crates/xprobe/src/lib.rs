@@ -241,7 +241,11 @@ impl CrossProbe {
 
         let anchor_idx = self.choose_anchor(&reps);
         let anchor_path = &reps[anchor_idx].0;
-        let nodes = by_path.get(anchor_path).cloned().unwrap_or_default();
+        // The full path-equivalence set (as in `selection_for`), not just the
+        // candidates that led here: a source click can land on a *view* node —
+        // e.g. a modport pin's declaration — and the wave/source links live on
+        // its same-path siblings (the member Var), which `to_wave` walks.
+        let nodes = self.design.nodes_at_path(anchor_path).to_vec();
         let anchor = reps[anchor_idx].1;
         let alternatives = reps
             .iter()

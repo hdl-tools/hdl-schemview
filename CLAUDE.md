@@ -129,7 +129,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 **Model** (`core/crates/model/src/lib.rs`):
 - `NodeId` = `u32` index into `Document::nodes`.
 - `NodeKind { Instance, Net, Port, Var, Param, ModuleDef, GenBlock, Ff, Comb, Latch, Assign, Interface, Modport }` — `Interface` is an interface instance or a modport-specialized interface port; `Modport` a named view of a bundle.
-- `Node { id, name, path, parent, children, kind, symbol_key, def_range, inst_range, type_, dir, const_value, modport, drivers, loads }` — `modport` records the view name on a modport-specialized interface port (e.g. `mem`).
+- `Node { id, name, path, parent, children, kind, symbol_key, def_range, inst_range, type_, dir, const_value, modport, drivers, loads }` — `modport` records the view name on a modport-specialized interface port (e.g. `mem`). Such a port carries directional `Port` children (one per modport member, direction from slang's `ModportPort`); each pin's `path` is the *underlying member's* canonical path (the pin is a view of that signal), wired to it by an edge. Bare interface instances stay member-pin-less.
 - `Design { doc, path_index, src_index, conn_index, wave_index }`.
 - `Document.enums: HashMap<String, EnumDef>` — normalized enum table keyed by canonical type string (matches `Node.type_`); `EnumDef { width, members: Vec<EnumMember{name, value}> }`. Looked up via `Design::enum_for_type` and surfaced on `WaveLink.enum_map` for FSM state-name display.
 

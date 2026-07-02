@@ -182,6 +182,81 @@ fn interface_instance_is_a_bundle_box() {
 }
 
 #[test]
+fn modport_interface_port_has_directional_pins() {
+    // Inside the consumer, its modport-qualified interface port renders as a
+    // bundle box with one directional pin per modport member (#64). Sides are
+    // mirrored like boundary pins: an `in` member enters the consumer, so its
+    // pin faces the design (east); an `out` member is entered from the west.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].memory").expect("scope graph");
+
+    let bus = g
+        .nodes
+        .iter()
+        .find(|n| n.label == "bus")
+        .expect("the consumer's interface-port bundle box");
+    assert_eq!(bus.kind, svxprobe_model::NodeKind::Interface);
+    assert_eq!(bus.module.as_deref(), Some("mem_if"), "interface sublabel");
+
+    let pin = |name: &str| {
+        bus.ports
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("pin {name} on the bundle: {:?}", bus.ports))
+    };
+    assert_eq!(pin("valid").side, Side::East, "in member faces the design");
+    assert_eq!(
+        pin("ready").side,
+        Side::West,
+        "out member entered from west"
+    );
+    assert_eq!(pin("addr").width.as_deref(), Some("[31:0]"));
+    // A pin is a view of the underlying bundle member: its path is the member's
+    // canonical path, so a click cross-probes to the real signal (and its wave).
+    assert_eq!(pin("valid").path, "picorv32_soc.g_lane[0].bus.valid");
+
+    // The consumer's logic wires to the pins: the memory FF loads `valid` from
+    // the bundle and drives `ready` back into it.
+    let ff = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .expect("the memory FF");
+    let touches = |pin_id| {
+        g.edges
+            .iter()
+            .any(|e| e.source == pin_id || e.target == pin_id)
+    };
+    assert!(touches(pin("valid").id), "valid pin is wired");
+    assert!(touches(pin("ready").id), "ready pin is wired");
+    let valid_wire = g
+        .edges
+        .iter()
+        .find(|e| e.source == pin("valid").id || e.target == pin("valid").id)
+        .unwrap();
+    let ff_pins: Vec<_> = ff.ports.iter().map(|p| p.id).collect();
+    assert!(
+        ff_pins.contains(&valid_wire.source) || ff_pins.contains(&valid_wire.target),
+        "valid wires to the FF"
+    );
+    assert_eq!(
+        valid_wire.net_path.as_deref(),
+        Some("picorv32_soc.g_lane[0].bus.valid"),
+        "wire cross-probes to the bundle member"
+    );
+
+    // The bare interface *instance* stays port-less on its members: its box in
+    // the lane scope shows only its own declared port (clk), no member pins.
+    let lane = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("lane graph");
+    let inst = lane.nodes.iter().find(|n| n.label == "bus").unwrap();
+    assert!(
+        inst.ports.iter().all(|p| p.name != "valid"),
+        "bare instance keeps no member pins: {:?}",
+        inst.ports
+    );
+}
+
+#[test]
 fn constant_tied_inputs_show_their_literal() {
     let d = design();
     let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();

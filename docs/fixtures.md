@@ -53,9 +53,15 @@ picorv32_soc/
 # Traces (needs Verilator; produces BOTH formats from one deterministic run):
 bash fixtures/regen.sh picorv32_soc
 
-# Golden hierarchy (needs the elaborate harness; deterministic):
+# Golden hierarchy (needs the elaborate harness; deterministic). The explicit
+# file order matches ci.yml — a bare *.sv glob would skip picorv32.v:
 uv run --project elaborate svxprobe-elaborate --top picorv32_soc \
-    fixtures/picorv32_soc/rtl/*.sv -o fixtures/picorv32_soc/golden/hierarchy.json
+    fixtures/picorv32_soc/rtl/picorv32.v \
+    fixtures/picorv32_soc/rtl/soc_pkg.sv \
+    fixtures/picorv32_soc/rtl/mem_if.sv \
+    fixtures/picorv32_soc/rtl/soc_mem.sv \
+    fixtures/picorv32_soc/rtl/picorv32_soc.sv \
+    -o fixtures/picorv32_soc/golden/hierarchy.json
 
 # Verify committed traces are still reproducible (structural; restores committed):
 bash fixtures/verify_reproducible.sh picorv32_soc
