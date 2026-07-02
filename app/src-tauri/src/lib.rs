@@ -41,9 +41,11 @@ fn load_design(
 
 /// Designlist flow (#93): elaborate a `.f` filelist with the external pyslang
 /// harness (`svxprobe-elaborate` on PATH), then load the produced model.
+/// `async` so the multi-second subprocess runs off the main thread and the
+/// window keeps painting (Tauri executes non-async commands on the UI thread).
 #[tauri::command]
-fn elaborate_and_load(
-    state: State<AppState>,
+async fn elaborate_and_load(
+    state: State<'_, AppState>,
     filelist: String,
     top: String,
     incdirs: Vec<String>,

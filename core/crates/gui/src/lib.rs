@@ -116,6 +116,12 @@ impl Session {
         excluded: Vec<String>,
         src_root: impl AsRef<Path>,
     ) -> Result<Self> {
+        // Without --top the harness would silently auto-select one; require an
+        // explicit name so the guard below compares against the user's intent.
+        anyhow::ensure!(
+            !top.trim().is_empty(),
+            "a top module name is required to elaborate a designlist"
+        );
         let mut cmd = std::process::Command::new("svxprobe-elaborate");
         cmd.arg("--top").arg(top).arg("-f").arg(filelist);
         for dir in incdirs {
@@ -133,12 +139,14 @@ impl Session {
             );
         }
         let design = svxprobe_ingest::from_slice(&out.stdout)?;
-        // The harness exits 0 even when the top doesn't exist (it elaborates an
-        // empty design); catch that here instead of loading a blank session.
+        // A top that doesn't exist elaborates to an empty design with exit 0;
+        // catch that here instead of loading a blank session, and surface
+        // whatever the harness said on stderr.
         anyhow::ensure!(
             design.doc.design == top,
             "elaboration produced no design for top '{top}' — check the top module name \
-             and the filelist"
+             and the filelist. Harness output: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
         );
         Self::from_design(design, trace, excluded, src_root)
     }

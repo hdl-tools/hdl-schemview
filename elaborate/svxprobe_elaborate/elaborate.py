@@ -836,6 +836,20 @@ def build_model(
     return Elaborator(files, top, include_dirs).build()
 
 
+def _error_report(el: Elaborator) -> Optional[str]:
+    """Rendered compile *errors* from the elaboration, or None when clean.
+    slang reports these as diagnostics, never as an exception — without this a
+    caller (the app's designlist flow, CI) gets an empty/partial model with no
+    explanation."""
+    errors = [d for d in el.comp.getAllDiagnostics() if d.isError()]
+    if not errors:
+        return None
+    try:
+        return str(pyslang.DiagnosticEngine.reportAll(el.sm, errors))
+    except Exception:
+        return f"{len(errors)} compile error(s) (diagnostic rendering failed)"
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Elaborate SV and emit Node-model JSON.")
     ap.add_argument("files", nargs="*", help="SystemVerilog source files.")
@@ -868,7 +882,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not files:
         ap.error("no source files given (pass files and/or -f FILELIST)")
 
-    model = build_model(files, args.top, include_dirs)
+    el = Elaborator(files, args.top, include_dirs)
+    model = el.build()
+    # Compile errors always render to stderr for visibility, but only an empty
+    # design (nothing elaborated) fails the run: slang flags pedantic errors
+    # (e.g. mixed timescale presence) on designs it still elaborates fully, and
+    # the harness stays best-effort about partial models.
+    report = _error_report(el)
+    if report is not None:
+        print(report, file=sys.stderr, end="")
+    if not model["design"]:
+        where = f" for top '{args.top}'" if args.top else ""
+        hint = " (see diagnostics above)" if report is not None else ""
+        print(f"error: elaboration produced no design{where}{hint}", file=sys.stderr)
+        return 1
     text = json.dumps(model, indent=2)
     if args.out == "-":
         sys.stdout.write(text + "\n")
