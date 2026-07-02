@@ -85,28 +85,37 @@ fn source_text_loads() {
 fn hierarchy_tree_is_lazy_and_navigable() {
     let s = session();
 
-    // depth 1: the top plus its direct structural children (the generate
-    // array); grandchildren are not fetched but flagged expandable so the
-    // frontend loads them lazily.
+    // depth 1: the top plus its direct structural children. A generate-for's
+    // array container (`g_lane`) is hoisted away (#107) — the per-iteration
+    // scopes are the tree levels, mirroring the schematic's GenBlock dissolve
+    // but stopping at the iterations. Grandchildren are not fetched but
+    // flagged expandable so the frontend loads them lazily.
     let root = s.hierarchy_tree("picorv32_soc", 1).expect("tree root");
     assert_eq!(root.label, "picorv32_soc");
     assert_eq!(root.path, "picorv32_soc");
     assert!(root.expandable);
-    let arr = root
+    let labels: Vec<&str> = root.children.iter().map(|c| c.label.as_str()).collect();
+    assert!(!labels.contains(&"g_lane"), "container hoisted: {labels:?}");
+    assert!(labels.contains(&"g_lane[1]"), "children: {labels:?}");
+    let lane0 = root
         .children
         .iter()
-        .find(|c| c.label == "g_lane")
-        .expect("generate-array child");
-    assert!(arr.expandable, "array has iterations below");
-    assert!(arr.children.is_empty(), "depth-1 stops here (lazy)");
+        .find(|c| c.label == "g_lane[0]")
+        .expect("iteration child");
+    assert!(lane0.expandable, "iteration has instances below");
+    assert!(lane0.children.is_empty(), "depth-1 stops here (lazy)");
 
-    // depth 2 reaches the iterations in one call.
+    // depth 2 reaches the iterations' instances in one call.
     let deep = s.hierarchy_tree("picorv32_soc", 2).expect("tree root");
-    let arr = deep.children.iter().find(|c| c.label == "g_lane").unwrap();
+    let lane0 = deep
+        .children
+        .iter()
+        .find(|c| c.label == "g_lane[0]")
+        .unwrap();
     assert!(
-        arr.children.iter().any(|c| c.label == "g_lane[0]"),
-        "iterations: {:?}",
-        arr.children.iter().map(|c| &c.label).collect::<Vec<_>>()
+        lane0.children.iter().any(|c| c.label == "core"),
+        "instances: {:?}",
+        lane0.children.iter().map(|c| &c.label).collect::<Vec<_>>()
     );
 
     // Expanding a child = re-querying with its path (what the frontend does).

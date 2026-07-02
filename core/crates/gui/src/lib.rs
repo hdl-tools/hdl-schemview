@@ -82,6 +82,48 @@ fn is_tree_scope(design: &Design, id: NodeId) -> bool {
     )
 }
 
+/// A generate-for's array container: a named `GenBlock` (`g_lane`) whose
+/// children are the unnamed per-iteration `GenBlock`s (`g_lane[0]`, …). The
+/// tree hoists these one level (#107) — iterations show, the container
+/// doesn't — mirroring the schematic's GenBlock dissolve but keeping the
+/// iterations as navigable scopes. Named if/case generate blocks have no
+/// unnamed GenBlock children and stay visible.
+fn is_gen_array_container(design: &Design, id: NodeId) -> bool {
+    design.node(id).is_some_and(|n| {
+        n.kind == NodeKind::GenBlock
+            && !n.name.is_empty()
+            && n.children.iter().any(|&c| {
+                design
+                    .node(c)
+                    .is_some_and(|k| k.kind == NodeKind::GenBlock && k.name.is_empty())
+            })
+    })
+}
+
+/// The tree children of a scope: its structural-scope children, with each
+/// generate-array container replaced by its iteration scopes.
+fn tree_children(design: &Design, children: &[NodeId]) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    for &c in children {
+        if !is_tree_scope(design, c) {
+            continue;
+        }
+        if is_gen_array_container(design, c) {
+            if let Some(cn) = design.node(c) {
+                out.extend(
+                    cn.children
+                        .iter()
+                        .copied()
+                        .filter(|&g| is_tree_scope(design, g)),
+                );
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// A loaded design + trace: the state behind the GUI.
 pub struct Session {
     cross: CrossProbe,
@@ -210,12 +252,7 @@ impl Session {
     fn tree_node(&self, id: NodeId, depth: usize) -> Option<TreeNode> {
         let design = self.cross.design();
         let n = design.node(id)?;
-        let kids: Vec<NodeId> = n
-            .children
-            .iter()
-            .copied()
-            .filter(|&c| is_tree_scope(design, c))
-            .collect();
+        let kids = tree_children(design, &n.children);
         let children = if depth > 0 {
             kids.iter()
                 .filter_map(|&c| self.tree_node(c, depth - 1))
