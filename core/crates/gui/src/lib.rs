@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use svxprobe_matcher::MatchOptions;
-use svxprobe_model::{EnumMember, NodeId};
-use svxprobe_schematic::{cone, expand, scope_graph, SchematicGraph};
+use svxprobe_model::{Design, EnumMember, NodeId, NodeKind};
+use svxprobe_schematic::{cone, expand, module_of, scope_graph, SchematicGraph};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
@@ -54,6 +54,32 @@ pub struct ProbeResponse {
     pub source: Option<SourceLoc>,
     pub wave: WaveLink,
     pub alternatives: Vec<NodeRef>,
+}
+
+/// One node of the lazy instance-hierarchy tree (#92): a structural scope with
+/// its children populated down to the requested depth. `expandable` flags an
+/// unexpanded node that has more levels below, so the frontend fetches them on
+/// demand instead of loading the whole tree at startup.
+#[derive(Debug, Clone, Serialize)]
+pub struct TreeNode {
+    /// Last path segment (e.g. `g_lane[0]`, `memory`).
+    pub label: String,
+    /// Canonical model path — feeds straight into `scope_graph`/`setScope`.
+    pub path: String,
+    /// Module/interface type sublabel (same recovery as schematic boxes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    pub expandable: bool,
+    pub children: Vec<TreeNode>,
+}
+
+/// A structural scope the hierarchy tree shows — the kinds `scope_graph`
+/// accepts as roots, so clicking any tree node yields a schematic.
+fn is_tree_scope(design: &Design, id: NodeId) -> bool {
+    matches!(
+        design.node(id).map(|n| n.kind),
+        Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
+    )
 }
 
 /// A loaded design + trace: the state behind the GUI.
@@ -106,6 +132,46 @@ impl Session {
 
     pub fn scope_graph(&self, scope: &str) -> Option<SchematicGraph> {
         scope_graph(self.cross.design(), scope)
+    }
+
+    /// The instance-hierarchy tree under `scope`, `depth` levels deep (#92).
+    /// Tree nodes are the structural scopes (`Instance` / `GenBlock` — the same
+    /// kinds `scope_graph` accepts as roots, so every node is navigable); the
+    /// frontend expands lazily by re-calling with a child's path. `None` when
+    /// `scope` names no structural node.
+    pub fn hierarchy_tree(&self, scope: &str, depth: usize) -> Option<TreeNode> {
+        let design = self.cross.design();
+        let root = design
+            .nodes_at_path(scope)
+            .iter()
+            .copied()
+            .find(|&id| is_tree_scope(design, id))?;
+        self.tree_node(root, depth)
+    }
+
+    fn tree_node(&self, id: NodeId, depth: usize) -> Option<TreeNode> {
+        let design = self.cross.design();
+        let n = design.node(id)?;
+        let kids: Vec<NodeId> = n
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| is_tree_scope(design, c))
+            .collect();
+        let children = if depth > 0 {
+            kids.iter()
+                .filter_map(|&c| self.tree_node(c, depth - 1))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Some(TreeNode {
+            label: n.path.rsplit('.').next().unwrap_or(&n.path).to_string(),
+            path: n.path.clone(),
+            module: module_of(design, n),
+            expandable: !kids.is_empty(),
+            children,
+        })
     }
 
     pub fn expand(&self, node: NodeId) -> Option<SchematicGraph> {

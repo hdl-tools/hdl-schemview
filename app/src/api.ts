@@ -1,6 +1,6 @@
 // Typed wrappers over the Tauri commands exposed by app/src-tauri.
 import { invoke } from "@tauri-apps/api/core";
-import type { ProbeResponse, SchematicGraph, TraceTimescale, ValueChange } from "./types";
+import type { ProbeResponse, SchematicGraph, TraceTimescale, TreeNode, ValueChange } from "./types";
 
 export const api = {
   loadDesign: (model: string, trace: string, excluded: string[], srcRoot: string) =>
@@ -8,6 +8,8 @@ export const api = {
 
   scopeGraph: (scope: string) => invoke<SchematicGraph>("scope_graph", { scope }),
   expandNode: (node: number) => invoke<SchematicGraph>("expand_node", { node }),
+  hierarchyTree: (scope: string, depth: number) =>
+    invoke<TreeNode>("hierarchy_tree", { scope, depth }),
   cone: (net: number, dir: string, depth: number) =>
     invoke<SchematicGraph>("cone", { net, dir, depth }),
 
