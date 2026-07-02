@@ -257,10 +257,37 @@ class Elaborator:
                 # side of the schematic (inputs left, outputs right).
                 d = str(getattr(sym, "direction", "")).split(".")[-1]
                 node["dir"] = {"In": "in", "Out": "out", "InOut": "inout"}.get(d)
+            if kind == "Modport":
+                # Per-modport membership + directions as model data (#95). The
+                # modport stays a view (no children/drivers/loads); this is
+                # descriptive metadata for schematic modport rendering.
+                node["members"] = self._modport_members(sym)
         self.nodes.append(node)
         if parent is not None:
             self.nodes[parent]["children"].append(nid)
         return nid
+
+    @staticmethod
+    def _modport_members(sym: Any) -> list[dict[str, str]]:
+        """Membership of a modport view: each bundle member visible through it,
+        with its direction — straight from slang's ``ModportPort`` (``direction``
+        + ``internalSymbol``, no name heuristics). The member's own node lives in
+        the parent interface instance at ``<parent path>.<name>``; members whose
+        underlying signal slang cannot resolve are skipped (never guess)."""
+        out: list[dict[str, str]] = []
+        for mp in sym:
+            if _kind_name(mp) != "ModportPort":
+                continue
+            if getattr(mp, "internalSymbol", None) is None:
+                continue
+            d = str(getattr(mp, "direction", "")).split(".")[-1]
+            out.append(
+                {
+                    "name": getattr(mp, "name", "") or "",
+                    "dir": {"In": "in", "Out": "out", "InOut": "inout"}.get(d, "inout"),
+                }
+            )
+        return out
 
     def _add_modport_pins(self, sym: Any, parent: int) -> None:
         """Directional member pins for a modport-specialized interface port.

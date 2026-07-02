@@ -793,7 +793,41 @@
       "const": null,
       "modport": null,
       "drivers": [],
-      "loads": []
+      "loads": [],
+      "members": [
+        {
+          "name": "clk",
+          "dir": "in"
+        },
+        {
+          "name": "ready",
+          "dir": "in"
+        },
+        {
+          "name": "rdata",
+          "dir": "in"
+        },
+        {
+          "name": "valid",
+          "dir": "out"
+        },
+        {
+          "name": "instr",
+          "dir": "out"
+        },
+        {
+          "name": "addr",
+          "dir": "out"
+        },
+        {
+          "name": "wdata",
+          "dir": "out"
+        },
+        {
+          "name": "wstrb",
+          "dir": "out"
+        }
+      ]
     },
     {
       "id": 25,
@@ -822,7 +856,41 @@
       "const": null,
       "modport": null,
       "drivers": [],
-      "loads": []
+      "loads": [],
+      "members": [
+        {
+          "name": "clk",
+          "dir": "in"
+        },
+        {
+          "name": "valid",
+          "dir": "in"
+        },
+        {
+          "name": "instr",
+          "dir": "in"
+        },
+        {
+          "name": "addr",
+          "dir": "in"
+        },
+        {
+          "name": "wdata",
+          "dir": "in"
+        },
+        {
+          "name": "wstrb",
+          "dir": "in"
+        },
+        {
+          "name": "ready",
+          "dir": "out"
+        },
+        {
+          "name": "rdata",
+          "dir": "out"
+        }
+      ]
     },
     {
       "id": 26,
@@ -12219,7 +12287,41 @@
       "const": null,
       "modport": null,
       "drivers": [],
-      "loads": []
+      "loads": [],
+      "members": [
+        {
+          "name": "clk",
+          "dir": "in"
+        },
+        {
+          "name": "ready",
+          "dir": "in"
+        },
+        {
+          "name": "rdata",
+          "dir": "in"
+        },
+        {
+          "name": "valid",
+          "dir": "out"
+        },
+        {
+          "name": "instr",
+          "dir": "out"
+        },
+        {
+          "name": "addr",
+          "dir": "out"
+        },
+        {
+          "name": "wdata",
+          "dir": "out"
+        },
+        {
+          "name": "wstrb",
+          "dir": "out"
+        }
+      ]
     },
     {
       "id": 404,
@@ -12248,7 +12350,41 @@
       "const": null,
       "modport": null,
       "drivers": [],
-      "loads": []
+      "loads": [],
+      "members": [
+        {
+          "name": "clk",
+          "dir": "in"
+        },
+        {
+          "name": "valid",
+          "dir": "in"
+        },
+        {
+          "name": "instr",
+          "dir": "in"
+        },
+        {
+          "name": "addr",
+          "dir": "in"
+        },
+        {
+          "name": "wdata",
+          "dir": "in"
+        },
+        {
+          "name": "wstrb",
+          "dir": "in"
+        },
+        {
+          "name": "ready",
+          "dir": "out"
+        },
+        {
+          "name": "rdata",
+          "dir": "out"
+        }
+      ]
     },
     {
       "id": 405,
