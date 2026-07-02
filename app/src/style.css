@@ -43,6 +43,18 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #breadcrumb span { cursor:pointer; }
 #breadcrumb span:hover { text-decoration:underline; }
 #panes { flex:1; display:flex; min-height:0; }
+/* Instance-hierarchy tree: the top-left slot (#92). Fixed width; the tree
+   scrolls inside it. */
+#hier-pane { flex:0 0 220px; min-width:140px; }
+#hierarchy { flex:1; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; }
+#hierarchy ul { list-style:none; margin:0; padding-left:14px; }
+#hierarchy > ul { padding-left:2px; }
+#hierarchy .tnode { display:flex; align-items:baseline; gap:3px; padding:1px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; }
+#hierarchy .tnode:hover .tlabel { text-decoration:underline; }
+#hierarchy .tnode.sel { background:var(--hl); }
+#hierarchy .twist { width:12px; flex:0 0 12px; text-align:center; color:var(--muted); cursor:pointer; }
+#hierarchy .tlabel { color:var(--fg); }
+#hierarchy .tmod { color:var(--sublabel); font-size:11px; }
 /* min-width:0 lets the schematic pane shrink to its flex share so a zoomed-up
    SVG scrolls inside #schematic (overflow:auto) instead of widening the pane and
    pushing the source/waveform panes off-screen. */

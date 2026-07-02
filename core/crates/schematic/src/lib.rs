@@ -220,7 +220,9 @@ fn with_select(base: String, select: &Option<String>) -> String {
 /// The module/definition type of an instance, taken from the basename (no
 /// extension) of the file that defines it (`…/picorv32.v` → `picorv32`). This is
 /// a best-effort recovery until the harness emits the real definition name.
-fn module_of(design: &Design, node: &svxprobe_model::Node) -> Option<String> {
+/// Public so the GUI's hierarchy tree can sublabel its nodes the same way the
+/// schematic sublabels its boxes.
+pub fn module_of(design: &Design, node: &svxprobe_model::Node) -> Option<String> {
     // Module instances and interface instances both carry a defining-file sublabel
     // (e.g. `picorv32`, `mem_if`); a consuming interface port has no def_range and
     // falls through to `None`.

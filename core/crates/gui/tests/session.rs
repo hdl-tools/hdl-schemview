@@ -80,3 +80,54 @@ fn source_text_loads() {
     assert!(text.contains("module"));
     let _ = g;
 }
+
+#[test]
+fn hierarchy_tree_is_lazy_and_navigable() {
+    let s = session();
+
+    // depth 1: the top plus its direct structural children (the generate
+    // array); grandchildren are not fetched but flagged expandable so the
+    // frontend loads them lazily.
+    let root = s.hierarchy_tree("picorv32_soc", 1).expect("tree root");
+    assert_eq!(root.label, "picorv32_soc");
+    assert_eq!(root.path, "picorv32_soc");
+    assert!(root.expandable);
+    let arr = root
+        .children
+        .iter()
+        .find(|c| c.label == "g_lane")
+        .expect("generate-array child");
+    assert!(arr.expandable, "array has iterations below");
+    assert!(arr.children.is_empty(), "depth-1 stops here (lazy)");
+
+    // depth 2 reaches the iterations in one call.
+    let deep = s.hierarchy_tree("picorv32_soc", 2).expect("tree root");
+    let arr = deep.children.iter().find(|c| c.label == "g_lane").unwrap();
+    assert!(
+        arr.children.iter().any(|c| c.label == "g_lane[0]"),
+        "iterations: {:?}",
+        arr.children.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+
+    // Expanding a child = re-querying with its path (what the frontend does).
+    let lane = s
+        .hierarchy_tree("picorv32_soc.g_lane[0]", 1)
+        .expect("lane subtree");
+    let labels: Vec<&str> = lane.children.iter().map(|c| c.label.as_str()).collect();
+    assert!(labels.contains(&"core"), "children: {labels:?}");
+    assert!(labels.contains(&"memory"), "children: {labels:?}");
+    // Interface instances are not structural scopes (scope_graph rejects them
+    // as roots), so the tree keeps them out — every node stays navigable.
+    assert!(!labels.contains(&"bus"), "children: {labels:?}");
+    let core = lane.children.iter().find(|c| c.label == "core").unwrap();
+    assert_eq!(core.module.as_deref(), Some("picorv32"), "module sublabel");
+
+    // Every tree node's path opens as a schematic scope.
+    for c in &lane.children {
+        assert!(s.scope_graph(&c.path).is_some(), "{} is navigable", c.path);
+    }
+
+    // Unknown / non-structural scopes yield None.
+    assert!(s.hierarchy_tree("nope", 1).is_none());
+    assert!(s.hierarchy_tree("picorv32_soc.g_lane[0].bus", 1).is_none());
+}

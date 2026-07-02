@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 
-use svxprobe_gui::{ProbeResponse, Session};
+use svxprobe_gui::{ProbeResponse, Session, TreeNode};
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
 use tauri::State;
@@ -49,6 +49,14 @@ fn scope_graph(state: State<AppState>, scope: String) -> CmdResult<SchematicGrap
 #[tauri::command]
 fn expand_node(state: State<AppState>, node: u32) -> CmdResult<SchematicGraph> {
     with_session(&state, |s| s.expand(node).ok_or_else(|| "not expandable".into()))
+}
+
+#[tauri::command]
+fn hierarchy_tree(state: State<AppState>, scope: String, depth: usize) -> CmdResult<TreeNode> {
+    with_session(&state, |s| {
+        s.hierarchy_tree(&scope, depth)
+            .ok_or_else(|| format!("scope not found: {scope}"))
+    })
 }
 
 #[tauri::command]
@@ -107,6 +115,7 @@ pub fn run() {
             load_design,
             scope_graph,
             expand_node,
+            hierarchy_tree,
             cone,
             probe_signal,
             probe_node,

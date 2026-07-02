@@ -18,8 +18,10 @@ import type {
   SchNode,
   SchPort,
   TraceTimescale,
+  TreeNode,
   WaveLink,
 } from "./types";
+import { scopeFrames } from "./tree";
 import {
   defaultDisplayUnit,
   displayScale,
@@ -118,6 +120,7 @@ async function load() {
     state.waveUnit = defaultDisplayUnit(state.timescale);
     syncUnitSelect();
     renderWaves();
+    await initHierarchy(top);
     await setScope(top, top);
   } catch (e) {
     $("status").textContent = `error: ${e}`;
@@ -131,6 +134,7 @@ async function setScope(path: string, label: string, push = true) {
   state.graph = graph;
   if (push) state.stack.push({ path, label });
   renderBreadcrumb();
+  highlightTree(path);
   await renderSchematic(graph, viewCache.get(path));
 }
 
@@ -161,6 +165,97 @@ function renderBreadcrumb() {
     bc.appendChild(s);
     if (i < state.stack.length - 1) bc.appendChild(document.createTextNode(" / "));
   });
+}
+
+// -- hierarchy tree (#92) ----------------------------------------------------
+
+// Rendered tree rows keyed by scope path, for selection-highlight sync.
+const treeItems = new Map<string, HTMLElement>();
+
+// Build (or rebuild, on model reload) the tree pane: the design top plus its
+// direct children; deeper levels are fetched lazily on expand.
+async function initHierarchy(top: string) {
+  const host = $("hierarchy");
+  host.innerHTML = "";
+  treeItems.clear();
+  const root = await api.hierarchyTree(top, 1);
+  const ul = document.createElement("ul");
+  ul.appendChild(treeItem(root));
+  host.appendChild(ul);
+  highlightTree(top);
+}
+
+function treeItem(node: TreeNode): HTMLLIElement {
+  const li = document.createElement("li");
+  const row = document.createElement("div");
+  row.className = "tnode";
+  const twist = document.createElement("span");
+  twist.className = "twist";
+  const label = document.createElement("span");
+  label.className = "tlabel";
+  label.textContent = node.label;
+  row.appendChild(twist);
+  row.appendChild(label);
+  // Module sublabel, unless it repeats the label (e.g. the design top).
+  if (node.module && node.module !== node.label) {
+    const mod = document.createElement("span");
+    mod.className = "tmod";
+    mod.textContent = `(${node.module})`;
+    row.appendChild(mod);
+  }
+  li.appendChild(row);
+  treeItems.set(node.path, row);
+
+  let kids: HTMLUListElement | null = null;
+  const attachKids = (children: TreeNode[]) => {
+    const ul = document.createElement("ul");
+    for (const c of children) ul.appendChild(treeItem(c));
+    li.appendChild(ul);
+    kids = ul;
+    return ul;
+  };
+  if (node.children.length) attachKids(node.children);
+
+  let open = node.children.length > 0;
+  const setOpen = (o: boolean) => {
+    open = o;
+    twist.textContent = node.expandable ? (open ? "▾" : "▸") : "";
+    if (kids) kids.style.display = open ? "" : "none";
+  };
+  setOpen(open);
+  twist.onclick = async (e) => {
+    e.stopPropagation();
+    if (!node.expandable) return;
+    if (!kids) {
+      // Lazy: fetch this node's direct children on first expand. Reserve the
+      // list synchronously so a second click during the fetch can't attach a
+      // duplicate one.
+      const ul = attachKids([]);
+      const sub = await api.hierarchyTree(node.path, 1);
+      for (const c of sub.children) ul.appendChild(treeItem(c));
+    }
+    setOpen(!open);
+  };
+  // Clicking the row navigates the schematic to this scope.
+  row.onclick = () => jumpToScope(node.path);
+  return li;
+}
+
+// Navigate to an arbitrary scope from the tree: the breadcrumb becomes the
+// scope's ancestor chain (not the drill-down history), then the schematic
+// loads it like any other navigation.
+function jumpToScope(path: string) {
+  rememberCurrentView();
+  const frames = scopeFrames(path);
+  state.stack = frames.slice(0, -1);
+  setScope(path, frames[frames.length - 1].label);
+}
+
+// Keep the tree's selection in step with whatever sets the scope (tree click,
+// schematic drill, breadcrumb). A scope deeper than the fetched tree has no
+// row yet — the highlight simply clears until that branch is expanded.
+function highlightTree(path: string) {
+  for (const [p, el] of treeItems) el.classList.toggle("sel", p === path);
 }
 
 // -- schematic -------------------------------------------------------------

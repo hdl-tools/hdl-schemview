@@ -76,6 +76,21 @@ export interface ProbeResponse {
   wave: WaveLink;
   alternatives: NodeRef[];
 }
+/**
+ * One node of the lazy instance-hierarchy tree (#92). `children` is populated
+ * to the requested depth only; `expandable` flags nodes with more levels below,
+ * fetched on demand via `hierarchy_tree(path, 1)`.
+ */
+export interface TreeNode {
+  /** Last path segment (e.g. "g_lane[0]", "memory"). */
+  label: string;
+  /** Canonical model path — feeds setScope / scope_graph. */
+  path: string;
+  /** Module/interface type sublabel (e.g. "picorv32"). */
+  module?: string;
+  expandable: boolean;
+  children: TreeNode[];
+}
 export interface ValueChange {
   time: number;
   value: string;

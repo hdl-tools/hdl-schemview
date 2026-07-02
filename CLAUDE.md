@@ -45,7 +45,7 @@ SystemVerilog RTL
                  ├─ xprobe          → cross-probe resolution
                  └─ wave            → trace ValueChanges (wellen)
                       └─ gui        → Session + serializable DTOs (UI-toolkit-free, CI-testable)
-                           └─ app/src-tauri/src/lib.rs  → 10 #[tauri::command]s over Mutex<Session>
+                           └─ app/src-tauri/src/lib.rs  → 11 #[tauri::command]s over Mutex<Session>
                                 └─ app/src/api.ts         → typed invoke() wrappers
                                      └─ app/src/main.ts    → 3 panes: schematic (SVG/elk.ts), source, waveform (canvas)
 ```
@@ -70,11 +70,12 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 
 | File | Role |
 | --- | --- |
-| `app/index.html` | Three-pane layout + toolbar/breadcrumb. |
+| `app/index.html` | Pane layout (hierarchy tree / schematic / source / waveform) + toolbar/breadcrumb. |
 | `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache, pinned waveform traces). |
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
 | `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |
 | `app/src/elk.ts` (+ `elk.test.ts`) | `SchematicGraph` → ELK layout → SVG DOM. |
+| `app/src/tree.ts` (+ `tree.test.ts`) | Pure helpers for the hierarchy tree pane (breadcrumb frames from a scope path). |
 | `app/src/wave.ts` (+ `wave.test.ts`) | Waveform geometry (time-window mapping, zoom/pan, segments, value-at-time, ruler ticks) + per-trace/ruler canvas drawing. |
 | `app/src/style.css` | Theme vars. Dark default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
 
@@ -109,6 +110,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 | `load_design` | `model, trace, excluded[], srcRoot` | `String` (top scope) |
 | `scope_graph` | `scope` | `SchematicGraph` |
 | `expand_node` | `node` (id) | `SchematicGraph` |
+| `hierarchy_tree` | `scope, depth` | `TreeNode` (lazy: children to `depth`, `expandable` beyond) |
 | `cone` | `net` (id), `dir`, `depth` | `SchematicGraph` |
 | `probe_node` | `path, context?` | `ProbeResponse \| null` |
 | `probe_signal` | `fullName, context?` | `ProbeResponse \| null` |
