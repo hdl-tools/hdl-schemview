@@ -100,10 +100,26 @@ pub struct Node {
     /// `mem_if.mem bus`); `None` otherwise.
     #[serde(default)]
     pub modport: Option<String>,
+    /// Membership of a `Modport` node: each bundle member visible through the
+    /// view, with its direction (slang `ModportPort.direction`). Descriptive
+    /// metadata — the modport stays a view (no children/drivers/loads); the
+    /// member's own node lives in the parent interface instance at
+    /// `<parent path>.<name>` (see [`Design::modport_member_nodes`]).
+    /// `None` on non-modport nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<ModportMember>>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
     pub loads: Vec<NodeId>,
+}
+
+/// One member of a modport view: the member signal's name and its direction
+/// through that view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModportMember {
+    pub name: String,
+    pub dir: Dir,
 }
 
 /// Provenance of a serialization.
@@ -277,6 +293,21 @@ impl Design {
         self.path_index.get(path).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// Resolve a modport member (by name) to the underlying signal node(s).
+    /// The member lives in the modport's parent interface instance, so its
+    /// canonical path is `<parent path>.<name>` — a pure path lookup, no
+    /// heuristics. Empty when `modport` has no parent or the path is unknown.
+    pub fn modport_member_nodes(&self, modport: NodeId, member: &str) -> &[NodeId] {
+        let parent = self
+            .node(modport)
+            .and_then(|n| n.parent)
+            .and_then(|p| self.node(p));
+        match parent {
+            Some(p) => self.nodes_at_path(&format!("{}.{}", p.path, member)),
+            None => &[],
+        }
+    }
+
     /// Nodes whose def/inst range covers `offset` in `file` (source → node).
     pub fn nodes_at_source(&self, file: u32, offset: usize) -> Vec<NodeId> {
         match self.src_index.get(&file) {
@@ -322,6 +353,7 @@ mod tests {
             dir: None,
             const_value: None,
             modport: None,
+            members: None,
             drivers: vec![],
             loads: vec![],
         }
@@ -399,6 +431,37 @@ mod tests {
         assert_eq!(d.edges_of(1).len(), 1);
         assert_eq!(d.edges_of(2)[0].dir, Dir::Out);
         assert!(d.edges_of(0).is_empty());
+    }
+
+    #[test]
+    fn modport_member_nodes_resolve_via_parent_path() {
+        // A Modport node carries membership metadata; each member's own node
+        // lives in the parent interface instance at `<parent path>.<name>`.
+        let mut bus = node(1, "t.bus", NodeKind::Interface, None);
+        bus.parent = Some(0);
+        bus.children = vec![2, 3];
+        let mut valid = node(2, "t.bus.valid", NodeKind::Var, None);
+        valid.parent = Some(1);
+        let mut mp = node(3, "t.bus.mem", NodeKind::Modport, None);
+        mp.parent = Some(1);
+        mp.members = Some(vec![ModportMember {
+            name: "valid".into(),
+            dir: Dir::In,
+        }]);
+        let doc = Document {
+            schema_version: 1,
+            design: "t".into(),
+            generator: Generator::default(),
+            files: vec![],
+            nodes: vec![node(0, "t", NodeKind::Instance, None), bus, valid, mp],
+            edges: vec![],
+            enums: HashMap::new(),
+        };
+        let d = Design::from_document(doc);
+        assert_eq!(d.modport_member_nodes(3, "valid"), &[2]);
+        assert!(d.modport_member_nodes(3, "nope").is_empty());
+        // The root has no parent: no members to resolve.
+        assert!(d.modport_member_nodes(0, "valid").is_empty());
     }
 
     #[test]

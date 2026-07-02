@@ -200,6 +200,38 @@ mod tests {
     }
 
     #[test]
+    fn golden_modport_membership_resolves() {
+        // Every Modport node in the fixture carries its membership (#95), and
+        // each member resolves to a real signal in the parent interface
+        // instance via `Design::modport_member_nodes` — the lookup the
+        // schematic's modport rendering builds on.
+        let golden = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/picorv32_soc/golden/hierarchy.json");
+        let d = from_path(golden).unwrap();
+        let modports: Vec<_> = d
+            .nodes()
+            .iter()
+            .filter(|n| n.kind == NodeKind::Modport)
+            .collect();
+        assert!(!modports.is_empty(), "fixture has modport nodes");
+        for mp in modports {
+            let members = mp
+                .members
+                .as_ref()
+                .unwrap_or_else(|| panic!("modport {} carries members", mp.path));
+            assert!(!members.is_empty(), "modport {} has members", mp.path);
+            for m in members {
+                assert!(
+                    !d.modport_member_nodes(mp.id, &m.name).is_empty(),
+                    "member {}.{} resolves to a signal node",
+                    mp.path,
+                    m.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn golden_fixture_passes_name_uniqueness() {
         // The committed fixture exercises the dual-node pattern heavily (every port
         // has a backing net/var) plus path-distinguished synthetic logic nodes;

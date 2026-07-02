@@ -77,6 +77,36 @@ def test_modports_emitted(model: dict) -> None:
     assert mem_mp and mem_mp["kind"] == "Modport", mem_mp
 
 
+def test_modport_nodes_carry_membership(model: dict) -> None:
+    """Each Modport node carries its member signals + per-member direction as
+    model data (#95): the two views of mem_if expose the same members with
+    inverse driving directions. The modport stays a view — no children."""
+    by = {n["path"]: n for n in model["nodes"]}
+    core_mp = by["picorv32_soc.g_lane[0].bus.core"]
+    mem_mp = by["picorv32_soc.g_lane[0].bus.mem"]
+
+    def dirs(node: dict) -> dict[str, str]:
+        return {m["name"]: m["dir"] for m in node["members"]}
+
+    assert dirs(mem_mp) == {
+        "clk": "in",
+        "valid": "in",
+        "instr": "in",
+        "addr": "in",
+        "wdata": "in",
+        "wstrb": "in",
+        "ready": "out",
+        "rdata": "out",
+    }, dirs(mem_mp)
+    core = dirs(core_mp)
+    assert core["valid"] == "out" and core["ready"] == "in", core
+    assert set(core) == set(dirs(mem_mp)), "both views expose the same members"
+    assert core_mp["children"] == [], "modport stays a view (no children)"
+    # Membership is modport metadata only: other kinds don't carry the key.
+    bus = by["picorv32_soc.g_lane[0].bus"]
+    assert "members" not in bus
+
+
 def test_consuming_interface_port_records_modport(model: dict) -> None:
     """A modport-specialized interface port (`mem_if.mem bus`) is an `Interface`
     node recording the view it selects, so the connection resolves to its own node

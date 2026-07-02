@@ -78,6 +78,15 @@
         }
       }
     },
+    "modportMember": {
+      "type": "object",
+      "required": ["name", "dir"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Member signal name within the interface." },
+        "dir": { "type": "string", "enum": ["in", "out", "inout"], "description": "Direction of the member through this modport view." }
+      }
+    },
     "location": {
       "type": "object",
       "required": ["line", "col", "offset"],
@@ -128,6 +137,11 @@
         "modport": {
           "type": ["string", "null"],
           "description": "View name on a modport-specialized interface port (e.g. \"mem\" for `mem_if.mem bus`); null otherwise."
+        },
+        "members": {
+          "type": ["array", "null"],
+          "description": "Membership of a Modport node: each bundle member visible through the view, with its direction (slang ModportPort.direction). Descriptive metadata -- the modport stays a view; the member's own node lives in the parent interface instance at `<parent path>.<name>`. Absent/null on non-modport nodes.",
+          "items": { "$ref": "#/$defs/modportMember" }
         },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
