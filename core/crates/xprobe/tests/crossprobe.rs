@@ -158,3 +158,47 @@ fn not_in_trace_fst() {
 fn not_in_trace_vcd() {
     not_in_trace("vcd");
 }
+
+/// A source click on a modport member token (`valid` inside `modport mem (...)`,
+/// the modport pin's def_range) must still reach the member's waveform: the pin
+/// is a view node, and the wave link lives on its same-path sibling (the member
+/// Var), which the selection's path-equivalence set carries (#64).
+fn modport_pin_click_reaches_wave(ext: &str) {
+    let cp = build(ext);
+    // The pin shares the member's path; it is the node whose parent is the
+    // modport-qualified Interface node (the member Var's parent is not).
+    let pin = cp
+        .design()
+        .nodes_at_path("picorv32_soc.g_lane[0].bus.valid")
+        .iter()
+        .filter_map(|&id| cp.design().node(id))
+        .find(|n| {
+            n.parent
+                .and_then(|p| cp.design().node(p))
+                .is_some_and(|p| p.modport.is_some())
+        })
+        .expect("the modport pin node");
+    let def = pin.def_range.expect("pin has a def range");
+
+    let res = cp
+        .from_source(def.file, def.start.offset as usize)
+        .expect("modport member token resolves");
+    assert_eq!(
+        path_of(&cp, res.selection.anchor),
+        "picorv32_soc.g_lane[0].bus.valid",
+        "[{ext}] anchors the member path"
+    );
+    assert!(
+        matches!(cp.to_wave(&res.selection), WaveTarget::Linked { .. }),
+        "[{ext}] a modport pin click reaches the member's wave link"
+    );
+}
+
+#[test]
+fn modport_pin_click_reaches_wave_fst() {
+    modport_pin_click_reaches_wave("fst");
+}
+#[test]
+fn modport_pin_click_reaches_wave_vcd() {
+    modport_pin_click_reaches_wave("vcd");
+}
