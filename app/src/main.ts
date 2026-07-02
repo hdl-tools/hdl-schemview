@@ -103,12 +103,47 @@ const context = () => (state.stack.length ? state.stack[state.stack.length - 1].
 
 // -- load ------------------------------------------------------------------
 
+// Which design-input flow the toolbar is set to: a pre-elaborated model JSON,
+// or a designlist (.f) elaborated on load by the external harness (#93).
+function loadMode(): string {
+  return ($("load-mode") as HTMLSelectElement).value;
+}
+
+// Show the inputs for the selected flow (model path vs filelist/top/incdirs).
+function syncLoadMode() {
+  const filelist = loadMode() === "filelist";
+  $("model").classList.toggle("hidden", filelist);
+  for (const id of ["filelist", "top", "incdir"]) $(id).classList.toggle("hidden", !filelist);
+}
+
 async function load() {
   const model = (($("model") as HTMLInputElement).value || "").trim();
   const trace = (($("trace") as HTMLInputElement).value || "").trim();
   const srcRoot = (($("srcroot") as HTMLInputElement).value || ".").trim();
+  // Elaboration can take seconds; block re-entry until this load settles.
+  const button = $("load") as HTMLButtonElement;
+  button.disabled = true;
   try {
-    const top = await api.loadDesign(model, trace, ["TOP", "tb", "soc_pkg"], srcRoot);
+    let top: string;
+    if (loadMode() === "filelist") {
+      const filelist = (($("filelist") as HTMLInputElement).value || "").trim();
+      const topName = (($("top") as HTMLInputElement).value || "").trim();
+      const incdirs = (($("incdir") as HTMLInputElement).value || "")
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      $("status").textContent = "elaborating…";
+      top = await api.elaborateAndLoad(
+        filelist,
+        topName,
+        incdirs,
+        trace,
+        ["TOP", "tb", "soc_pkg"],
+        srcRoot,
+      );
+    } else {
+      top = await api.loadDesign(model, trace, ["TOP", "tb", "soc_pkg"], srcRoot);
+    }
     $("status").textContent = `loaded ${top}`;
     state.stack = [];
     viewCache.clear();
@@ -124,6 +159,8 @@ async function load() {
     await setScope(top, top);
   } catch (e) {
     $("status").textContent = `error: ${e}`;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -1776,10 +1813,14 @@ function setupWaveInteraction() {
 function init() {
   ($("model") as HTMLInputElement).value =
     "../../fixtures/picorv32_soc/golden/hierarchy.json";
+  ($("filelist") as HTMLInputElement).value = "../../fixtures/picorv32_soc/picorv32_soc.f";
+  ($("top") as HTMLInputElement).value = "picorv32_soc";
   ($("trace") as HTMLInputElement).value =
     "../../fixtures/picorv32_soc/traces/picorv32_soc.fst";
   ($("srcroot") as HTMLInputElement).value = "../..";
   $("load").addEventListener("click", load);
+  $("load-mode").addEventListener("change", syncLoadMode);
+  syncLoadMode();
   initTheme();
   setupZoom();
   setupWaveInteraction();

@@ -39,6 +39,26 @@ fn load_design(
     Ok(top)
 }
 
+/// Designlist flow (#93): elaborate a `.f` filelist with the external pyslang
+/// harness (`svxprobe-elaborate` on PATH), then load the produced model.
+#[tauri::command]
+fn elaborate_and_load(
+    state: State<AppState>,
+    filelist: String,
+    top: String,
+    incdirs: Vec<String>,
+    trace: String,
+    excluded: Vec<String>,
+    src_root: String,
+) -> CmdResult<String> {
+    let session =
+        Session::elaborate_and_load(&filelist, &top, &incdirs, &trace, excluded, &src_root)
+            .map_err(|e| e.to_string())?;
+    let top = session.design_top();
+    *state.0.lock().map_err(|e| e.to_string())? = Some(session);
+    Ok(top)
+}
+
 #[tauri::command]
 fn scope_graph(state: State<AppState>, scope: String) -> CmdResult<SchematicGraph> {
     with_session(&state, |s| {
@@ -113,6 +133,7 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             load_design,
+            elaborate_and_load,
             scope_graph,
             expand_node,
             hierarchy_tree,

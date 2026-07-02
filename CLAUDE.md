@@ -45,7 +45,7 @@ SystemVerilog RTL
                  ├─ xprobe          → cross-probe resolution
                  └─ wave            → trace ValueChanges (wellen)
                       └─ gui        → Session + serializable DTOs (UI-toolkit-free, CI-testable)
-                           └─ app/src-tauri/src/lib.rs  → 11 #[tauri::command]s over Mutex<Session>
+                           └─ app/src-tauri/src/lib.rs  → 12 #[tauri::command]s over Mutex<Session>
                                 └─ app/src/api.ts         → typed invoke() wrappers
                                      └─ app/src/main.ts    → 3 panes: schematic (SVG/elk.ts), source, waveform (canvas)
 ```
@@ -108,6 +108,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 | Command | Args | Returns |
 | --- | --- | --- |
 | `load_design` | `model, trace, excluded[], srcRoot` | `String` (top scope) |
+| `elaborate_and_load` | `filelist, top, incdirs[], trace, excluded[], srcRoot` | `String` (top scope) — runs `svxprobe-elaborate` (on PATH) on a `.f` designlist, then loads |
 | `scope_graph` | `scope` | `SchematicGraph` |
 | `expand_node` | `node` (id) | `SchematicGraph` |
 | `hierarchy_tree` | `scope, depth` | `TreeNode` (lazy: children to `depth`, `expandable` beyond) |

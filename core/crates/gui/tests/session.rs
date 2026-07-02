@@ -131,3 +131,41 @@ fn hierarchy_tree_is_lazy_and_navigable() {
     assert!(s.hierarchy_tree("nope", 1).is_none());
     assert!(s.hierarchy_tree("picorv32_soc.g_lane[0].bus", 1).is_none());
 }
+
+#[test]
+fn elaborate_and_load_runs_the_harness() {
+    // Requires `svxprobe-elaborate` on PATH — the app's runtime contract for
+    // designlist loading (#93). Skip when absent (e.g. the Rust CI job carries
+    // no Python env); everything past the subprocess boundary is the same
+    // ingest/load path the other tests cover via Session::load.
+    let available = std::process::Command::new("svxprobe-elaborate")
+        .arg("--help")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !available {
+        eprintln!("skipping: svxprobe-elaborate not on PATH");
+        return;
+    }
+    let s = Session::elaborate_and_load(
+        &fixture("picorv32_soc.f"),
+        "picorv32_soc",
+        &[],
+        &fixture("traces/picorv32_soc.fst"),
+        vec!["TOP".into(), "tb".into(), "soc_pkg".into()],
+        repo_root(),
+    )
+    .unwrap();
+    assert_eq!(s.design_top(), "picorv32_soc");
+    assert!(s.scope_graph("picorv32_soc.g_lane[0]").is_some());
+
+    // A bad top must surface the harness error, not a silent empty design.
+    let err = Session::elaborate_and_load(
+        &fixture("picorv32_soc.f"),
+        "no_such_top",
+        &[],
+        &fixture("traces/picorv32_soc.fst"),
+        vec![],
+        repo_root(),
+    );
+    assert!(err.is_err(), "unknown top should fail loudly");
+}

@@ -5,6 +5,14 @@ import type { ProbeResponse, SchematicGraph, TraceTimescale, TreeNode, ValueChan
 export const api = {
   loadDesign: (model: string, trace: string, excluded: string[], srcRoot: string) =>
     invoke<string>("load_design", { model, trace, excluded, srcRoot }),
+  elaborateAndLoad: (
+    filelist: string,
+    top: string,
+    incdirs: string[],
+    trace: string,
+    excluded: string[],
+    srcRoot: string,
+  ) => invoke<string>("elaborate_and_load", { filelist, top, incdirs, trace, excluded, srcRoot }),
 
   scopeGraph: (scope: string) => invoke<SchematicGraph>("scope_graph", { scope }),
   expandNode: (node: number) => invoke<SchematicGraph>("expand_node", { node }),

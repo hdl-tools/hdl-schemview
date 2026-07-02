@@ -99,6 +99,56 @@ impl Session {
         src_root: impl AsRef<Path>,
     ) -> Result<Self> {
         let design = svxprobe_ingest::from_path(model)?;
+        Self::from_design(design, trace, excluded, src_root)
+    }
+
+    /// Elaborate a designlist with the external pyslang harness, then load the
+    /// resulting model (#93). Runs `svxprobe-elaborate` (which must be on
+    /// `PATH`; bundling is future packaging work) as a subprocess — the
+    /// roadmap's out-of-process boundary — captures the model JSON from its
+    /// stdout, and feeds it to the same ingest path as [`Session::load`]. No
+    /// persistent cache: every call re-elaborates (caching is #21/#22).
+    pub fn elaborate_and_load(
+        filelist: &str,
+        top: &str,
+        incdirs: &[String],
+        trace: &str,
+        excluded: Vec<String>,
+        src_root: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let mut cmd = std::process::Command::new("svxprobe-elaborate");
+        cmd.arg("--top").arg(top).arg("-f").arg(filelist);
+        for dir in incdirs {
+            cmd.arg("-I").arg(dir);
+        }
+        cmd.arg("-o").arg("-"); // model JSON on stdout; progress goes to stderr
+        let out = cmd.output().context(
+            "running svxprobe-elaborate (is the elaboration harness installed and on PATH?)",
+        )?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "svxprobe-elaborate failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        let design = svxprobe_ingest::from_slice(&out.stdout)?;
+        // The harness exits 0 even when the top doesn't exist (it elaborates an
+        // empty design); catch that here instead of loading a blank session.
+        anyhow::ensure!(
+            design.doc.design == top,
+            "elaboration produced no design for top '{top}' — check the top module name \
+             and the filelist"
+        );
+        Self::from_design(design, trace, excluded, src_root)
+    }
+
+    fn from_design(
+        design: Design,
+        trace: &str,
+        excluded: Vec<String>,
+        src_root: impl AsRef<Path>,
+    ) -> Result<Self> {
         let mut wave = LoadedWave::open(trace)?;
         let opts = MatchOptions {
             excluded_scopes: excluded,
