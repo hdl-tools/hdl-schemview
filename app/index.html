@@ -8,7 +8,14 @@
   </head>
   <body>
     <header id="toolbar">
+      <select id="load-mode" title="Design input: a pre-elaborated model JSON, or a designlist (.f) elaborated on load">
+        <option value="model">model JSON</option>
+        <option value="filelist">designlist (.f)</option>
+      </select>
       <input id="model" placeholder="model JSON path" />
+      <input id="filelist" placeholder="designlist (.f) path" class="hidden" />
+      <input id="top" placeholder="top module" class="hidden" />
+      <input id="incdir" placeholder="+incdir dirs (optional, ;-separated)" class="hidden" />
       <input id="trace" placeholder="trace path" />
       <input id="srcroot" placeholder="source root" />
       <button id="load">Load</button>

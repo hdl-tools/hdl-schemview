@@ -413,3 +413,33 @@ def test_enum_with_nonliteral_member_is_skipped(tmp_path) -> None:
         "module m; import q::*; bad_e s; endmodule\n"
     )
     assert "q::bad_e" not in build_model([str(src)], top="m")["enums"]
+
+
+def test_main_surfaces_diagnostics_and_fails_on_empty_design(
+    tmp_path: Path, capsys
+) -> None:
+    """Compile errors always render on stderr so the app's designlist flow (#93)
+    can surface them; the run stays best-effort (exit 0, model written) while a
+    usable design exists, and only an empty design — nothing elaborated for the
+    requested top — exits nonzero. A silent empty model is undiagnosable from
+    the UI."""
+    from svxprobe_elaborate.elaborate import main
+
+    bad = tmp_path / "bad.sv"
+    bad.write_text("module bad; assign x = y +; endmodule\n")
+    out = tmp_path / "out.json"
+
+    # Errors inside an elaborable top: diagnostics visible, partial model kept.
+    rc = main([str(bad), "--top", "bad", "-o", str(out)])
+    err = capsys.readouterr().err
+    assert rc == 0, err
+    assert "undeclared" in err, err
+    assert out.exists(), "partial model is still written (best-effort)"
+
+    # A top that elaborates nothing fails loudly instead of emitting a blank model.
+    out2 = tmp_path / "out2.json"
+    rc = main([str(bad), "--top", "no_such_top", "-o", str(out2)])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "produced no design" in err, err
+    assert not out2.exists(), "no model should be written when nothing elaborated"

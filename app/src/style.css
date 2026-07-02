@@ -32,6 +32,9 @@
 body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); height:100vh; display:flex; flex-direction:column; }
 #toolbar { display:flex; gap:6px; padding:6px; background:var(--chrome); align-items:center; }
 #toolbar input { flex:1; background:var(--field); color:var(--fg); border:1px solid var(--border); padding:3px 6px; }
+#toolbar select { flex:0 0 auto; background:var(--field); color:var(--fg); border:1px solid var(--border); padding:3px 4px; }
+#toolbar #top { flex:0.45; }
+#toolbar .hidden { display:none; }
 #toolbar button { background:var(--accent); border:0; color:#fff; padding:4px 12px; cursor:pointer; }
 #toolbar #theme-toggle { background:transparent; color:var(--fg); border:1px solid var(--border); padding:4px 8px; flex:0 0 auto; }
 /* Zoom controls live in the schematic pane header, pushed to its right edge. */
