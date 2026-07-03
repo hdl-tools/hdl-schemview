@@ -124,7 +124,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 
 **Schematic** (`core/crates/schematic/src/lib.rs`):
 - `SchematicGraph { root, nodes: Vec<SchNode>, edges: Vec<SchEdge> }`
-- `SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>, module: Option<String> }`
+- `SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>, module: Option<String>, modport: Option<String> }` — `modport` (#106) marks an `Interface` box as a modport-qualified port's bundle (boundary-like: the frontend hugs it to the drilled view's edge and sublabels the view, e.g. `(mem_if.mem)`).
 - `SchPort { id, name, side: Side, path: String, width: Option<String>, role: Option<PinRole> }` — `path` is the pin's canonical model path (empty for synthetic const pins) so a right-click cross-probes it; `width` like `[31:0]`, else `None`; `role` (`PinRole { Clk, Reset, Enable }`, #59) tags a synthesized FF/latch pin from the model facts (`Node.type_` clock name / `Node.reset` / `Node.enable`) — the frontend's `ffRole` prefers it over its name-regex fallback.
 - `SchEdge { id, source, target, net: Option<String>, net_path: Option<String> }` — `net_path` is the connecting net's canonical model path (absolute, no bit-select), so a wire click cross-probes via `probe_node`; `None` for synthetic constant tie-offs.
 - `Side { West, East }` — drives ELK port placement.

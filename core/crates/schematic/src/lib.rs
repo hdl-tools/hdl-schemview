@@ -72,6 +72,12 @@ pub struct SchNode {
     /// a node sits outside the design and drives a single tied input.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constant: Option<String>,
+    /// Modport view of a modport-qualified interface port (`mem`); `None` for
+    /// bare interface instances and every other node kind. Marks the bundle as
+    /// boundary-like so the frontend clusters it at the frame (#106) and
+    /// sublabels it with the view (`mem_if.mem`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modport: Option<String>,
 }
 
 /// Synthetic id base for constant-source nodes (keyed by the driven port id), so
@@ -276,7 +282,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
     // mirrored like the scope's own boundary pins (see `boundary_side`).
     let mirror = n.kind == NodeKind::Interface && n.modport.is_some();
     // Generate blocks have no ports; instances expose their Port children.
-    let ports: Vec<SchPort> = n
+    let mut ports: Vec<SchPort> = n
         .children
         .iter()
         .copied()
@@ -312,6 +318,46 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
             }
         })
         .collect();
+    // A modport-qualified interface port shows as a single bundle pin on the
+    // consuming instance (#106) — the modport connection sits in the port row;
+    // its members stay on the drilled view's bundle box. The pin id/path are
+    // the interface-port node's own, so wires and cross-probes anchor to it.
+    for &c in &n.children {
+        let Some(cn) = design.node(c) else { continue };
+        if cn.kind != NodeKind::Interface
+            || cn.modport.is_none()
+            || !design.edges_of(c).iter().any(|e| e.port == c)
+        {
+            continue;
+        }
+        // Side from the members' direction majority: a mostly-input view reads
+        // like an input bundle (fall back west, like scalar pins).
+        let (ins, outs) = cn
+            .children
+            .iter()
+            .filter(|&&m| is_kind(design, m, NodeKind::Port))
+            .fold((0, 0), |(i, o), &m| {
+                match design.node(m).and_then(|x| x.dir) {
+                    Some(Dir::Out) => (i, o + 1),
+                    Some(_) => (i + 1, o),
+                    None => (i, o),
+                }
+            });
+        let side = if outs > ins { Side::East } else { Side::West };
+        let view = cn.modport.as_deref().unwrap_or_default();
+        let name = match module_of(design, cn) {
+            Some(t) => format!("{} ({t}.{view})", cn.name),
+            None => format!("{} ({view})", cn.name),
+        };
+        ports.push(SchPort {
+            id: c,
+            name,
+            side,
+            path: cn.path.clone(),
+            width: None,
+            role: None,
+        });
+    }
     let label = relative_to(&n.path, scope);
     Some(SchNode {
         id: bx,
@@ -325,6 +371,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         ports,
         module: module_of(design, n),
         constant: None,
+        modport: n.modport.clone(),
     })
 }
 
@@ -350,6 +397,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
         }],
         module: None,
         constant: Some(lit.to_string()),
+        modport: None,
     }
 }
 
@@ -398,6 +446,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
         ports,
         module: None,
         constant: None,
+        modport: None,
     })
 }
 
@@ -445,6 +494,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
         ports,
         module: None,
         constant: None,
+        modport: None,
     })
 }
 
@@ -471,6 +521,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
         }],
         module: None,
         constant: None,
+        modport: None,
     })
 }
 
@@ -573,12 +624,29 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             return Some((*b, *pin));
         }
         let b = box_of(design, node, &box_set)?;
+        // A modport-qualified interface port directly under the box — or one of
+        // its member pins — anchors on the box's bundle pin (#106), collapsing
+        // the port-level and member-level edges onto one anchor.
+        let bundle_pin = |id: NodeId| {
+            design.node(id).and_then(|n| {
+                (n.kind == NodeKind::Interface && n.modport.is_some() && n.parent == Some(b))
+                    .then_some(id)
+            })
+        };
         // Draw to the specific port if the node is a Port directly under the box;
         // otherwise anchor to the box.
         let pin = if is_kind(design, node, NodeKind::Port)
             && design.node(node).and_then(|n| n.parent) == Some(b)
         {
             node
+        } else if let Some(p) = bundle_pin(node).or_else(|| {
+            design
+                .node(node)
+                .filter(|n| n.kind == NodeKind::Port)
+                .and_then(|n| n.parent)
+                .and_then(bundle_pin)
+        }) {
+            p
         } else {
             b
         };

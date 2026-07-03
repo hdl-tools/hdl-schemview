@@ -704,6 +704,14 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
       tri.setAttribute("class", "pin pin-out");
       tri.setAttribute("d", `M${W},${py - 4} L${W},${py + 4} L${W - 8},${py} Z`);
       g.appendChild(tri);
+    } else {
+      // Data/condition input stub on the bottom wall (base flush, apex up into
+      // the box) — without it the south wires end at a bare edge and the FF
+      // reads as having no inputs.
+      const tri = document.createElementNS(SVGNS, "path");
+      tri.setAttribute("class", "pin pin-in");
+      tri.setAttribute("d", `M${px - 4},${H} L${px + 4},${H} L${px},${H - 8} Z`);
+      g.appendChild(tri);
     }
   }
   parent.appendChild(g);
@@ -817,7 +825,8 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
     mod.setAttribute("x", String(cx));
     mod.setAttribute("y", String(cy + 12));
     mod.setAttribute("text-anchor", "middle");
-    mod.textContent = `(${node.module})`;
+    // A modport-qualified port names its view too: (mem_if.mem).
+    mod.textContent = node.modport ? `(${node.module}.${node.modport})` : `(${node.module})`;
     mod.style.pointerEvents = "none";
     g.appendChild(mod);
   }
