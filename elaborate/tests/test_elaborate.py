@@ -304,6 +304,103 @@ def test_legacy_clocked_always_is_ff(model: dict) -> None:
     assert core_ffs, "no FF nodes inside the core (legacy clocked always unmodeled)"
 
 
+def _model_for(src: str, tmp_path, top: str = "m") -> dict:
+    f = tmp_path / "dut.sv"
+    f.write_text(src)
+    m = build_model([str(f)], top=top)
+    validate_model(m)
+    return m
+
+
+def test_async_reset_ff_emits_reset_fact_and_true_clock(tmp_path) -> None:
+    """#59: with `@(posedge clk or negedge rst_n)` the timing signal the body
+    also reads is the async reset — a structural fact. The FF emits it as
+    `reset` (canonical path) and `type` names the true clock (the one NOT read).
+    `arst` sorts before `ck`, so this also proves `type` is the disambiguated
+    clock, not merely the first timing signal alphabetically."""
+    m = _model_for(
+        "module m(input ck, arst, d, output logic q);\n"
+        "  always_ff @(posedge ck or negedge arst)\n"
+        "    if (!arst) q <= 1'b0; else q <= d;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    ff = next(n for n in m["nodes"] if n["kind"] == "FF")
+    assert ff.get("reset") == "m.arst", ff
+    assert ff["type"] == "ck", ff
+
+
+def test_sync_reset_ff_emits_no_reset_fact(tmp_path) -> None:
+    """A sync reset is read in the body but absent from the timing control —
+    structurally indistinguishable from data, so no `reset` fact (no guessing,
+    even though the name says reset)."""
+    m = _model_for(
+        "module m(input clk, rst_n, d, output logic q);\n"
+        "  always_ff @(posedge clk)\n"
+        "    if (!rst_n) q <= 1'b0; else q <= d;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    ff = next(n for n in m["nodes"] if n["kind"] == "FF")
+    assert ff.get("reset") is None, ff
+    assert ff["type"] == "clk", ff
+
+
+def test_ambiguous_ff_timing_emits_no_reset_fact(tmp_path) -> None:
+    """Every timing signal is read in the body — the read-in-body rule cannot
+    tell clock from reset, so no `reset` fact is emitted (no guessing)."""
+    m = _model_for(
+        "module m(input a, b, output logic q);\n"
+        "  always_ff @(posedge a or posedge b)\n"
+        "    q <= a ^ b;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    ff = next(n for n in m["nodes"] if n["kind"] == "FF")
+    assert ff.get("reset") is None, ff
+
+
+def test_latch_emits_enable_fact(tmp_path) -> None:
+    """#59: a latch's gating signal — the sole signal read by the body's
+    top-level conditional — is emitted as `enable` (canonical path)."""
+    m = _model_for(
+        "module m(input en, d, output logic q);\n"
+        "  always_latch if (en) q = d;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    latch = next(n for n in m["nodes"] if n["kind"] == "Latch")
+    assert latch.get("enable") == "m.en", latch
+
+
+def test_latch_enable_found_through_begin_end(tmp_path) -> None:
+    """The gating conditional may sit inside a begin/end block; the fact is
+    found by peeling blocks, not by pattern-matching source text."""
+    m = _model_for(
+        "module m(input en, d, output logic q);\n"
+        "  always_latch begin\n"
+        "    if (en) q = d;\n"
+        "  end\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    latch = next(n for n in m["nodes"] if n["kind"] == "Latch")
+    assert latch.get("enable") == "m.en", latch
+
+
+def test_latch_compound_condition_emits_no_enable_fact(tmp_path) -> None:
+    """A compound gate (`en & sel`) has no single enable signal — emit nothing
+    rather than pick one."""
+    m = _model_for(
+        "module m(input en, sel, d, output logic q);\n"
+        "  always_latch if (en & sel) q = d;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    latch = next(n for n in m["nodes"] if n["kind"] == "Latch")
+    assert latch.get("enable") is None, latch
+
+
 def test_connectivity_edges(model: dict) -> None:
     """Port connections are emitted as edges with valid endpoints."""
     edges = model["edges"]

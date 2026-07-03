@@ -108,6 +108,15 @@ pub struct Node {
     /// `None` on non-modport nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub members: Option<Vec<ModportMember>>,
+    /// Canonical path of an inferred FF's async-reset signal — a model fact
+    /// from the harness (the timing-control edge whose signal the body reads),
+    /// never a name guess (#59). `None` when the process has no async reset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset: Option<String>,
+    /// Canonical path of an inferred latch's enable signal (the top-level
+    /// gating condition) — a model fact from the harness (#59).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable: Option<String>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -354,6 +363,8 @@ mod tests {
             const_value: None,
             modport: None,
             members: None,
+            reset: None,
+            enable: None,
             drivers: vec![],
             loads: vec![],
         }

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use svxprobe_model::{Design, Dir, NodeId};
-use svxprobe_schematic::{cone, scope_graph, Side};
+use svxprobe_schematic::{cone, scope_graph, PinRole, Side};
 
 fn design() -> Design {
     let golden = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -540,4 +540,100 @@ fn cone_reaches_the_driver() {
         c.nodes.iter().any(|n| n.label == "core"),
         "cone of bus.valid did not reach core"
     );
+}
+
+#[test]
+fn ff_clock_pin_carries_the_clk_role() {
+    // #59: the FF's clock pin is tagged from the model fact (`Node.type_` holds
+    // the timing-control signal name emitted by the harness), not a name guess.
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+    let ff = top
+        .nodes
+        .iter()
+        .find(|n| n.kind == svxprobe_model::NodeKind::Ff)
+        .expect("lane_state FF");
+    let clk = ff
+        .ports
+        .iter()
+        .find(|p| p.name == "clk")
+        .expect("FF clock pin");
+    assert_eq!(clk.role, Some(PinRole::Clk));
+    // The fixture FFs are sync-reset (no async-reset model fact), so no other
+    // pin may carry a role — in particular `resetn` must NOT be tagged by name.
+    assert!(
+        ff.ports.iter().all(|p| p.name == "clk" || p.role.is_none()),
+        "only the clock is role-tagged: {:?}",
+        ff.ports
+            .iter()
+            .map(|p| (&p.name, p.role))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn ff_reset_and_latch_enable_pins_carry_roles() {
+    // #59: `Node.reset` (async-reset path on an FF) and `Node.enable` (gating
+    // condition path on a latch) are model facts from the harness; the matching
+    // synthesized pins carry the corresponding role.
+    let doc = r#"{
+        "schema_version": 1,
+        "design": "t",
+        "files": [{"id": 0, "path": "t.sv"}],
+        "nodes": [
+            {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+             "children":[1,2,3,4,5,6,7],"symbol_key":"t"},
+            {"id":1,"kind":"Var","name":"clk","path":"t.clk","parent":0,
+             "children":[],"symbol_key":"t.clk","type":"logic"},
+            {"id":2,"kind":"Var","name":"rst_n","path":"t.rst_n","parent":0,
+             "children":[],"symbol_key":"t.rst_n","type":"logic"},
+            {"id":3,"kind":"Var","name":"d","path":"t.d","parent":0,
+             "children":[],"symbol_key":"t.d","type":"logic"},
+            {"id":4,"kind":"Var","name":"en","path":"t.en","parent":0,
+             "children":[],"symbol_key":"t.en","type":"logic"},
+            {"id":5,"kind":"Var","name":"q","path":"t.q","parent":0,
+             "children":[],"symbol_key":"t.q","type":"logic"},
+            {"id":6,"kind":"FF","name":"FF","path":"t.$ff6","parent":0,
+             "children":[],"symbol_key":"t.$ff6","type":"clk","reset":"t.rst_n"},
+            {"id":7,"kind":"Latch","name":"Latch","path":"t.$latch7","parent":0,
+             "children":[],"symbol_key":"t.$latch7","enable":"t.en"}
+        ],
+        "edges": [
+            {"id":0,"port":6,"endpoint":1,"dir":"in"},
+            {"id":1,"port":6,"endpoint":2,"dir":"in"},
+            {"id":2,"port":6,"endpoint":3,"dir":"in"},
+            {"id":3,"port":6,"endpoint":5,"dir":"out"},
+            {"id":4,"port":7,"endpoint":4,"dir":"in"},
+            {"id":5,"port":7,"endpoint":3,"dir":"in"},
+            {"id":6,"port":7,"endpoint":5,"dir":"out"}
+        ]
+    }"#;
+    let d = svxprobe_ingest::from_slice(doc.as_bytes()).unwrap();
+    let g = scope_graph(&d, "t").expect("scope graph");
+
+    let role_of = |kind: svxprobe_model::NodeKind, pin: &str| {
+        g.nodes
+            .iter()
+            .find(|n| n.kind == kind)
+            .unwrap_or_else(|| panic!("no {kind:?} box"))
+            .ports
+            .iter()
+            .find(|p| p.name == pin)
+            .unwrap_or_else(|| panic!("no {pin} pin on {kind:?}"))
+            .role
+    };
+    use svxprobe_model::NodeKind::{Ff, Latch};
+    assert_eq!(role_of(Ff, "clk"), Some(PinRole::Clk));
+    assert_eq!(
+        role_of(Ff, "rst_n"),
+        Some(PinRole::Reset),
+        "path matches Node.reset"
+    );
+    assert_eq!(role_of(Ff, "d"), None, "plain data input is untagged");
+    assert_eq!(
+        role_of(Latch, "en"),
+        Some(PinRole::Enable),
+        "path matches Node.enable"
+    );
+    assert_eq!(role_of(Latch, "d"), None, "latch data input is untagged");
 }

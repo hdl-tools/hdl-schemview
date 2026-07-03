@@ -125,7 +125,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 **Schematic** (`core/crates/schematic/src/lib.rs`):
 - `SchematicGraph { root, nodes: Vec<SchNode>, edges: Vec<SchEdge> }`
 - `SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>, module: Option<String> }`
-- `SchPort { id, name, side: Side, path: String, width: Option<String> }` — `path` is the pin's canonical model path (empty for synthetic const pins) so a right-click cross-probes it; `width` like `[31:0]`, else `None`.
+- `SchPort { id, name, side: Side, path: String, width: Option<String>, role: Option<PinRole> }` — `path` is the pin's canonical model path (empty for synthetic const pins) so a right-click cross-probes it; `width` like `[31:0]`, else `None`; `role` (`PinRole { Clk, Reset, Enable }`, #59) tags a synthesized FF/latch pin from the model facts (`Node.type_` clock name / `Node.reset` / `Node.enable`) — the frontend's `ffRole` prefers it over its name-regex fallback.
 - `SchEdge { id, source, target, net: Option<String>, net_path: Option<String> }` — `net_path` is the connecting net's canonical model path (absolute, no bit-select), so a wire click cross-probes via `probe_node`; `None` for synthetic constant tie-offs.
 - `Side { West, East }` — drives ELK port placement.
 
@@ -136,6 +136,7 @@ Delegate to a global `AppState(Mutex<Session>)`.
 - `Design { doc, path_index, src_index, conn_index, wave_index }`.
 - `Document.enums: HashMap<String, EnumDef>` — normalized enum table keyed by canonical type string (matches `Node.type_`); `EnumDef { width, members: Vec<EnumMember{name, value}> }`. Looked up via `Design::enum_for_type` and surfaced on `WaveLink.enum_map` for FSM state-name display.
 - `Node.members: Option<Vec<ModportMember{name, dir}>>` — per-modport membership + directions on `Modport` nodes (descriptive metadata; the modport stays a view). A member's own node resolves via `Design::modport_member_nodes` (`<parent interface path>.<name>` path lookup).
+- `Node.reset` / `Node.enable: Option<String>` (#59) — canonical paths of an inferred FF's async-reset signal and an inferred latch's gating (enable) signal. Structural facts from the harness: the reset is the timing-control edge whose signal the process body *also reads* (and `type_` then names the true clock); the enable is the sole signal read by the body's top-level conditional. Ambiguity ⇒ absent — never a name guess (a sync reset is structurally untaggable and stays untagged).
 
 > ⚠️ These serde types are the wire format for the frontend. Any field change in
 > `gui`/`schematic` DTOs must be mirrored in `app/src/types.ts`, or the TS layer

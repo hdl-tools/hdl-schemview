@@ -138,6 +138,14 @@
           "type": ["string", "null"],
           "description": "View name on a modport-specialized interface port (e.g. \"mem\" for `mem_if.mem bus`); null otherwise."
         },
+        "reset": {
+          "type": ["string", "null"],
+          "description": "FF only: canonical path of the async-reset signal — the timing-control edge whose signal the process body also reads (#59). Absent/null when the FF has no async reset or the rule cannot disambiguate."
+        },
+        "enable": {
+          "type": ["string", "null"],
+          "description": "Latch only: canonical path of the gating (enable) signal — the sole signal read by the body's top-level conditional (#59). Absent/null when no single gating signal exists."
+        },
         "members": {
           "type": ["array", "null"],
           "description": "Membership of a Modport node: each bundle member visible through the view, with its direction (slang ModportPort.direction). Descriptive metadata -- the modport stays a view; the member's own node lives in the parent interface instance at `<parent path>.<name>`. Absent/null on non-modport nodes.",

@@ -61,10 +61,13 @@ export const isLogicKind = (k: string): boolean =>
 
 // --- inferred FF symbol ----------------------------------------------------
 export type FfRole = "clk" | "reset" | "q" | "data";
-// Classify an FF pin by side + (conventional) name: Q on the east, clock/reset
-// by name, everything else a condition.
+// Classify an FF pin: Q on the east, then the model role fact (#59 — the
+// harness tags the clock and async-reset structurally), then conventional
+// names as a fallback for facts the model cannot state (a sync reset is
+// indistinguishable from data structurally).
 export function ffRole(p: SchPort): FfRole {
   if (p.side === "east") return "q";
+  if (p.role === "clk" || p.role === "reset") return p.role;
   if (/(^|_)(clk|clock)/i.test(p.name)) return "clk";
   if (/(^|_)(rst|reset)/i.test(p.name)) return "reset";
   return "data";

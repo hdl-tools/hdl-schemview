@@ -21,6 +21,19 @@ pub enum Side {
     East,
 }
 
+/// Structural role of a synthesized logic pin (#59). Derived from model facts
+/// the harness emits — the FF's timing-control clock name (`Node.type_`), its
+/// async-reset path (`Node.reset`), the latch's gating path (`Node.enable`) —
+/// never from pin-name patterns. Drives the FF/latch glyph (clock wedge,
+/// reset/enable markers) in the frontend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PinRole {
+    Clk,
+    Reset,
+    Enable,
+}
+
 /// A pin on a box.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SchPort {
@@ -36,6 +49,10 @@ pub struct SchPort {
     /// for a scalar. Shown next to the pin label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<String>,
+    /// Structural role of a synthesized FF/latch pin; `None` for plain data pins
+    /// and all module-instance ports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<PinRole>,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -291,6 +308,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 side,
                 path: node.map(|n| n.path.clone()).unwrap_or_default(),
                 width: node.and_then(|n| width_of(&n.type_)),
+                role: None,
             }
         })
         .collect();
@@ -328,6 +346,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
             side: Side::East,
             path: String::new(), // synthetic constant source — no model node
             width: None,
+            role: None,
         }],
         module: None,
         constant: Some(lit.to_string()),
@@ -346,12 +365,23 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
         .filter(|e| e.port == ff)
         .map(|e| {
             let sig = design.node(e.endpoint);
+            // Role from the model facts on the FF node (#59): `reset` names the
+            // async-reset signal's canonical path, `type_` the clock signal's
+            // name — both emitted by the harness, never guessed from pin names.
+            let role = if e.dir != Dir::Out && sig.map(|s| s.path.as_str()) == n.reset.as_deref() {
+                Some(PinRole::Reset)
+            } else if e.dir != Dir::Out && sig.map(|s| s.name.as_str()) == n.type_.as_deref() {
+                Some(PinRole::Clk)
+            } else {
+                None
+            };
             SchPort {
                 id: pins.pin(ff, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
                 width: sig.and_then(|s| width_of(&s.type_)),
+                role,
             }
         })
         .collect();
@@ -385,12 +415,19 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
         .filter(|e| e.port == bx)
         .map(|e| {
             let sig = design.node(e.endpoint);
+            // A latch's `enable` model fact (#59) names the gating signal's
+            // canonical path; tag the matching input pin.
+            let role = (n.kind == NodeKind::Latch
+                && e.dir != Dir::Out
+                && sig.map(|s| s.path.as_str()) == n.enable.as_deref())
+            .then_some(PinRole::Enable);
             SchPort {
                 id: pins.pin(bx, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
                 width: sig.and_then(|s| width_of(&s.type_)),
+                role,
             }
         })
         .collect();
@@ -430,6 +467,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             side,
             path: n.path.clone(),
             width: width_of(&n.type_),
+            role: None,
         }],
         module: None,
         constant: None,
