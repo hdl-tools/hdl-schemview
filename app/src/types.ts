@@ -10,6 +10,12 @@ export interface SchPort {
   path?: string;
   /** Bit-range like "[31:0]" for a bus pin, absent for a scalar. */
   width?: string;
+  /**
+   * Structural role of a synthesized FF/latch pin (#59) — a model fact from
+   * the harness (clock name / async-reset path / latch gating path), absent
+   * for plain data pins and all module-instance ports.
+   */
+  role?: "clk" | "reset" | "enable";
 }
 export interface SchNode {
   id: number;

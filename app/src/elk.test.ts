@@ -4,6 +4,7 @@ import {
   nodeId,
   portId,
   fitZoom,
+  ffRole,
   FF_W,
   FF_H,
   wireLabelPlacement,
@@ -153,6 +154,25 @@ describe("toElk", () => {
     expect(sides.filter((s) => s === "WEST").length).toBe(3); // inputs spread
     // Width is driven by input count, not the (unrendered) signal-name length.
     expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(c.width);
+  });
+});
+
+describe("ffRole", () => {
+  it("prefers the model role fact over name conventions (#59)", () => {
+    // Neither name matches the clk/rst regexes — only the model fact can
+    // classify these correctly.
+    expect(ffRole({ id: 1, name: "gated_ck", side: "west", role: "clk" })).toBe("clk");
+    expect(ffRole({ id: 2, name: "arst", side: "west", role: "reset" })).toBe("reset");
+  });
+
+  it("falls back to conventional names when no fact exists (sync reset)", () => {
+    expect(ffRole({ id: 3, name: "resetn", side: "west" })).toBe("reset");
+    expect(ffRole({ id: 4, name: "clk", side: "west" })).toBe("clk");
+    expect(ffRole({ id: 5, name: "d", side: "west" })).toBe("data");
+  });
+
+  it("keeps east pins as Q regardless of role", () => {
+    expect(ffRole({ id: 6, name: "q", side: "east" })).toBe("q");
   });
 });
 

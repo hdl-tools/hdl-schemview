@@ -352,6 +352,35 @@ class Elaborator:
                 pass
         return found["v"]
 
+    @staticmethod
+    def _stmt_kind(stmt: Any) -> str:
+        """Bare statement-kind name (`Timed`, `Block`, `Conditional`, …)."""
+        return str(getattr(stmt, "kind", "")).split(".")[-1]
+
+    def _gating_condition_refs(self, sym: Any) -> set[str]:
+        """Signals read by the single top-level conditional gating a process
+        body, peeling timing controls and begin/end blocks structurally. Empty
+        when the top level is anything else — no single gating condition means
+        no fact (never guess from source text)."""
+        stmt = getattr(sym, "body", None)
+        while stmt is not None:
+            k = self._stmt_kind(stmt)
+            if k == "Timed":
+                stmt = getattr(stmt, "stmt", None)
+            elif k == "Block":
+                stmt = getattr(stmt, "body", None)
+            elif k == "List":
+                items = list(getattr(stmt, "list", None) or [])
+                stmt = items[0] if len(items) == 1 else None
+            else:
+                break
+        if stmt is None or self._stmt_kind(stmt) != "Conditional":
+            return set()
+        refs: set[str] = set()
+        for c in getattr(stmt, "conditions", None) or []:
+            refs |= self._value_refs(getattr(c, "expr", None))
+        return refs
+
     def _collect_inferred_latches(self) -> set[tuple[Any, int]]:
         """Source locations slang's analysis pass flags as inferring a latch — i.e.
         an ``always_comb`` / ``always_latch`` that holds state on some path. slang
@@ -579,8 +608,33 @@ class Elaborator:
         wire(data, "in")
         wire(assigned, "out")
         # Tell the renderer which pin is the clock (draws the FF clock notch).
+        # With several timing signals (async reset) the reset is the event whose
+        # signal the body *also reads* (#59) — a structural fact, never a name
+        # guess. When that rule disambiguates, `type` names the true clock and
+        # `reset` the async-reset's canonical path; otherwise fall back to the
+        # first wired timing signal and emit no reset.
         if clk_ids:
-            self.nodes[logic_id]["type"] = self.nodes[clk_ids[0]]["name"]
+            clock_name = self.nodes[clk_ids[0]]["name"]
+            if len(clk_ids) > 1:
+                body_reads = self._value_refs(
+                    getattr(getattr(sym, "body", None), "stmt", None)
+                )
+                clocks = [i for i in clk_ids if self.nodes[i]["path"] not in body_reads]
+                resets = [i for i in clk_ids if self.nodes[i]["path"] in body_reads]
+                if len(clocks) == 1:
+                    clock_name = self.nodes[clocks[0]]["name"]
+                    if len(resets) == 1:
+                        self.nodes[logic_id]["reset"] = self.nodes[resets[0]]["path"]
+            self.nodes[logic_id]["type"] = clock_name
+        # A latch's gate: the sole signal read by the body's top-level
+        # conditional and not assigned by the block (#59). Anything else —
+        # compound gate, no top-level conditional — emits nothing (no guess).
+        if role == "latch":
+            gate = self._gating_condition_refs(sym) - assigned
+            if len(gate) == 1:
+                eid = self._pick_node(next(iter(gate)), ("Net", "Var", "Port"))
+                if eid is not None and self.nodes[eid]["kind"] in ("Net", "Var", "Port"):
+                    self.nodes[logic_id]["enable"] = self.nodes[eid]["path"]
 
     def _members(self, sym: Any):
         body = getattr(sym, "body", None)
