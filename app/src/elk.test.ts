@@ -189,6 +189,36 @@ describe("toElk", () => {
   });
 });
 
+describe("interface bundle", () => {
+  it("pads the box height so wall pins clear the hexagon caps", () => {
+    const asKind = (kind: string) =>
+      toElk({
+        root: "s",
+        nodes: [
+          {
+            id: 1,
+            kind,
+            label: "bus",
+            path: "s.bus",
+            expandable: false,
+            module: "mem_if",
+            ports: [
+              { id: 10, name: "valid", side: "west" },
+              { id: 11, name: "ready", side: "east" },
+            ],
+          },
+        ],
+        edges: [],
+      }).children[0];
+    const iface = asKind("Interface");
+    const box = asKind("Instance");
+    // Same pin rows, but the bundle reserves room for its pointed caps.
+    expect(iface.height).toBeGreaterThan(box.height);
+    // Pins keep their wall positions (below the top cap).
+    expect(iface.ports[0].y).toBeGreaterThan(12);
+  });
+});
+
 describe("ffRole", () => {
   it("prefers the model role fact over name conventions (#59)", () => {
     // Neither name matches the clk/rst regexes — only the model fact can

@@ -5,6 +5,7 @@ import {
   clampSegmentToRect,
   ffRole,
   fitZoom,
+  IFACE_CAP,
   isLogicKind,
   layout,
   nodeId,
@@ -495,11 +496,15 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
 
       const arrow = document.createElementNS(SVGNS, "path");
       arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+      // A bundle pin (whole-interface connection) is a square; a normal pin a
+      // directional triangle.
       arrow.setAttribute(
         "d",
-        west
-          ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
-          : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
+        sp?.bundle
+          ? `M${west ? edgeX : edgeX - PIN},${py - 4} h${PIN} v8 h${-PIN} Z`
+          : west
+            ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
+            : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
       );
       // A pin selects + highlights (left) and cross-probes to source + waveform
       // (right) by its own model path; if the pin has no path, fall back to the
@@ -779,20 +784,21 @@ function renderLatch(parent: SVGElement, c: any, node: SchNode, id: number) {
 function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) {
   const W = c.width;
   const H = c.height;
-  const FOLD = 11; // dog-ear size
   const portById = new Map<number, SchPort>();
   node.ports.forEach((p) => portById.set(p.id, p));
 
   const g = document.createElementNS(SVGNS, "g");
   g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
-  // Body with the top-right corner cut away (the fold sits there instead).
+  // Bundle body: a pointed hexagon (apex caps top and bottom, straight side
+  // walls for the pins) — matches the reference bundle glyph. Pin rows stay on
+  // the walls because the layout pads the height by IFACE_CAP.
   const body = document.createElementNS(SVGNS, "path");
   body.setAttribute("class", "box iface" + (state.selected === id ? " sel" : ""));
   body.setAttribute(
     "d",
-    `M4,0 L${W - FOLD},0 L${W},${FOLD} L${W},${H - 4} Q${W},${H} ${W - 4},${H} ` +
-      `L4,${H} Q0,${H} 0,${H - 4} L0,4 Q0,0 4,0 Z`,
+    `M${W / 2},0 L${W},${IFACE_CAP} L${W},${H - IFACE_CAP} L${W / 2},${H} ` +
+      `L0,${H - IFACE_CAP} L0,${IFACE_CAP} Z`,
   );
   body.dataset.nodeId = String(id);
   body.onclick = () => selectNode(id);
@@ -802,36 +808,39 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   };
   g.appendChild(body);
 
-  // The folded-over corner flap.
-  const fold = document.createElementNS(SVGNS, "path");
-  fold.setAttribute("class", "iface-fold");
-  fold.setAttribute("d", `M${W - FOLD},0 L${W - FOLD},${FOLD} L${W},${FOLD} Z`);
-  fold.style.pointerEvents = "none";
-  g.appendChild(fold);
-
+  // Instance name reads first — same convention as module boxes and the
+  // reference snapshots — with the interface type (and modport view, #106)
+  // on the grey sublabel line.
   const cx = W / 2;
   const cy = H / 2;
+  const inst = c.labels?.[0]?.text ?? node.label;
+  const type_ = node.module
+    ? node.modport
+      ? `${node.module}.${node.modport}`
+      : node.module
+    : null;
   const name = document.createElementNS(SVGNS, "text");
   name.setAttribute("class", "box-label");
   name.setAttribute("x", String(cx));
-  name.setAttribute("y", String(node.module ? cy - 4 : cy + 4));
+  name.setAttribute("y", String(type_ ? cy - 4 : cy + 4));
   name.setAttribute("text-anchor", "middle");
-  name.textContent = c.labels?.[0]?.text ?? node.label;
+  name.textContent = inst;
   name.style.pointerEvents = "none";
   g.appendChild(name);
-  if (node.module) {
+  if (type_) {
     const mod = document.createElementNS(SVGNS, "text");
     mod.setAttribute("class", "box-sublabel");
     mod.setAttribute("x", String(cx));
     mod.setAttribute("y", String(cy + 12));
     mod.setAttribute("text-anchor", "middle");
-    // A modport-qualified port names its view too: (mem_if.mem).
-    mod.textContent = node.modport ? `(${node.module}.${node.modport})` : `(${node.module})`;
+    mod.textContent = type_;
     mod.style.pointerEvents = "none";
     g.appendChild(mod);
   }
 
-  // Interface ports (e.g. clk), drawn like a module box's pins.
+  // Interface ports: real ports (e.g. clk) plus the aggregate access ports
+  // (#96 — one per consuming modport view, one raw fan-out port), drawn like
+  // a module box's pins.
   const PIN = 8;
   const LABEL_PAD = 11;
   for (const p of c.ports ?? []) {
@@ -842,11 +851,15 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
     const edgeX = west ? 0 : W;
     const arrow = document.createElementNS(SVGNS, "path");
     arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+    // Aggregate access ports (#96) are bundle pins — squares, unlike the
+    // directional triangle of a normal pin (e.g. clk).
     arrow.setAttribute(
       "d",
-      west
-        ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
-        : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
+      sp?.bundle
+        ? `M${west ? edgeX : edgeX - PIN},${py - 4} h${PIN} v8 h${-PIN} Z`
+        : west
+          ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
+          : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
     );
     const probePin = (e: MouseEvent) => {
       e.preventDefault();

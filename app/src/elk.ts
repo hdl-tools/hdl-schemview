@@ -53,6 +53,10 @@ const PIN_HALF = 4; // pin triangle half-height (it extends ±4 around its py)
 
 const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 1 : 0);
 
+// Pointed-cap size of the interface bundle hexagon (top/bottom apexes). Shared
+// with the renderer so layout and glyph agree on the straight-wall zone.
+export const IFACE_CAP = 12;
+
 // Process-level logic nodes (combinational process / level latch / continuous
 // assign). They draw bare pin stubs and size compactly — distinct from module
 // instances. (FF has its own dedicated symbol, so it is handled separately.)
@@ -269,8 +273,10 @@ export function toElk(graph: SchematicGraph): ElkGraph {
       ? Math.max(64, titleLen * TITLE_CH + 24)
       : Math.max(150, titleLen * TITLE_CH + 28, (wMax + eMax) * PIN_CH + 56);
     const rows = Math.max(west.length, east.length, 1);
-    // Tall enough for the two-line title band plus one row per pin.
-    const h = Math.max(58, 36 + rows * ROW_H);
+    // Tall enough for the two-line title band plus one row per pin. An
+    // interface bundle draws pointed hexagon caps top and bottom, so it grows
+    // by the cap size to keep every wall pin on the straight side walls.
+    const h = Math.max(58, 36 + rows * ROW_H) + (n.kind === "Interface" ? IFACE_CAP : 0);
 
     // Place pins explicitly (FIXED_POS) so we control their Y — ELK's BEGIN
     // alignment flushes the top pin to the box top edge. We shift the top pin

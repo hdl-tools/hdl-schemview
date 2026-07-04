@@ -61,11 +61,20 @@ fn scope_graph_has_boxes_and_wires() {
         "dangling output eoi should be hidden"
     );
 
-    // There is internal wiring, including the memory↔bus connection.
+    // There is internal wiring, including the memory↔bus connection. Wires
+    // anchor on the bus box or one of its pins (member pins since #96).
     assert!(!g.edges.is_empty(), "no wires");
     let bus = id(&d, "picorv32_soc.g_lane[0].bus");
+    let bus_ids: std::collections::HashSet<NodeId> = g
+        .nodes
+        .iter()
+        .find(|n| n.id == bus)
+        .map(|n| n.ports.iter().map(|p| p.id).chain([bus]).collect())
+        .unwrap_or_default();
     assert!(
-        g.edges.iter().any(|e| e.source == bus || e.target == bus),
+        g.edges
+            .iter()
+            .any(|e| bus_ids.contains(&e.source) || bus_ids.contains(&e.target)),
         "no edge touches the bus instance"
     );
 
@@ -102,6 +111,7 @@ fn modport_interface_port_is_a_bundle_pin_on_its_instance() {
     // Side from the members' direction majority (mem: 6 in / 2 out → west).
     assert_eq!(pin.side, Side::West);
     assert_eq!(pin.width, None, "a bundle pin carries no bit-range");
+    assert!(pin.bundle, "marked as a bundle pin (drawn square)");
     // The pin is the interface-port node itself, so a right-click cross-probes
     // it directly via probe_node.
     assert!(
@@ -109,17 +119,24 @@ fn modport_interface_port_is_a_bundle_pin_on_its_instance() {
         "pin path resolves back to the interface-port node"
     );
 
-    // The memory↔bus wire anchors at the bundle pin, not the box corner —
-    // and only once (member-level edges collapse onto the same pin).
+    // The memory↔bus wire anchors bundle-pin to the instance's `mem` access
+    // port (the Modport node, #96 revised) — and only once (member-level
+    // edges collapse onto the same pin).
     let bus = id(&d, "picorv32_soc.g_lane[0].bus");
+    let mem_view = id(&d, "picorv32_soc.g_lane[0].bus.mem");
     let pin_wires: Vec<_> = g
         .edges
         .iter()
         .filter(|e| {
-            (e.source == pin.id && e.target == bus) || (e.source == bus && e.target == pin.id)
+            (e.source == pin.id && e.target == mem_view)
+                || (e.source == mem_view && e.target == pin.id)
         })
         .collect();
-    assert_eq!(pin_wires.len(), 1, "one wire from bundle pin to bundle box");
+    assert_eq!(
+        pin_wires.len(),
+        1,
+        "one wire from bundle pin to the mem port"
+    );
     // No leftover box-anchored wire between memory and bus.
     assert!(
         !g.edges
@@ -233,6 +250,104 @@ fn interface_instance_is_a_bundle_box() {
 }
 
 #[test]
+fn bare_interface_exposes_one_access_port_per_connection_style() {
+    // #96 (revised): the interface instance bundle carries one aggregate port
+    // per *access path*, both structural facts:
+    // - a port named after the modport view (`mem`) for a modport-qualified
+    //   consumer, wired once to that consumer's bundle pin;
+    // - a port named after the interface (`mem_if`) for raw member taps,
+    //   fanning out to each tapping pin (picorv32's scalar ports).
+    // No per-member pins on the bundle.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+    let bus = g.nodes.iter().find(|n| n.label == "bus").expect("bus box");
+    let pin = |name: &str| {
+        bus.ports
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "no {name} pin: {:?}",
+                    bus.ports.iter().map(|p| &p.name).collect::<Vec<_>>()
+                )
+            })
+    };
+
+    // Exactly three ports: the interface's own clk, the raw-access aggregate,
+    // and the used modport view. No member pins, no port for the unused view.
+    let names: Vec<&str> = bus.ports.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names.len(), 3, "ports: {names:?}");
+    for member in ["valid", "addr", "ready"] {
+        assert!(
+            !names.contains(&member),
+            "no member pin {member}: {names:?}"
+        );
+    }
+    assert!(
+        !names.contains(&"core"),
+        "unused view gets no port: {names:?}"
+    );
+
+    // The view port is the Modport node itself (cross-probes to the modport).
+    let mem = pin("mem");
+    assert!(
+        d.nodes_at_path("picorv32_soc.g_lane[0].bus.mem")
+            .contains(&mem.id),
+        "mem port is the modport node"
+    );
+    assert_eq!(mem.side, Side::East, "mostly-in view faces its consumer");
+
+    // Both aggregate ports are marked as bundles (drawn square, not as the
+    // directional triangle of a normal scalar/bus pin); the interface's own
+    // clk port stays a normal pin.
+    assert!(mem.bundle, "view port is a bundle pin");
+    assert!(pin("mem_if").bundle, "raw access port is a bundle pin");
+    assert!(!pin("clk").bundle, "clk stays a normal pin");
+
+    // One wire between the mem port and the consumer's bundle pin (#106) —
+    // the whole-interface and member-level edges all collapse onto it.
+    let memory = g.nodes.iter().find(|n| n.label == "memory").unwrap();
+    let bundle = memory
+        .ports
+        .iter()
+        .find(|p| p.path == "picorv32_soc.g_lane[0].memory.bus")
+        .expect("memory bundle pin");
+    let mem_wires = g
+        .edges
+        .iter()
+        .filter(|e| {
+            (e.source == mem.id && e.target == bundle.id)
+                || (e.source == bundle.id && e.target == mem.id)
+        })
+        .count();
+    assert_eq!(mem_wires, 1, "one wire mem port <-> memory bundle pin");
+
+    // The raw-access port carries the interface's name and fans out to the
+    // core's individual pins — one wire per tapped member.
+    let raw = pin("mem_if");
+    assert_eq!(
+        raw.side,
+        Side::West,
+        "mostly-driven-into raw port faces west"
+    );
+    assert_eq!(
+        raw.path, "picorv32_soc.g_lane[0].bus",
+        "raw port cross-probes to the interface instance"
+    );
+    let core = g.nodes.iter().find(|n| n.label == "core").unwrap();
+    let core_pins: std::collections::HashSet<NodeId> = core.ports.iter().map(|p| p.id).collect();
+    let fanout = g
+        .edges
+        .iter()
+        .filter(|e| {
+            (e.source == raw.id && core_pins.contains(&e.target))
+                || (e.target == raw.id && core_pins.contains(&e.source))
+        })
+        .count();
+    assert!(fanout >= 5, "raw port fans out to core pins, got {fanout}");
+}
+
+#[test]
 fn modport_interface_port_has_directional_pins() {
     // Inside the consumer, its modport-qualified interface port renders as a
     // bundle box with one directional pin per modport member (#64). Sides are
@@ -296,13 +411,15 @@ fn modport_interface_port_has_directional_pins() {
         "wire cross-probes to the bundle member"
     );
 
-    // The bare interface *instance* stays port-less on its members: its box in
-    // the lane scope shows only its own declared port (clk), no member pins.
+    // The bare interface *instance* keeps no member pins (#96 revised): its
+    // connections aggregate into per-access ports (`mem` for the modport
+    // consumer, `mem_if` for raw taps) — unlike the consumer-side bundle
+    // above, whose pins are the directional member views of one modport.
     let lane = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("lane graph");
     let inst = lane.nodes.iter().find(|n| n.label == "bus").unwrap();
     assert!(
         inst.ports.iter().all(|p| p.name != "valid"),
-        "bare instance keeps no member pins: {:?}",
+        "instance aggregates access ports, no member pins: {:?}",
         inst.ports
     );
 }

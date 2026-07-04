@@ -130,9 +130,8 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .box.comb { fill:var(--comb); stroke:var(--comb-stroke); }
 .box.assign { fill:var(--assign); stroke:var(--assign-stroke); }
 .box.latch { fill:var(--latch); stroke:var(--latch-stroke); }
-/* Interface bundle: a distinct teal box; the dog-ear flap reads as a fold. */
+/* Interface bundle: a pointed hexagon in a distinct teal. */
 .box.iface { fill:var(--iface); stroke:var(--iface-stroke); }
-.iface-fold { fill:var(--iface-stroke); stroke:var(--iface-stroke); opacity:0.55; }
 /* Selection stroke wins over every per-kind stroke above (declared last). */
 .box.sel { stroke:var(--sel); stroke-width:2.5; }
 .ff-clk { fill:none; stroke:var(--label); stroke-width:1.3; }
