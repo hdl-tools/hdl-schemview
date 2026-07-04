@@ -7,6 +7,8 @@ import {
   ffRole,
   FF_W,
   FF_H,
+  FF_TOP,
+  FF_CLK_ZONE,
   wireLabelPlacement,
   clampSegmentToRect,
 } from "./elk";
@@ -20,10 +22,10 @@ const ffChildOf = (ports: SchPort[]) =>
     edges: [],
   }).children[0];
 
-const southXs = (c: any): number[] =>
+const westYs = (c: any): number[] =>
   c.ports
-    .filter((p: any) => p.layoutOptions["elk.port.side"] === "SOUTH")
-    .map((p: any) => p.x as number)
+    .filter((p: any) => p.layoutOptions["elk.port.side"] === "WEST")
+    .map((p: any) => p.y as number)
     .sort((a: number, b: number) => a - b);
 
 const graph: SchematicGraph = {
@@ -236,30 +238,72 @@ describe("ffRole", () => {
   it("keeps east pins as Q regardless of role", () => {
     expect(ffRole({ id: 6, name: "q", side: "east" })).toBe("q");
   });
+
+  it("honors the model enable fact (#59)", () => {
+    // "gate" matches no name convention — only the fact can classify it.
+    expect(ffRole({ id: 7, name: "gate", side: "west", role: "enable" })).toBe("enable");
+  });
+
+  it("falls back to conventional enable names when no fact exists", () => {
+    expect(ffRole({ id: 8, name: "en", side: "west" })).toBe("enable");
+    expect(ffRole({ id: 9, name: "ce", side: "west" })).toBe("enable");
+    expect(ffRole({ id: 10, name: "wr_en", side: "west" })).toBe("enable");
+    // Word-bounded: names merely containing "en"/"ce" stay data.
+    expect(ffRole({ id: 11, name: "wen", side: "west" })).toBe("data");
+    expect(ffRole({ id: 12, name: "end", side: "west" })).toBe("data");
+  });
 });
 
 describe("ffChild", () => {
   const clk: SchPort = { id: 1, name: "clk", side: "west" };
   const q: SchPort = { id: 9, name: "q", side: "east" };
   const data = (id: number): SchPort => ({ id, name: `d${id}`, side: "west" });
+  const byId = (c: any, sid: number) => c.ports.find((p: any) => p.id === portId(sid));
 
-  it("keeps the default width for a small FF", () => {
-    const c = ffChildOf([clk, data(2), q]); // one data pin
+  it("keeps the default size for a small FF", () => {
+    const c = ffChildOf([clk, data(2), q]); // one short data pin
     expect(c.width).toBe(FF_W);
+    expect(c.height).toBe(FF_H);
   });
 
-  it("grows only when the data pins exceed the default width", () => {
-    const many = Array.from({ length: 10 }, (_, i) => data(20 + i));
+  it("stacks data pins as labelled rows down the west wall (#115)", () => {
+    const c = ffChildOf([clk, data(2), data(3), data(4), q]); // 3 data
+    const ys = westYs(c); // rows first, then the clk at the bottom
+    expect(ys.slice(0, 3)).toEqual([FF_TOP, FF_TOP + 16, FF_TOP + 32]);
+    // Nothing but the reset ever sits on the bottom edge now.
+    const south = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "SOUTH");
+    expect(south).toHaveLength(0);
+  });
+
+  it("orders enable rows below the data rows", () => {
+    const en: SchPort = { id: 7, name: "gate", side: "west", role: "enable" };
+    const c = ffChildOf([clk, en, data(2), data(3), q]);
+    expect(byId(c, 7)!.y).toBeGreaterThan(byId(c, 2)!.y!);
+    expect(byId(c, 7)!.y).toBeGreaterThan(byId(c, 3)!.y!);
+  });
+
+  it("keeps the clock wedge at the bottom of the west wall", () => {
+    const c = ffChildOf([clk, data(2), q]);
+    expect(byId(c, 1)!.y).toBe(c.height! - 11);
+  });
+
+  it("grows height so the input rows clear the clock wedge", () => {
+    const many = Array.from({ length: 8 }, (_, i) => data(20 + i));
     const c = ffChildOf([clk, ...many, q]);
-    expect(c.width).toBeGreaterThan(FF_W);
+    expect(c.height).toBeGreaterThan(FF_H);
+    const ys = westYs(c);
+    // The last input row sits exactly at the top of the reserved wedge band
+    // (the final west y is the clk itself at H - 11).
+    expect(ys[ys.length - 2]).toBe(c.height! - FF_CLK_ZONE);
   });
 
-  it("spreads data pins evenly across the bottom edge", () => {
-    const c = ffChildOf([clk, data(2), data(3), data(4), data(5), q]); // 4 data
-    const xs = southXs(c);
-    expect(xs).toHaveLength(4);
-    const gaps = xs.slice(1).map((x, i) => x - xs[i]);
-    gaps.forEach((g) => expect(g).toBeCloseTo(gaps[0]));
+  it("grows width with the longest west pin label, not east names", () => {
+    const wide: SchPort = { id: 30, name: "mem_la_wstrb", side: "west", width: "[31:0]" };
+    expect(ffChildOf([clk, wide, q]).width).toBeGreaterThan(FF_W);
+    // A long output name costs nothing — Q pins are unlabeled on the glyph
+    // (the wire label already names the output).
+    const longQ: SchPort = { id: 31, name: "cached_insn_opcode_wstrb", side: "east" };
+    expect(ffChildOf([clk, data(2), longQ]).width).toBe(FF_W);
   });
 
   it("gives each output its own east pin, spread down the wall", () => {
@@ -280,13 +324,56 @@ describe("ffChild", () => {
     expect(east[0].y).toBe(FF_H / 2);
   });
 
-  it("centers the reset and keeps data symmetric about it", () => {
+  it("keeps the reset on the south edge, dead-centre", () => {
     const rst: SchPort = { id: 8, name: "rst_n", side: "west" };
-    const c = ffChildOf([clk, rst, data(2), data(3), q]); // 2 data + reset
-    const W = c.width;
-    const byId = (sid: number) => c.ports.find((p: any) => p.id === portId(sid));
-    expect(byId(8)!.x).toBe(W / 2); // reset dead-centre
-    expect(byId(2)!.x! + byId(3)!.x!).toBeCloseTo(W); // data mirror about centre
+    const c = ffChildOf([clk, rst, data(2), q]);
+    const south = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "SOUTH");
+    expect(south).toHaveLength(1);
+    expect(south[0].id).toBe(portId(8));
+    expect(south[0].x).toBe(c.width! / 2);
+  });
+});
+
+describe("storage child (latch)", () => {
+  const latchOf = (ports: SchPort[]) =>
+    toElk({
+      root: "s",
+      nodes: [{ id: 1, kind: "Latch", label: "lat", path: "s.l", expandable: false, ports }],
+      edges: [],
+    }).children[0];
+
+  it("dispatches a latch to the FF-style storage child (#115)", () => {
+    const c = latchOf([
+      { id: 7, name: "gate", side: "west", role: "enable" },
+      { id: 2, name: "d", side: "west" },
+      { id: 9, name: "q", side: "east" },
+    ]);
+    expect(c.labels[0].text).toBe("LE");
+    expect(c.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    // West label rows, not the generic instance box's 150px floor.
+    expect(c.width).toBeLessThan(150);
+    const west = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "WEST");
+    expect(west).toHaveLength(2);
+  });
+
+  it("keeps the FF caption on FF nodes", () => {
+    const c = ffChildOf([{ id: 2, name: "d", side: "west" }]);
+    expect(c.labels[0].text).toBe("FF");
+  });
+
+  it("does not read FF clock/reset name conventions into latch pins", () => {
+    // A level latch has no clock or async reset in the model — a data input
+    // that merely *sounds* like one must stay a labelled west row, not become
+    // a wedge or a south bubble.
+    const c = latchOf([
+      { id: 2, name: "rst_n", side: "west" },
+      { id: 3, name: "clk_div", side: "west" },
+      { id: 9, name: "q", side: "east" },
+    ]);
+    const rows = westYs(c);
+    expect(rows).toEqual([FF_TOP, FF_TOP + 16]); // plain data rows, no wedge slot
+    const south = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "SOUTH");
+    expect(south).toHaveLength(0);
   });
 });
 

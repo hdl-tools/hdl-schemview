@@ -3,6 +3,7 @@
 import { api } from "./api";
 import {
   clampSegmentToRect,
+  FF_LABEL_PAD,
   ffRole,
   fitZoom,
   IFACE_CAP,
@@ -419,19 +420,15 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       renderBoundaryPin(root, c, node, id);
       continue;
     }
-    // Inferred register: a generic flip-flop symbol.
-    if (node?.kind === "FF") {
-      renderFF(root, c, node, id);
+    // Inferred storage (register FF / level latch): an FF-style symbol with
+    // labelled west input rows.
+    if (node?.kind === "FF" || node?.kind === "Latch") {
+      renderStorage(root, c, node, id);
       continue;
     }
     // Continuous assign: a stadium (rounded-end capsule) function node.
     if (node?.kind === "Assign") {
       renderAssign(root, c, node, id);
-      continue;
-    }
-    // Level-sensitive latch: a storage box with a level-enable marker.
-    if (node?.kind === "Latch") {
-      renderLatch(root, c, node, id);
       continue;
     }
     // SystemVerilog interface instance / interface port: a folded-corner bundle.
@@ -447,9 +444,9 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
     const rect = document.createElementNS(SVGNS, "rect");
-    // Logic kinds (comb/latch) get a per-kind class so combinational processes read
-    // apart from module-instance boxes by colour. (Assign has its own shape — see
-    // renderAssign — so it never reaches this generic path.)
+    // Logic kinds get a per-kind class so combinational processes read apart
+    // from module-instance boxes by colour. (Only Comb still reaches this
+    // generic path — FF/Latch draw the storage symbol and Assign its capsule.)
     const kindClass = node && isLogicKind(node.kind) ? " " + node.kind.toLowerCase() : "";
     rect.setAttribute("class", "box" + kindClass + (state.selected === id ? " sel" : ""));
     rect.setAttribute("width", String(c.width));
@@ -660,18 +657,21 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   parent.appendChild(g);
 }
 
-// An inferred register, drawn as a generic flip-flop: a plain square labelled
-// "FF" with a clock wedge (clk, on the left wall), an active-low bubble (reset,
-// outer bottom), conditions along the bottom, and Q at the right centre. Pin
-// positions come from ELK (FIXED_POS in `ffChild`); here we add the glyphs.
-function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
+// An inferred storage element — register FF or level latch (#115): a box
+// captioned "FF"/"LE" in its bottom band, the data + enable inputs as labelled
+// rows down the west wall (enable in its own colour), a clock wedge (clk, left
+// wall, low), an active-low bubble (async reset, outer bottom centre), and one
+// Q stub per distinct output on the east wall. Pin positions come from ELK
+// (FIXED_POS in `storageChild`); here we add the glyphs and labels.
+function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
   const W = c.width;
   const H = c.height;
   const g = document.createElementNS(SVGNS, "g");
   g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
   const rect = document.createElementNS(SVGNS, "rect");
-  rect.setAttribute("class", "box ff" + (state.selected === id ? " sel" : ""));
+  const kindClass = node.kind === "Latch" ? "latch" : "ff";
+  rect.setAttribute("class", `box ${kindClass}` + (state.selected === id ? " sel" : ""));
   rect.setAttribute("width", String(W));
   rect.setAttribute("height", String(H));
   rect.setAttribute("rx", "3");
@@ -689,24 +689,38 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
   t.setAttribute("y", String(H / 2 + 1));
   t.setAttribute("text-anchor", "middle");
   t.style.pointerEvents = "none";
-  t.textContent = "FF";
+  t.textContent = c.labels?.[0]?.text ?? "FF";
   g.appendChild(t);
 
   const portById = new Map<number, SchPort>();
   node.ports.forEach((p) => portById.set(p.id, p));
   for (const p of c.ports ?? []) {
-    const sp = portById.get(Number(String(p.id).slice(1)));
+    const pid = Number(String(p.id).slice(1));
+    const sp = portById.get(pid);
     if (!sp) continue;
     const px = p.x ?? 0;
-    const role = ffRole(sp);
+    const py = p.y ?? 0;
+    // A pin selects + highlights (left) and cross-probes (right) by its own
+    // model path, falling back to the box so right-click is never dead.
+    const probePin = (e: MouseEvent) => {
+      e.preventDefault();
+      if (sp.path) crossProbePath(sp.path, e);
+      else crossProbe(id, e);
+    };
+    const wirePin = (el: SVGElement) => {
+      el.dataset.nodeId = String(pid);
+      el.onclick = () => selectNode(pid);
+      el.oncontextmenu = probePin;
+      g.appendChild(el);
+    };
+    const role = ffRole(sp, node.kind);
     if (role === "clk") {
       // Clock-edge wedge on the left wall: base flush to the wall, apex pointing
       // right into the box.
-      const py = p.y ?? 0;
       const tri = document.createElementNS(SVGNS, "path");
       tri.setAttribute("class", "ff-clk");
       tri.setAttribute("d", `M0,${py - 6} L0,${py + 6} L10,${py} Z`);
-      g.appendChild(tri);
+      wirePin(tri);
     } else if (role === "reset") {
       // Active-low reset bubble, centred on and just below the bottom edge.
       const circ = document.createElementNS(SVGNS, "circle");
@@ -714,78 +728,30 @@ function renderFF(parent: SVGElement, c: any, node: SchNode, id: number) {
       circ.setAttribute("cx", String(px));
       circ.setAttribute("cy", String(H + 3));
       circ.setAttribute("r", "3");
-      g.appendChild(circ);
+      wirePin(circ);
     } else if (role === "q") {
       // One output stub per distinct output, so a register driving several
       // signals shows each output individually (base on the east wall, apex in).
-      const py = p.y ?? 0;
+      // No label: the wire label already names the output net.
       const tri = document.createElementNS(SVGNS, "path");
       tri.setAttribute("class", "pin pin-out");
       tri.setAttribute("d", `M${W},${py - 4} L${W},${py + 4} L${W - 8},${py} Z`);
-      g.appendChild(tri);
+      wirePin(tri);
     } else {
-      // Data/condition input stub on the bottom wall (base flush, apex up into
-      // the box) — without it the south wires end at a bare edge and the FF
-      // reads as having no inputs.
+      // Data/enable input row on the west wall: a stub (base flush, apex in)
+      // plus the signal-name label, so the glyph says which input is which.
       const tri = document.createElementNS(SVGNS, "path");
-      tri.setAttribute("class", "pin pin-in");
-      tri.setAttribute("d", `M${px - 4},${H} L${px + 4},${H} L${px},${H - 8} Z`);
-      g.appendChild(tri);
+      tri.setAttribute("class", "pin " + (role === "enable" ? "pin-en" : "pin-in"));
+      tri.setAttribute("d", `M0,${py - 4} L0,${py + 4} L8,${py} Z`);
+      wirePin(tri);
+      const lab = document.createElementNS(SVGNS, "text");
+      lab.setAttribute("class", "pin-label");
+      lab.setAttribute("x", String(FF_LABEL_PAD));
+      lab.setAttribute("y", String(py + 3));
+      lab.setAttribute("text-anchor", "start");
+      lab.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+      wirePin(lab);
     }
-  }
-  parent.appendChild(g);
-}
-
-// A level-sensitive latch: a storage rectangle (like the FF) but transparent on an
-// active level rather than a clock edge. Distinguished from the FF by its "LE"
-// caption (the FF carries an edge wedge instead) and from the comb rectangle by its
-// own tint. Pins are bare stubs like the other logic nodes.
-function renderLatch(parent: SVGElement, c: any, node: SchNode, id: number) {
-  const W = c.width;
-  const H = c.height;
-  const g = document.createElementNS(SVGNS, "g");
-  g.setAttribute("transform", `translate(${c.x},${c.y})`);
-
-  const rect = document.createElementNS(SVGNS, "rect");
-  rect.setAttribute("class", "box latch" + (state.selected === id ? " sel" : ""));
-  rect.setAttribute("width", String(W));
-  rect.setAttribute("height", String(H));
-  rect.setAttribute("rx", "3");
-  rect.dataset.nodeId = String(id);
-  rect.onclick = () => selectNode(id);
-  rect.oncontextmenu = (e) => {
-    e.preventDefault();
-    crossProbe(id, e);
-  };
-  g.appendChild(rect);
-
-  const t = document.createElementNS(SVGNS, "text");
-  t.setAttribute("class", "box-label");
-  t.setAttribute("x", String(W / 2));
-  t.setAttribute("y", String(H / 2 + 1));
-  t.setAttribute("text-anchor", "middle");
-  t.style.pointerEvents = "none";
-  t.textContent = "LE";
-  g.appendChild(t);
-
-  // Bare pin stubs (no per-pin labels), like the other logic nodes.
-  const PIN = 8;
-  for (const p of c.ports ?? []) {
-    const pid = Number(String(p.id).slice(1));
-    const sp = node.ports.find((q) => q.id === pid);
-    const py = p.y ?? 0;
-    const west = sp ? sp.side !== "east" : (p.x ?? 0) < W / 2;
-    const edgeX = west ? 0 : W;
-    const arrow = document.createElementNS(SVGNS, "path");
-    arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
-    arrow.setAttribute(
-      "d",
-      west
-        ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
-        : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
-    );
-    arrow.onclick = () => selectNode(pid);
-    g.appendChild(arrow);
   }
   parent.appendChild(g);
 }
