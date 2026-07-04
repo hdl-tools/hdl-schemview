@@ -22,6 +22,12 @@ export interface SchPort {
    * triangle. Absent for normal pins.
    */
   bundle?: boolean;
+  /**
+   * Marks a pin nothing connects to (#118): an unconnected instance output /
+   * floating input, or a logic-box output no in-scope box reads. Drawn dimmed;
+   * absent for connected pins.
+   */
+  dangling?: boolean;
 }
 export interface SchNode {
   id: number;

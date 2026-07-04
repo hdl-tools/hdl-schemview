@@ -504,7 +504,10 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       const edgeX = west ? 0 : c.width;
 
       const arrow = document.createElementNS(SVGNS, "path");
-      arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+      arrow.setAttribute(
+        "class",
+        "pin " + (west ? "pin-in" : "pin-out") + (sp?.dangling ? " dangling" : ""),
+      );
       // A bundle pin (whole-interface connection) is a square; a normal pin a
       // directional triangle.
       arrow.setAttribute(
@@ -533,7 +536,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // carries that name).
       if (sp && !isLogicKind(node?.kind ?? "")) {
         const t = document.createElementNS(SVGNS, "text");
-        t.setAttribute("class", "pin-label");
+        t.setAttribute("class", "pin-label" + (sp.dangling ? " dangling" : ""));
         t.setAttribute("x", String(west ? edgeX + LABEL_PAD : edgeX - LABEL_PAD));
         t.setAttribute("y", String(py + 3));
         t.setAttribute("text-anchor", west ? "start" : "end");
@@ -732,11 +735,21 @@ function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
     } else if (role === "q") {
       // One output stub per distinct output, so a register driving several
       // signals shows each output individually (base on the east wall, apex in).
-      // No label: the wire label already names the output net.
+      // A wired Q carries no label (the wire label names the net); a dangling
+      // Q (#118) is labelled in-box, dimmed, since no wire exists to name it.
       const tri = document.createElementNS(SVGNS, "path");
-      tri.setAttribute("class", "pin pin-out");
+      tri.setAttribute("class", "pin pin-out" + (sp.dangling ? " dangling" : ""));
       tri.setAttribute("d", `M${W},${py - 4} L${W},${py + 4} L${W - 8},${py} Z`);
       wirePin(tri);
+      if (sp.dangling) {
+        const lab = document.createElementNS(SVGNS, "text");
+        lab.setAttribute("class", "pin-label dangling");
+        lab.setAttribute("x", String(W - FF_LABEL_PAD));
+        lab.setAttribute("y", String(py + 3));
+        lab.setAttribute("text-anchor", "end");
+        lab.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+        wirePin(lab);
+      }
     } else {
       // Data/enable input row on the west wall: a stub (base flush, apex in)
       // plus the signal-name label, so the glyph says which input is which.
@@ -830,7 +843,10 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
     const west = sp ? sp.side !== "east" : (p.x ?? 0) < W / 2;
     const edgeX = west ? 0 : W;
     const arrow = document.createElementNS(SVGNS, "path");
-    arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+    arrow.setAttribute(
+      "class",
+      "pin " + (west ? "pin-in" : "pin-out") + (sp?.dangling ? " dangling" : ""),
+    );
     // Aggregate access ports (#96) are bundle pins — squares, unlike the
     // directional triangle of a normal pin (e.g. clk).
     arrow.setAttribute(
@@ -916,7 +932,10 @@ function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
     const inset = r - Math.sqrt(Math.max(0, r * r - dy * dy));
     const edgeX = west ? inset : W - inset;
     const arrow = document.createElementNS(SVGNS, "path");
-    arrow.setAttribute("class", "pin " + (west ? "pin-in" : "pin-out"));
+    arrow.setAttribute(
+      "class",
+      "pin " + (west ? "pin-in" : "pin-out") + (sp.dangling ? " dangling" : ""),
+    );
     arrow.setAttribute(
       "d",
       west

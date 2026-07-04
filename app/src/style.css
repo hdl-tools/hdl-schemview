@@ -122,6 +122,11 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 /* Storage enable input (latch gate / FF clock-enable): its own tint so the
    control pin reads apart from the data rows (#115). */
 .pin-en { fill:var(--pin-en); }
+/* Dangling pin/label (#118): nothing connects to it — dimmed so it reads as
+   intentionally unconnected rather than a missing wire. Selection restores
+   full opacity so the accent highlight isn't washed out. */
+.pin.dangling, .pin-label.dangling { opacity:0.45; }
+.pin.dangling.sel, .pin-label.dangling.sel { opacity:1; }
 /* Selected pin: accent fill/outline (declared after pin-in/out so it wins). */
 .pin.sel { fill:var(--sel); stroke:var(--sel); }
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }
