@@ -11,7 +11,7 @@
   --latch:#3a2c4a; --latch-stroke:#9b80c0;
   --iface:#15433f; --iface-stroke:#2fa39a;
   --label:#eaeefb; --sublabel:#9fb4d8;
-  --pin:#9cc4ff; --pin-out:#ffd479;
+  --pin:#9cc4ff; --pin-out:#ffd479; --pin-en:#9fe0a8;
   --wire:#7f93b5; --wire-label:#c7d3ea;
 }
 :root[data-theme="light"] {
@@ -25,7 +25,7 @@
   --latch:#efe6f5; --latch-stroke:#9b80c0;
   --iface:#e0f3f0; --iface-stroke:#2a8f86;
   --label:#1a2233; --sublabel:#55617a;
-  --pin:#2f5fb0; --pin-out:#b56a00;
+  --pin:#2f5fb0; --pin-out:#b56a00; --pin-en:#2f7d32;
   --wire:#5a6a86; --wire-label:#33415c;
 }
 * { box-sizing: border-box; }
@@ -119,6 +119,9 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .pin { cursor:pointer; }
 .pin-in { fill:var(--pin); }
 .pin-out { fill:var(--pin-out); }
+/* Storage enable input (latch gate / FF clock-enable): its own tint so the
+   control pin reads apart from the data rows (#115). */
+.pin-en { fill:var(--pin-en); }
 /* Selected pin: accent fill/outline (declared after pin-in/out so it wins). */
 .pin.sel { fill:var(--sel); stroke:var(--sel); }
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }

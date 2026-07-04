@@ -59,64 +59,70 @@ export const IFACE_CAP = 12;
 
 // Process-level logic nodes (combinational process / level latch / continuous
 // assign). They draw bare pin stubs and size compactly — distinct from module
-// instances. (FF has its own dedicated symbol, so it is handled separately.)
+// instances. (FF and Latch dispatch to the storage symbol and Assign to the
+// capsule before the generic path, so only Comb still reaches the call sites
+// that use this predicate — kept complete so it states the kind taxonomy.)
 export const isLogicKind = (k: string): boolean =>
   k === "Comb" || k === "Latch" || k === "Assign";
 
 // --- inferred FF symbol ----------------------------------------------------
-export type FfRole = "clk" | "reset" | "q" | "data";
-// Classify an FF pin: Q on the east, then the model role fact (#59 — the
-// harness tags the clock and async-reset structurally), then conventional
-// names as a fallback for facts the model cannot state (a sync reset is
-// indistinguishable from data structurally).
-export function ffRole(p: SchPort): FfRole {
+export type FfRole = "clk" | "reset" | "enable" | "q" | "data";
+// Classify an FF/latch pin: Q on the east, then the model role fact (#59 — the
+// harness tags the clock, async-reset and latch-enable structurally), then
+// conventional names as a fallback for facts the model cannot state (a sync
+// reset or an FF clock-enable is indistinguishable from data structurally).
+// The clock/reset conventions are FF-only: a level latch has neither concept
+// in the model, so a latch input merely *named* `clk_div`/`rst_n` stays data.
+export function ffRole(p: SchPort, kind: string = "FF"): FfRole {
   if (p.side === "east") return "q";
-  if (p.role === "clk" || p.role === "reset") return p.role;
-  if (/(^|_)(clk|clock)/i.test(p.name)) return "clk";
-  if (/(^|_)(rst|reset)/i.test(p.name)) return "reset";
+  if (p.role === "clk" || p.role === "reset" || p.role === "enable") return p.role;
+  if (kind === "FF") {
+    if (/(^|_)(clk|clock)/i.test(p.name)) return "clk";
+    if (/(^|_)(rst|reset)/i.test(p.name)) return "reset";
+  }
+  if (/(^|_)(en|ce|enable)($|_)/i.test(p.name)) return "enable";
   return "data";
 }
 export const FF_H = 46;
 export const FF_W = 56; // default FF box width
-const FF_MARGIN = 12; // edge inset for the bottom (south) pin row
-const FF_PITCH = 16; // minimum spacing between adjacent bottom pins
+const FF_PITCH = 16; // vertical pitch between adjacent west input rows
+export const FF_TOP = 10; // top inset of the west input column
+// Bottom band of the west wall reserved for the clock wedge (centred at H - 11,
+// spanning H-17..H-5): the last input row stops FF_CLK_ZONE above the bottom so
+// its pin triangle clears the wedge.
+export const FF_CLK_ZONE = 24;
+export const FF_LABEL_PAD = 11; // gap from the wall to a pin label (renderer draws at this x)
+const FF_EAST_GAP = 20; // room for the Q triangle (depth 8) + clearance
 const FF_Q_PITCH = 16; // minimum spacing between adjacent east (output) pins
 const FF_Q_TOP = 12; // top inset of the east output column
 const FF_Q_BOT = 12; // bottom inset of the east output column
 
-// Width needed to host `slots` evenly-spaced bottom pins at >= FF_PITCH, never
-// below the default. `slots` counts data pins plus the reset (which takes the
-// centre slot). Small FFs stay at FF_W; only a genuinely wide pin row grows it.
-export const ffWidth = (slots: number) =>
-  slots <= 1 ? FF_W : Math.max(FF_W, 2 * FF_MARGIN + (slots - 1) * FF_PITCH);
-
-// A flip-flop: clock on the left wall (low), the data pins spread evenly across
-// the bottom edge with the reset held dead-centre, and one east pin per distinct
+// A storage element (inferred FF or level latch, #115): data + enable inputs as
+// labelled rows down the west wall (enable last, just above the clock wedge),
+// the async reset as a bubble on the south edge, and one east pin per distinct
 // output spread down the right wall — so a register driving several signals shows
-// each as its own output rather than one fanned-out pin. The box grows tall enough
-// to host the output column. FIXED_POS so the renderer can match glyphs to ports.
-function ffChild(n: SchNode): ElkChild {
-  const by = (r: FfRole) => n.ports.filter((p) => ffRole(p) === r);
-  const data = by("data");
+// each as its own output rather than one fanned-out pin. Width fits the longest
+// input label; height fits the input rows plus wedge, or the output column.
+// FIXED_POS so the renderer can match glyphs to ports.
+function storageChild(n: SchNode): ElkChild {
+  const by = (r: FfRole) => n.ports.filter((p) => ffRole(p, n.kind) === r);
+  const westPins = [...by("data"), ...by("enable")];
   const reset = by("reset");
+  const clks = by("clk");
   const qs = by("q");
-  const hasReset = reset.length > 0;
-  // The reset occupies one of the evenly-spaced bottom slots (the centre one).
-  const slots = data.length + (hasReset ? 1 : 0);
-  const W = ffWidth(slots);
-  // Tall enough to spread every output down the east wall at >= FF_Q_PITCH.
-  const H =
-    qs.length > 1
-      ? Math.max(FF_H, FF_Q_TOP + (qs.length - 1) * FF_Q_PITCH + FF_Q_BOT)
-      : FF_H;
-  const south = (id: number, x: number): ElkPort => ({
-    id: portId(id),
-    width: 0,
-    height: 0,
-    x,
-    y: H,
-    layoutOptions: { "elk.port.side": "SOUTH" },
-  });
+  const rows = westPins.length;
+
+  // The longest west label must fit between the label pad and the Q triangles.
+  const wMax = westPins.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
+  const W = Math.max(FF_W, FF_LABEL_PAD + wMax * PIN_CH + FF_EAST_GAP);
+  // A latch has no wedge, so its last row only needs the plain top inset below it.
+  const bot = clks.length ? FF_CLK_ZONE : FF_TOP;
+  const H = Math.max(
+    FF_H,
+    rows ? FF_TOP + (rows - 1) * FF_PITCH + bot : 0,
+    // Tall enough to spread every output down the east wall at >= FF_Q_PITCH.
+    qs.length > 1 ? FF_Q_TOP + (qs.length - 1) * FF_Q_PITCH + FF_Q_BOT : 0,
+  );
   const west = (id: number, y: number): ElkPort => ({
     id: portId(id),
     width: 0,
@@ -139,27 +145,24 @@ function ffChild(n: SchNode): ElkChild {
       layoutOptions: { "elk.port.side": "EAST" },
     }),
   );
-  for (const p of by("clk")) ports.push(west(p.id, H - 11));
-
-  // One evenly-spaced row of `slots` positions across [margin, W - margin]. The
-  // centre slot is reserved for the reset (snapped to exactly W/2); the data pins
-  // fill the remaining slots in order, so the row reads as a single even spread.
-  const lo = FF_MARGIN;
-  const hi = W - FF_MARGIN;
-  const slotX = (i: number) => (slots > 1 ? lo + ((hi - lo) * i) / (slots - 1) : W / 2);
-  const mid = hasReset ? Math.round((slots - 1) / 2) : -1;
-  let di = 0;
-  for (let i = 0; i < slots; i++) {
-    if (i === mid) continue; // reserved for the centred reset
-    ports.push(south(data[di++].id, slotX(i)));
-  }
-  if (hasReset) ports.push(south(reset[0].id, W / 2));
+  westPins.forEach((p, i) => ports.push(west(p.id, FF_TOP + i * FF_PITCH)));
+  for (const p of clks) ports.push(west(p.id, H - 11));
+  // The async reset draws as a bubble under the box, dead-centre.
+  if (reset.length)
+    ports.push({
+      id: portId(reset[0].id),
+      width: 0,
+      height: 0,
+      x: W / 2,
+      y: H,
+      layoutOptions: { "elk.port.side": "SOUTH" },
+    });
 
   return {
     id: nodeId(n.id),
     width: W,
     height: H,
-    labels: [{ text: "FF" }],
+    labels: [{ text: n.kind === "Latch" ? "LE" : "FF" }],
     layoutOptions: { "elk.portConstraints": "FIXED_POS" },
     ports,
   };
@@ -227,9 +230,9 @@ export function toElk(graph: SchematicGraph): ElkGraph {
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
 
   const children: ElkChild[] = graph.nodes.map((n): ElkChild => {
-    // Inferred register: a fixed-size FF symbol with explicitly-placed pins —
-    // clock + reset + conditions along the bottom, Q on the right centre.
-    if (n.kind === "FF") return ffChild(n);
+    // Inferred storage (register / level latch): an FF-style symbol with
+    // labelled west input rows, clock wedge, south reset bubble, east Qs.
+    if (n.kind === "FF" || n.kind === "Latch") return storageChild(n);
     // Continuous assign: a stadium capsule (inputs west, output east).
     if (n.kind === "Assign") return assignChild(n);
     // Boundary I/O pin: a small node sized to its label, with its single port
