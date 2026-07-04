@@ -353,12 +353,20 @@ export async function layout(graph: SchematicGraph): Promise<any> {
 }
 
 /// Zoom factor that fits a laid-out graph (`baseW`x`baseH`) inside a pane
-/// (`paneW`x`paneH`), clamped to <= 1 so small scopes render at natural size
-/// rather than being magnified. Returns 1 when the pane is unmeasurable
-/// (e.g. a hidden or not-yet-laid-out host reports 0) to avoid div-by-zero.
-export function fitZoom(baseW: number, baseH: number, paneW: number, paneH: number): number {
+/// (`paneW`x`paneH`), clamped to <= `maxZoom`. The default cap of 1 keeps small
+/// scopes at natural size on drill-in; an explicit fit (#114) passes a higher
+/// cap so the schematic fills a pane larger than the graph. Returns 1 when the
+/// pane is unmeasurable (e.g. a hidden or not-yet-laid-out host reports 0) to
+/// avoid div-by-zero.
+export function fitZoom(
+  baseW: number,
+  baseH: number,
+  paneW: number,
+  paneH: number,
+  maxZoom = 1,
+): number {
   if (baseW <= 0 || baseH <= 0 || paneW <= 0 || paneH <= 0) return 1;
-  return Math.min(1, paneW / baseW, paneH / baseH);
+  return Math.min(maxZoom, paneW / baseW, paneH / baseH);
 }
 
 // --- wire-label placement --------------------------------------------------

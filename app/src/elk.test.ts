@@ -350,4 +350,23 @@ describe("fitZoom", () => {
     // jsdom/hidden panes report 0 for clientWidth/Height — don't divide by zero.
     expect(fitZoom(2000, 1500, 0, 0)).toBe(1);
   });
+
+  it("magnifies a small graph to fill the pane when maxZoom allows (#114)", () => {
+    // 200x150 graph in an 800x600 pane: both ratios are 4, under the 6x cap.
+    expect(fitZoom(200, 150, 800, 600, 6)).toBeCloseTo(4);
+  });
+
+  it("caps magnification at maxZoom", () => {
+    // Tiny graph in a huge pane: fill would be 60x — clamp to the cap.
+    expect(fitZoom(100, 100, 6000, 6000, 6)).toBe(6);
+  });
+
+  it("still shrinks past 1 when maxZoom is raised", () => {
+    // maxZoom only lifts the ceiling; a large graph still scales down to fit.
+    expect(fitZoom(2000, 1500, 800, 600, 6)).toBeCloseTo(0.4);
+  });
+
+  it("ignores maxZoom when the pane is unmeasurable", () => {
+    expect(fitZoom(200, 150, 0, 0, 6)).toBe(1);
+  });
 });

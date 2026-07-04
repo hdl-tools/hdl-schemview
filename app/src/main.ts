@@ -298,9 +298,21 @@ function highlightTree(path: string) {
 
 // -- schematic -------------------------------------------------------------
 
+// Zoom bounds shared by manual zoom (setZoom) and explicit fit (fitView, #114).
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 6;
+
 // Current zoom factor. Manual zoom (setZoom) mutates it in place; a scope change
 // resets it via renderSchematic's zoom-to-fit (or restores a saved view on back).
 const zoom = { k: 1 };
+// Fit mode (#114): true while the view is still the fitted view (drill-in or
+// fitView), so a window resize re-fits the schematic; manual zoom/pan disarms
+// it until the next fit.
+let fitted = true;
+// Timestamp of the last code-driven scroll write. The pane's scroll handler
+// ignores events this close to it, so a programmatic scroll (fit's reset to
+// origin, navigate-back's viewport restore) doesn't read as a manual pan.
+let programmaticScrollAt = 0;
 
 async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const host = $("schematic");
@@ -545,8 +557,10 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // is visible, scrolled top-left — unless we're navigating back, in which case
   // restore the viewport we left. (Manual zoom via setZoom is unaffected after.)
   zoom.k = restore ? restore.k : fitZoom(baseW, baseH, host.clientWidth, host.clientHeight);
+  fitted = !restore; // a restored viewport is the user's manual view, not a fit
   host.appendChild(svg);
   applyZoom(svg);
+  programmaticScrollAt = performance.now();
   host.scrollLeft = restore ? restore.scrollLeft : 0;
   host.scrollTop = restore ? restore.scrollTop : 0;
   // Place labels against the final viewport (orientation + visible-portion).
@@ -966,7 +980,8 @@ function setZoom(k: number, focus?: { x: number; y: number }) {
   const svg = host.querySelector("svg");
   if (!svg) return;
   const prev = zoom.k;
-  zoom.k = Math.min(6, Math.max(0.2, k));
+  zoom.k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, k));
+  fitted = false; // manual zoom leaves fit mode (#114)
   const rect = host.getBoundingClientRect();
   const fx = focus ? focus.x - rect.left : host.clientWidth / 2;
   const fy = focus ? focus.y - rect.top : host.clientHeight / 2;
@@ -987,8 +1002,10 @@ function fitView() {
   if (!svg) return;
   const bw = Number(svg.dataset.baseW) || 400;
   const bh = Number(svg.dataset.baseH) || 300;
-  zoom.k = fitZoom(bw, bh, host.clientWidth, host.clientHeight);
+  zoom.k = fitZoom(bw, bh, host.clientWidth, host.clientHeight, MAX_ZOOM);
+  fitted = true;
   applyZoom(svg);
+  programmaticScrollAt = performance.now();
   host.scrollLeft = 0;
   host.scrollTop = 0;
   placeWireLabels();
@@ -1023,7 +1040,16 @@ function setupZoom() {
   $("zoom-out").addEventListener("click", () => setZoom(zoom.k / 1.25));
   $("zoom-reset").addEventListener("click", fitView); // fit, not actual-size 100%
   // Panning (native scroll) re-places net labels onto the visible wire portion.
-  host.addEventListener("scroll", placeWireLabels, { passive: true });
+  // A user-initiated scroll also leaves fit mode (#114) — but programmatic
+  // scrolls (fit's origin reset, navigate-back's restore) must not.
+  host.addEventListener(
+    "scroll",
+    () => {
+      if (performance.now() - programmaticScrollAt > 200) fitted = false;
+      placeWireLabels();
+    },
+    { passive: true },
+  );
 }
 
 // `node.path` isn't in the layout; look it up from the graph by id.
@@ -1856,7 +1882,12 @@ function init() {
     if (e.key === "Escape") closeContextMenu();
   });
   // Track canvases are sized from their laid-out cell width; rescale on resize.
-  window.addEventListener("resize", redrawTracks);
+  // While the schematic is still in its fitted view, re-fit it to the resized
+  // pane so it keeps tracking the window (#114).
+  window.addEventListener("resize", () => {
+    redrawTracks();
+    if (fitted) fitView();
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
