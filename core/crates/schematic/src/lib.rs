@@ -59,6 +59,12 @@ pub struct SchPort {
     /// triangle of a normal scalar/bus pin.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub bundle: bool,
+    /// Marks a pin nothing connects to (#118): an instance port with no model
+    /// edge and no constant tie-off, or a synthesized logic output no box in
+    /// the scope reads. Shown dimmed so a floating pin reads as intentionally
+    /// unconnected rather than a rendering bug.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dangling: bool,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -283,6 +289,16 @@ fn width_of(type_: &Option<String>) -> Option<String> {
     Some(t[lo..=hi].to_string())
 }
 
+/// Pin bit-range with an enum fallback (#118): the declared packed range, or —
+/// for an enum-typed signal (`lane_state_e`) — the range implied by the enum's
+/// width in the model's normalized enum table. A model fact, never a guess.
+fn pin_width(design: &Design, type_: &Option<String>) -> Option<String> {
+    width_of(type_).or_else(|| {
+        let e = design.enum_for_type(type_.as_deref()?)?;
+        Some(format!("[{}:0]", e.width.saturating_sub(1)))
+    })
+}
+
 /// Aggregate access ports of a bare interface instance bundle (#96): one port
 /// per way the design touches the bundle, read off the connection edges —
 /// never a name guess. Returns the used modport views as `(Modport node, view
@@ -370,14 +386,12 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         .iter()
         .copied()
         .filter(|&c| is_kind(design, c, NodeKind::Port))
-        // Show wired pins and constant-tied inputs; dangling ports (unconnected
-        // outputs like mem_la_*, pcpi_*) are hidden to keep blocks compact.
-        .filter(|&pid| {
-            design.edges_of(pid).iter().any(|e| e.port == pid)
-                || design.node(pid).is_some_and(|n| n.const_value.is_some())
-        })
         .map(|pid| {
             let node = design.node(pid);
+            // A pin with no model edge and no constant tie-off is floating in
+            // the design (#118): shown, but marked so the frontend dims it.
+            let dangling = !design.edges_of(pid).iter().any(|e| e.port == pid)
+                && node.is_some_and(|n| n.const_value.is_none());
             // Prefer the port's declared direction so even unconnected pins land
             // on the correct side; fall back to an incident edge, then West.
             let side = node
@@ -396,9 +410,10 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),
                 side,
                 path: node.map(|n| n.path.clone()).unwrap_or_default(),
-                width: node.and_then(|n| width_of(&n.type_)),
+                width: node.and_then(|n| pin_width(design, &n.type_)),
                 role: None,
                 bundle: false,
+                dangling,
             }
         })
         .collect();
@@ -417,6 +432,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 width: None,
                 role: None,
                 bundle: true,
+                dangling: false,
             });
         }
         if let Some(side) = raw {
@@ -428,6 +444,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 width: None,
                 role: None,
                 bundle: true,
+                dangling: false,
             });
         }
     }
@@ -470,6 +487,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
             width: None,
             role: None,
             bundle: true,
+            dangling: false,
         });
     }
     let label = relative_to(&n.path, scope);
@@ -509,6 +527,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
             width: None,
             role: None,
             bundle: false,
+            dangling: false,
         }],
         module: None,
         constant: Some(lit.to_string()),
@@ -543,9 +562,10 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
-                width: sig.and_then(|s| width_of(&s.type_)),
+                width: sig.and_then(|s| pin_width(design, &s.type_)),
                 role,
                 bundle: false,
+                dangling: false,
             }
         })
         .collect();
@@ -591,9 +611,10 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
-                width: sig.and_then(|s| width_of(&s.type_)),
+                width: sig.and_then(|s| pin_width(design, &s.type_)),
                 role,
                 bundle: false,
+                dangling: false,
             }
         })
         .collect();
@@ -633,9 +654,10 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             name: n.name.clone(),
             side,
             path: n.path.clone(),
-            width: width_of(&n.type_),
+            width: pin_width(design, &n.type_),
             role: None,
             bundle: false,
+            dangling: false,
         }],
         module: None,
         constant: None,
@@ -1005,16 +1027,19 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         }
     }
 
-    // Hide dangling output pins on synthesized logic boxes — an FF/comb/assign
-    // output that nothing in this scope reads — mirroring make_box's pruning of
-    // unconnected module ports, so a register driving several signals shows only
-    // the outputs that actually go somewhere.
+    // Mark dangling output pins on synthesized logic boxes (#118) — an FF/comb/
+    // assign output that nothing in this scope reads stays visible (dimmed by
+    // the frontend) instead of being pruned, so a write-only register still
+    // shows its Q with the signal's name.
     let wired: std::collections::HashSet<NodeId> =
         edges.iter().flat_map(|e| [e.source, e.target]).collect();
     for node in &mut nodes {
         if is_logic_box(design, node.id) {
-            node.ports
-                .retain(|p| p.side != Side::East || wired.contains(&p.id));
+            for p in &mut node.ports {
+                if p.side == Side::East && !wired.contains(&p.id) {
+                    p.dangling = true;
+                }
+            }
         }
     }
 

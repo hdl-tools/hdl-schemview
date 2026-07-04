@@ -113,8 +113,14 @@ function storageChild(n: SchNode): ElkChild {
   const rows = westPins.length;
 
   // The longest west label must fit between the label pad and the Q triangles.
+  // A dangling Q is labelled in-box too (#118) — no wire label names it — so
+  // reserve room for the longest such label alongside the west rows.
   const wMax = westPins.reduce((m, p) => Math.max(m, pinLabelLen(p)), 0);
-  const W = Math.max(FF_W, FF_LABEL_PAD + wMax * PIN_CH + FF_EAST_GAP);
+  const eMax = qs.reduce((m, p) => (p.dangling ? Math.max(m, pinLabelLen(p)) : m), 0);
+  const W = Math.max(
+    FF_W,
+    FF_LABEL_PAD + (wMax + eMax) * PIN_CH + (eMax ? FF_LABEL_PAD : 0) + FF_EAST_GAP,
+  );
   // A latch has no wedge, so its last row only needs the plain top inset below it.
   const bot = clks.length ? FF_CLK_ZONE : FF_TOP;
   const H = Math.max(

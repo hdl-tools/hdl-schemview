@@ -55,10 +55,11 @@ fn scope_graph_has_boxes_and_wires() {
     assert_eq!(clk.side, Side::West, "input clk on the west");
     let mv = core.ports.iter().find(|p| p.name == "mem_valid").unwrap();
     assert_eq!(mv.side, Side::East, "output mem_valid on the east");
-    // Unconnected ports are hidden to keep blocks compact.
+    // Unconnected ports show as dangling pins instead of being hidden (#118).
+    let eoi = core.ports.iter().find(|p| p.name == "eoi").unwrap();
     assert!(
-        core.ports.iter().all(|p| p.name != "eoi"),
-        "dangling output eoi should be hidden"
+        eoi.dangling,
+        "unconnected output eoi shows, marked dangling"
     );
 
     // There is internal wiring, including the memory↔bus connection. Wires
@@ -549,7 +550,7 @@ fn top_scope_has_boundary_io_pins() {
 }
 
 #[test]
-fn inferred_ff_shows_clock_and_hides_dangling_output() {
+fn inferred_ff_shows_clock_and_dangling_output() {
     let d = design();
     let top = scope_graph(&d, "picorv32_soc").expect("top graph");
     let ffs: Vec<_> = top
@@ -565,12 +566,27 @@ fn inferred_ff_shows_clock_and_hides_dangling_output() {
         .find(|p| p.name == "clk")
         .expect("FF clock pin");
     assert_eq!(clk.side, Side::West, "clock on the west");
-    // `lane_state` is written by the FF but read by nothing in the scope, so its
-    // dangling output pin is hidden (like unconnected module ports).
+    assert!(!clk.dangling, "the wired clock must not read as dangling");
+    // `lane_state` is written by the FF but read by nothing in the scope (#118):
+    // its Q pin stays visible, marked dangling, instead of being pruned — and
+    // carries the enum's width from the model's enum table.
+    let q = ff
+        .ports
+        .iter()
+        .find(|p| p.side == Side::East)
+        .expect("dangling lane_state output pin");
+    assert_eq!(q.name, "lane_state");
+    assert!(q.dangling, "unread output must be marked dangling");
+    assert_eq!(
+        q.width.as_deref(),
+        Some("[1:0]"),
+        "enum width from the model"
+    );
     assert!(
-        ff.ports.iter().all(|p| p.side != Side::East),
-        "dangling lane_state output should be hidden: {:?}",
-        ff.ports.iter().map(|p| &p.name).collect::<Vec<_>>()
+        !top.edges
+            .iter()
+            .any(|e| e.source == q.id || e.target == q.id),
+        "a dangling pin has no wire"
     );
     // The FF clock pin is wired into the design (to the boundary clk).
     assert!(
@@ -579,6 +595,29 @@ fn inferred_ff_shows_clock_and_hides_dangling_output() {
             .any(|e| e.source == clk.id || e.target == clk.id),
         "FF clock is not wired"
     );
+}
+
+#[test]
+fn unconnected_instance_outputs_show_as_dangling_pins() {
+    // #118: picorv32 leaves mem_la_*/pcpi_*/trace_* unconnected in this design —
+    // they must appear on the core box as dangling pins instead of vanishing.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+    let core = g.nodes.iter().find(|n| n.label == "core").unwrap();
+    let la = core
+        .ports
+        .iter()
+        .find(|p| p.name == "mem_la_read")
+        .expect("unconnected mem_la_read output pin");
+    assert!(la.dangling, "unconnected output must be marked dangling");
+    assert_eq!(la.side, Side::East, "declared direction places the pin");
+    // A connected pin stays undimmed.
+    let trap = core
+        .ports
+        .iter()
+        .find(|p| p.name == "trap")
+        .expect("trap pin");
+    assert!(!trap.dangling, "wired pins are not dangling");
 }
 
 #[test]

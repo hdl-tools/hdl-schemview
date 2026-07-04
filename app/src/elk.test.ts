@@ -297,6 +297,15 @@ describe("ffChild", () => {
     expect(ys[ys.length - 2]).toBe(c.height! - FF_CLK_ZONE);
   });
 
+  it("grows width for a labelled dangling output (#118)", () => {
+    // A dangling Q has no wire label to name it, so the glyph labels it in-box
+    // — the body must reserve room alongside the west rows.
+    const dq: SchPort = { id: 31, name: "lane_state", side: "east", width: "[1:0]", dangling: true };
+    expect(ffChildOf([clk, data(2), dq]).width).toBeGreaterThan(FF_W);
+    // A wired Q still costs nothing (the wire label carries the name).
+    expect(ffChildOf([clk, data(2), q]).width).toBe(FF_W);
+  });
+
   it("grows width with the longest west pin label, not east names", () => {
     const wide: SchPort = { id: 30, name: "mem_la_wstrb", side: "west", width: "[31:0]" };
     expect(ffChildOf([clk, wide, q]).width).toBeGreaterThan(FF_W);
