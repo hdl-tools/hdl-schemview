@@ -870,17 +870,45 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         let mut loads: std::collections::HashMap<NodeId, Vec<Anchor>> =
             std::collections::HashMap::new();
         for e in design.edges() {
-            if !is_logic_box(design, e.port) || !box_set.contains(&e.port) {
-                continue;
-            }
             // Join a boundary signal under its boundary pin so a port and its
             // backing net share a bucket; other signals key on the signal node.
             let key = *boundary_of.get(&e.endpoint).unwrap_or(&e.endpoint);
-            let anchor = (pins.pin(e.port, e.endpoint), e.select.clone());
-            if e.dir == Dir::Out {
-                drivers.entry(key).or_default().push(anchor);
-            } else {
-                loads.entry(key).or_default().push(anchor);
+            if is_logic_box(design, e.port) && box_set.contains(&e.port) {
+                let anchor = (pins.pin(e.port, e.endpoint), e.select.clone());
+                if e.dir == Dir::Out {
+                    drivers.entry(key).or_default().push(anchor);
+                } else {
+                    loads.entry(key).or_default().push(anchor);
+                }
+                continue;
+            }
+            // Plain instance ports fold in too (#116): an output drives the
+            // scope signal, an input loads it — otherwise a net driven only by
+            // an instance (e.g. `core_trap` from the core's `trap` port) has
+            // loads but no driver and its wire to an FF/Comb is dropped. The
+            // structural pass already draws instance<->instance connections,
+            // so the shared `seen` set below dedups those pairs. Interface
+            // machinery keeps its own folds: only Instance parents qualify
+            // (an instance inside a dissolved GenBlock is itself hoisted into
+            // `box_set` by `child_boxes`, so its ports fold like any other).
+            let Some(pn) = design.node(e.port) else {
+                continue;
+            };
+            if pn.kind != NodeKind::Port {
+                continue;
+            }
+            let Some(parent) = pn.parent else { continue };
+            if !box_set.contains(&parent) || !is_kind(design, parent, NodeKind::Instance) {
+                continue;
+            }
+            let anchor = (e.port, e.select.clone());
+            match e.dir {
+                Dir::Out => drivers.entry(key).or_default().push(anchor),
+                Dir::In => loads.entry(key).or_default().push(anchor),
+                _ => {
+                    drivers.entry(key).or_default().push(anchor.clone());
+                    loads.entry(key).or_default().push(anchor);
+                }
             }
         }
         // Boundary-like anchors fold in by declared direction: an input drives
@@ -928,9 +956,15 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             let net_path = design.node(sig).map(|n| n.path.clone());
             for &(dpin, ref dsel) in ds {
                 for &(lpin, ref lsel) in ls {
-                    // No self-loop (a box reading and writing the same signal); dedup
-                    // against the shared `seen` set.
-                    if dpin == lpin || !seen.insert((dpin.min(lpin), dpin.max(lpin))) {
+                    // No self-loop (a box reading and writing the same signal); a
+                    // driver and a load touching *different* bits of a vector are
+                    // not connected (#116: core 0 drives core_trap[0], lane 1's FF
+                    // reads [1]); dedup against the shared `seen` set last so a
+                    // skipped pair doesn't block a legitimate one.
+                    if dpin == lpin
+                        || matches!((dsel, lsel), (Some(a), Some(b)) if a != b)
+                        || !seen.insert((dpin.min(lpin), dpin.max(lpin)))
+                    {
                         continue;
                     }
                     let select = dsel.clone().or_else(|| lsel.clone());

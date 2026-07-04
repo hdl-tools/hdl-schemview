@@ -582,6 +582,56 @@ fn inferred_ff_shows_clock_and_hides_dangling_output() {
 }
 
 #[test]
+fn instance_output_wires_to_ff_read_pin() {
+    // #116: `core_trap` is driven by each core's `trap` output port and read by
+    // the lane FF — no logic box drives it, so the signal-join must fold plain
+    // instance ports as drivers or the FF's read pin floats. The recorded
+    // bit-selects must pair core[i] with lane i's FF only.
+    let d = design();
+    let top = scope_graph(&d, "picorv32_soc").expect("top graph");
+    let trap = |lane: usize| id(&d, &format!("picorv32_soc.g_lane[{lane}].core.trap"));
+    let ff_pin = |lane: usize| {
+        let ff = top
+            .nodes
+            .iter()
+            .find(|n| {
+                n.kind == svxprobe_model::NodeKind::Ff
+                    && n.path.starts_with(&format!("picorv32_soc.g_lane[{lane}]"))
+            })
+            .expect("lane FF");
+        ff.ports
+            .iter()
+            .find(|p| p.name == "core_trap")
+            .expect("FF core_trap read pin")
+            .id
+    };
+    let edge_between = |a: NodeId, b: NodeId| {
+        top.edges
+            .iter()
+            .find(|e| (e.source == a && e.target == b) || (e.source == b && e.target == a))
+    };
+    for lane in 0..2 {
+        assert!(
+            edge_between(trap(lane), ff_pin(lane)).is_some(),
+            "core {lane} trap output must wire to lane {lane}'s FF read pin"
+        );
+    }
+    // The two lanes touch different bits of `core_trap` — the selects keep the
+    // cross product from wiring core 0 into lane 1 (and vice versa).
+    assert!(
+        edge_between(trap(0), ff_pin(1)).is_none(),
+        "bit-select mismatch must not wire"
+    );
+    assert!(
+        edge_between(trap(1), ff_pin(0)).is_none(),
+        "bit-select mismatch must not wire"
+    );
+    // The label carries the driven bit.
+    let e = edge_between(trap(0), ff_pin(0)).unwrap();
+    assert_eq!(e.net.as_deref(), Some("core_trap[0]"));
+}
+
+#[test]
 fn shared_signal_gives_each_ff_a_distinct_pin() {
     let d = design();
     let top = scope_graph(&d, "picorv32_soc").expect("top graph");
