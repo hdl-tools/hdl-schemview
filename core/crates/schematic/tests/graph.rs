@@ -83,6 +83,57 @@ fn scope_graph_has_boxes_and_wires() {
 }
 
 #[test]
+fn modport_interface_port_is_a_bundle_pin_on_its_instance() {
+    // #106: in the parent scope, a modport-qualified interface port shows as a
+    // single bundle pin on the consuming instance box — the modport connection
+    // sits in the port row alongside the module's other pins. Members stay on
+    // the drilled view's bundle box.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+
+    let memory = g.nodes.iter().find(|n| n.label == "memory").unwrap();
+    let pin = memory
+        .ports
+        .iter()
+        .find(|p| p.path == "picorv32_soc.g_lane[0].memory.bus")
+        .expect("bundle pin for the modport-qualified interface port");
+    // Labelled with the bundle name plus its interface type and modport view.
+    assert_eq!(pin.name, "bus (mem_if.mem)");
+    // Side from the members' direction majority (mem: 6 in / 2 out → west).
+    assert_eq!(pin.side, Side::West);
+    assert_eq!(pin.width, None, "a bundle pin carries no bit-range");
+    // The pin is the interface-port node itself, so a right-click cross-probes
+    // it directly via probe_node.
+    assert!(
+        d.nodes_at_path(&pin.path).contains(&pin.id),
+        "pin path resolves back to the interface-port node"
+    );
+
+    // The memory↔bus wire anchors at the bundle pin, not the box corner —
+    // and only once (member-level edges collapse onto the same pin).
+    let bus = id(&d, "picorv32_soc.g_lane[0].bus");
+    let pin_wires: Vec<_> = g
+        .edges
+        .iter()
+        .filter(|e| {
+            (e.source == pin.id && e.target == bus) || (e.source == bus && e.target == pin.id)
+        })
+        .collect();
+    assert_eq!(pin_wires.len(), 1, "one wire from bundle pin to bundle box");
+    // No leftover box-anchored wire between memory and bus.
+    assert!(
+        !g.edges
+            .iter()
+            .any(|e| (e.source == memory.id && e.target == bus)
+                || (e.source == bus && e.target == memory.id)),
+        "no box-corner wire remains between memory and bus"
+    );
+
+    // The bare interface instance keeps its bundle box.
+    assert!(g.nodes.iter().any(|n| n.label == "bus"), "bus box remains");
+}
+
+#[test]
 fn wires_carry_the_net_canonical_path() {
     // A clicked wire cross-probes its net to source/waveform by a pure model
     // lookup, so each structural edge must carry the connecting net's *canonical*
@@ -254,6 +305,26 @@ fn modport_interface_port_has_directional_pins() {
         "bare instance keeps no member pins: {:?}",
         inst.ports
     );
+}
+
+#[test]
+fn modport_interface_port_carries_its_view_on_the_node() {
+    // #106: the drilled view's bundle box carries the modport view so the
+    // frontend can place it at the boundary frame (a modport-qualified port is
+    // the module's window to the outside, like its other ports) and sublabel
+    // it `mem_if.mem`. A bare interface instance carries none.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].memory").expect("scope graph");
+    let bus = g.nodes.iter().find(|n| n.label == "bus").unwrap();
+    assert_eq!(
+        bus.modport.as_deref(),
+        Some("mem"),
+        "view on the bundle box"
+    );
+
+    let lane = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("lane graph");
+    let inst = lane.nodes.iter().find(|n| n.label == "bus").unwrap();
+    assert_eq!(inst.modport, None, "bare instance carries no view");
 }
 
 #[test]

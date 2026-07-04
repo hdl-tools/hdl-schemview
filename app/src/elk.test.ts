@@ -100,6 +100,38 @@ describe("toElk", () => {
     expect(c.height).toBeGreaterThan(58);
   });
 
+  it("clusters a modport-qualified bundle at the boundary frame", () => {
+    // #106: inside the consumer, its modport-qualified interface port is the
+    // module's window to the outside — it hugs the boundary, but in the first
+    // *regular* layer (FIRST/LAST, not the _SEPARATE frame column) so the
+    // scope's own boundary pins keep their exclusive frame layer and stay at
+    // the top corner instead of stacking under the tall bundle. A mostly-in
+    // view (pins mirrored east, feeding the design) sits first; a mostly-out
+    // view last. A bare interface instance (no modport) stays a free box.
+    const bundle = (modport: string | undefined, sides: ("east" | "west")[]): SchematicGraph => ({
+      root: "s.memory",
+      nodes: [
+        {
+          id: 1,
+          kind: "Interface",
+          label: "bus",
+          path: "s.memory.bus",
+          expandable: false,
+          module: "mem_if",
+          modport,
+          ports: sides.map((side, i) => ({ id: 10 + i, name: `m${i}`, side })),
+        },
+      ],
+      edges: [],
+    });
+    const mostlyIn = toElk(bundle("mem", ["east", "east", "east", "west"])).children[0];
+    expect(mostlyIn.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("FIRST");
+    const mostlyOut = toElk(bundle("core", ["west", "west", "east"])).children[0];
+    expect(mostlyOut.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("LAST");
+    const bare = toElk(bundle(undefined, ["east", "west"])).children[0];
+    expect(bare.layoutOptions["elk.layered.layering.layerConstraint"]).toBeUndefined();
+  });
+
   it("keeps comb nodes compact despite long signal names", () => {
     // Comb draws bare pin stubs (no per-pin labels), so its width must not reserve
     // room for the connected signal names — only the short title.

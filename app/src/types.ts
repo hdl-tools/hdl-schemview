@@ -35,6 +35,12 @@ export interface SchNode {
   module?: string;
   /** Literal of a constant-source node (e.g. "32'd0"); drives one tied input. */
   constant?: string;
+  /**
+   * Modport view of a modport-qualified interface port (e.g. "mem"); absent
+   * for bare interface instances. Marks the bundle as boundary-like: it
+   * clusters at the frame and is sublabelled `(mem_if.mem)`.
+   */
+  modport?: string;
 }
 export interface SchEdge {
   id: number;

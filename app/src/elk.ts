@@ -288,12 +288,23 @@ export function toElk(graph: SchematicGraph): ElkGraph {
       y: base + shift + i * pitch,
       layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
     });
+    const layoutOptions: Record<string, string> = { "elk.portConstraints": "FIXED_POS" };
+    // A modport-qualified bundle is the scope's window to the outside, so it
+    // hugs the boundary (#106) — in the first/last *regular* layer, not the
+    // _SEPARATE frame column, so the scope's own boundary pins keep their
+    // exclusive layer and stay at the top corner instead of stacking under the
+    // tall bundle. Its pins are mirrored: a mostly-in view feeds the design
+    // from its east side, so it sits first; a mostly-out view last.
+    if (n.kind === "Interface" && n.modport) {
+      layoutOptions["elk.layered.layering.layerConstraint"] =
+        east.length >= west.length ? "FIRST" : "LAST";
+    }
     return {
       id: nodeId(n.id),
       width: w,
       height: h,
       labels: [{ text: n.label }],
-      layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+      layoutOptions,
       ports: [
         ...west.map((p, i) => sidePort(p, i, 0)),
         ...east.map((p, i) => sidePort(p, i, w)),
