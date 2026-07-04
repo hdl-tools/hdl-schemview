@@ -16,6 +16,12 @@ export interface SchPort {
    * for plain data pins and all module-instance ports.
    */
   role?: "clk" | "reset" | "enable";
+  /**
+   * Marks a bundle pin — a whole-interface connection (#106 consumer bundle
+   * pin, #96 aggregate access ports). Drawn square instead of the directional
+   * triangle. Absent for normal pins.
+   */
+  bundle?: boolean;
 }
 export interface SchNode {
   id: number;

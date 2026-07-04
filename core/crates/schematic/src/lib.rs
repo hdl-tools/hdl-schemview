@@ -53,6 +53,12 @@ pub struct SchPort {
     /// and all module-instance ports.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<PinRole>,
+    /// Marks a bundle pin — a whole-interface connection rather than one
+    /// signal: a consumer's modport-qualified port (#106) and a bare bundle's
+    /// aggregate access ports (#96). Drawn square, unlike the directional
+    /// triangle of a normal scalar/bus pin.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub bundle: bool,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -89,6 +95,11 @@ const CONST_ID_BASE: NodeId = 1 << 28;
 /// out per `(box, signal)` by [`PinAlloc`] so boxes sharing a net keep distinct
 /// pins.
 const LOGIC_PIN_BASE: NodeId = 1 << 30;
+
+/// Synthetic id base for a bare interface bundle's raw-access port (#96), keyed
+/// by the instance id — disjoint from `CONST_ID_BASE` (keyed by port id) and
+/// below `LOGIC_PIN_BASE`.
+const RAW_PORT_BASE: NodeId = 3 << 28;
 
 /// Allocates a distinct, stable synthetic pin id per `(box, signal)` pair. Keying
 /// on the box (not the signal alone) keeps several boxes that share one net — a
@@ -272,6 +283,78 @@ fn width_of(type_: &Option<String>) -> Option<String> {
     Some(t[lo..=hi].to_string())
 }
 
+/// Aggregate access ports of a bare interface instance bundle (#96): one port
+/// per way the design touches the bundle, read off the connection edges —
+/// never a name guess. Returns the used modport views as `(Modport node, view
+/// name, side)` — a consumer bound through a view (`.bus(bus.mem)`) gets a
+/// port carried by the `Modport` node itself, so a click cross-probes the view
+/// — plus the side of one shared raw port when consumers tap members directly
+/// (`bus.valid`), or `None` when nothing does. Sides come from direction
+/// majorities: a mostly-out view produces into the design (west), and the raw
+/// port faces its tap majority (mostly driven-into ⇒ west).
+fn access_ports(design: &Design, iface: NodeId) -> (Vec<(NodeId, String, Side)>, Option<Side>) {
+    let Some(n) = design.node(iface) else {
+        return (Vec::new(), None);
+    };
+    let inside: std::collections::HashSet<NodeId> = n.children.iter().copied().collect();
+    // The modport view (name) an edge endpoint accesses the bundle through: the
+    // consumer's modport-qualified interface port, or one of its member pins.
+    let view_of = |id: NodeId| -> Option<&str> {
+        let x = design.node(id)?;
+        if x.kind == NodeKind::Interface {
+            return x.modport.as_deref();
+        }
+        let p = design.node(x.parent?)?;
+        if p.kind != NodeKind::Interface {
+            return None;
+        }
+        p.modport.as_deref()
+    };
+    let mut used: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let (mut raw_in, mut raw_out) = (0usize, 0usize);
+    for e in design.edges() {
+        // A connection *into* the bundle: its endpoint is the instance, one of
+        // its members, or a modport view — from a port outside the interface.
+        if (e.endpoint != iface && !inside.contains(&e.endpoint))
+            || e.port == iface
+            || inside.contains(&e.port)
+        {
+            continue;
+        }
+        match view_of(e.port) {
+            Some(v) => {
+                used.insert(v);
+            }
+            None => match e.dir {
+                Dir::Out => raw_out += 1,
+                _ => raw_in += 1,
+            },
+        }
+    }
+    let side_of_view = |mp: &svxprobe_model::Node| -> Side {
+        let ms = mp.members.as_deref().unwrap_or_default();
+        let outs = ms.iter().filter(|m| m.dir == Dir::Out).count();
+        if outs * 2 > ms.len() {
+            Side::West
+        } else {
+            Side::East
+        }
+    };
+    let views = n
+        .children
+        .iter()
+        .filter_map(|&c| design.node(c))
+        .filter(|c| c.kind == NodeKind::Modport && used.contains(c.name.as_str()))
+        .map(|c| (c.id, c.name.clone(), side_of_view(c)))
+        .collect();
+    let raw = (raw_in + raw_out > 0).then_some(if raw_out >= raw_in {
+        Side::West
+    } else {
+        Side::East
+    });
+    (views, raw)
+}
+
 /// Build a box node with its ports; port sides come from incident edges. The
 /// label is scope-relative (like wire labels) so flattened generate-block
 /// iterations stay distinct — e.g. `g_lane[0].core` vs `g_lane[1].core`.
@@ -315,9 +398,39 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 path: node.map(|n| n.path.clone()).unwrap_or_default(),
                 width: node.and_then(|n| width_of(&n.type_)),
                 role: None,
+                bundle: false,
             }
         })
         .collect();
+    // A bare interface instance aggregates its connections into access ports
+    // (#96): one per consuming modport view — carried by the `Modport` node,
+    // so wires and cross-probes anchor on the view — plus one raw port, named
+    // after the interface type, fanning out to direct member taps.
+    if n.kind == NodeKind::Interface && n.modport.is_none() {
+        let (views, raw) = access_ports(design, bx);
+        for (vid, name, side) in views {
+            ports.push(SchPort {
+                id: vid,
+                name,
+                side,
+                path: design.node(vid).map(|x| x.path.clone()).unwrap_or_default(),
+                width: None,
+                role: None,
+                bundle: true,
+            });
+        }
+        if let Some(side) = raw {
+            ports.push(SchPort {
+                id: RAW_PORT_BASE + bx,
+                name: module_of(design, n).unwrap_or_else(|| n.name.clone()),
+                side,
+                path: n.path.clone(),
+                width: None,
+                role: None,
+                bundle: true,
+            });
+        }
+    }
     // A modport-qualified interface port shows as a single bundle pin on the
     // consuming instance (#106) — the modport connection sits in the port row;
     // its members stay on the drilled view's bundle box. The pin id/path are
@@ -356,6 +469,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
             path: cn.path.clone(),
             width: None,
             role: None,
+            bundle: true,
         });
     }
     let label = relative_to(&n.path, scope);
@@ -394,6 +508,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
             path: String::new(), // synthetic constant source — no model node
             width: None,
             role: None,
+            bundle: false,
         }],
         module: None,
         constant: Some(lit.to_string()),
@@ -430,6 +545,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
                 width: sig.and_then(|s| width_of(&s.type_)),
                 role,
+                bundle: false,
             }
         })
         .collect();
@@ -477,6 +593,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
                 width: sig.and_then(|s| width_of(&s.type_)),
                 role,
+                bundle: false,
             }
         })
         .collect();
@@ -518,6 +635,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             path: n.path.clone(),
             width: width_of(&n.type_),
             role: None,
+            bundle: false,
         }],
         module: None,
         constant: None,
@@ -612,6 +730,32 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         }
     }
 
+    // Aggregate access ports on bare interface bundles (#96): map the instance
+    // and its non-Port interior (members, modport views) to the owning bundle,
+    // so edges reaching any of them anchor on the bundle's raw port (member
+    // taps fan out one wire per consumer pin); modport-level connections are
+    // retargeted onto the matching view's port in the edge fold below.
+    // BTreeMap keeps the signal-join fold deterministic.
+    let mut iface_owner: std::collections::BTreeMap<NodeId, NodeId> =
+        std::collections::BTreeMap::new();
+    let mut raw_port: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
+    for &b in &boxes {
+        let Some(bn) = design.node(b) else { continue };
+        if bn.kind != NodeKind::Interface || bn.modport.is_some() {
+            continue;
+        }
+        iface_owner.insert(b, b);
+        for &c in &bn.children {
+            // Port children stay real pins with their own edges (e.g. clk).
+            if !is_kind(design, c, NodeKind::Port) {
+                iface_owner.insert(c, b);
+            }
+        }
+        if access_ports(design, b).1.is_some() {
+            raw_port.insert(b, RAW_PORT_BASE + b);
+        }
+    }
+
     // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
     let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
         if let Some(&bp) = boundary_of.get(&node) {
@@ -633,12 +777,16 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                     .then_some(id)
             })
         };
-        // Draw to the specific port if the node is a Port directly under the box;
-        // otherwise anchor to the box.
+        // Draw to the specific pin when the node is a Port directly under the
+        // box; a bare bundle's interior anchors on its raw access port (#96,
+        // falling back to the box when nothing taps members raw); otherwise
+        // anchor to the box.
         let pin = if is_kind(design, node, NodeKind::Port)
             && design.node(node).and_then(|n| n.parent) == Some(b)
         {
             node
+        } else if let Some(owner) = iface_owner.get(&node) {
+            *raw_port.get(owner).unwrap_or(owner)
         } else if let Some(p) = bundle_pin(node).or_else(|| {
             design
                 .node(node)
@@ -653,6 +801,26 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         Some((b, pin))
     };
 
+    // A modport-level connection anchors on the bundle's view port (#96): when
+    // the far end is a modport-qualified bundle pin, the bare-interface end
+    // moves from its raw/box anchor onto the port carried by the matching
+    // `Modport` node — so `.bus(bus.mem)` wires bundle pin to `mem`, directly.
+    let view_port = |b: NodeId, far_pin: NodeId| -> Option<NodeId> {
+        if iface_owner.get(&b) != Some(&b) {
+            return None; // not a bare interface bundle in this scope
+        }
+        let view = design
+            .node(far_pin)
+            .filter(|x| x.kind == NodeKind::Interface)?
+            .modport
+            .as_deref()?;
+        design.node(b)?.children.iter().copied().find(|&c| {
+            design
+                .node(c)
+                .is_some_and(|m| m.kind == NodeKind::Modport && m.name == view)
+        })
+    };
+
     let mut edges = Vec::new();
     let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for (i, e) in design.edges().iter().enumerate() {
@@ -663,6 +831,10 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             continue;
         }
         if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
+            let (src, tgt) = (
+                view_port(sb, tgt).unwrap_or(src),
+                view_port(tb, src).unwrap_or(tgt),
+            );
             // Collapse parallel connections that land on the same two anchors
             // (e.g. both lanes' clk meeting one boundary pin).
             if sb != tb && seen.insert((src.min(tgt), src.max(tgt))) {
@@ -731,6 +903,18 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         for (&sig, pins_of_sig) in &iface_pin {
             for &(_, pin) in pins_of_sig {
                 fold_anchor(sig, pin);
+            }
+        }
+        // Bundle members fold under their bundle's raw access port (#96): an
+        // in-scope logic box reading or driving `bus.valid` wires to the
+        // aggregate port. The synthetic pin has no model node, so it folds as
+        // both a driver and a load — the aggregate carries traffic both ways.
+        for (&member, &owner) in &iface_owner {
+            if member == owner {
+                continue;
+            }
+            if let Some(&rp) = raw_port.get(&owner) {
+                fold_anchor(member, rp);
             }
         }
         // BTreeSet for a deterministic wire order across runs.
