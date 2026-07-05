@@ -1,7 +1,7 @@
 // Adapter from our SchematicGraph to an ELK graph, plus a layout helper.
 // `toElk` is pure (unit-tested); `layout` runs elkjs.
 import ELK from "elkjs/lib/elk.bundled.js";
-import type { SchematicGraph, SchNode, SchPort } from "./types";
+import type { SchEdge, SchematicGraph, SchNode, SchPort } from "./types";
 
 export interface ElkLabel {
   text: string;
@@ -329,13 +329,40 @@ export function toElk(graph: SchematicGraph): ElkGraph {
 
   // An edge endpoint is a port if some box exposes it, else the box itself.
   const endpoint = (id: number) => (portOwner.has(id) ? portId(id) : nodeId(id));
-  const edges: ElkEdge[] = graph.edges.map((e) => ({
-    id: `e${e.id}`,
-    sources: [endpoint(e.source)],
-    targets: [endpoint(e.target)],
-    // Give ELK the net label so it reserves space and returns a placement.
-    labels: e.net ? [{ text: e.net, width: e.net.length * 5.5, height: 11 }] : undefined,
-  }));
+  // #117: collapse each bundle trunk group into one box->port edge so ELK
+  // routes (and reserves space for) a single wire; the renderer re-fans the
+  // members at the consumer wall via `gatherBar`, keeping per-member
+  // cross-probing on the stubs. Only layout sees the collapse.
+  const trunks = new Map<number, TrunkGroup>();
+  const droppedMembers = new Set<number>();
+  for (const g of trunkGroups(graph)) {
+    trunks.set(g.edges[0].id, g);
+    for (const m of g.edges.slice(1)) droppedMembers.add(m.id);
+  }
+  const edges: ElkEdge[] = graph.edges
+    .filter((e) => !droppedMembers.has(e.id))
+    .map((e) => {
+      const g = trunks.get(e.id);
+      if (g)
+        return {
+          id: `e${e.id}`,
+          // The representative is itself a member-pin <-> bundle-port edge, so
+          // keeping its endpoints anchors the trunk at a real pin (ELK routes
+          // it into the consumer wall at pin height, not off a box corner)
+          // while preserving the model's signal direction for layering.
+          sources: [endpoint(e.source)],
+          targets: [endpoint(e.target)],
+          // The trunk is the whole bundle, so it carries the bundle's name.
+          labels: [{ text: g.name, width: g.name.length * 5.5, height: 11 }],
+        };
+      return {
+        id: `e${e.id}`,
+        sources: [endpoint(e.source)],
+        targets: [endpoint(e.target)],
+        // Give ELK the net label so it reserves space and returns a placement.
+        labels: e.net ? [{ text: e.net, width: e.net.length * 5.5, height: 11 }] : undefined,
+      };
+    });
 
   return {
     id: "root",
@@ -351,6 +378,89 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     },
     children,
     edges,
+  };
+}
+
+// --- #117: bundle trunk wires ------------------------------------------------
+/// A bundle (raw access) port's member-tap edges into one consumer box. The
+/// per-member edges stay the model truth for cross-probing; layout and
+/// rendering collapse them into a single trunk that fans out at the consumer.
+export interface TrunkGroup {
+  port: number; // the bundle port id
+  box: number; // the consumer box node id
+  side: SchPort["side"]; // the consumer wall the member pins sit on
+  /// Trunk label: the bundle *instance's* label (e.g. `bus`), not its interface
+  /// type — type names repeat across instances, and the renderer merges wire
+  /// labels by text, so a type-named label would collapse two different
+  /// bundles' trunks onto one (wrongly-targeted) label.
+  name: string;
+  path: string; // bundle port model path (the interface instance)
+  edges: SchEdge[]; // >= 2 member taps, in graph order
+}
+
+/// Group a graph's edges into bundle trunks (#117): edges with a bundle pin on
+/// one end and a plain pin of one *other* box on the other, keyed per (bundle
+/// port, consumer box, wall) — a member pin can sit on either wall of the
+/// consumer (picorv32 drives east, reads west), and a single-sided gather bar
+/// cannot serve the far wall, so each wall gets its own trunk. Groups of one
+/// stay ordinary wires. Edges anchored on a bare box (no pin) are left
+/// ungrouped too — a fan-out needs member pins.
+export function trunkGroups(graph: SchematicGraph): TrunkGroup[] {
+  const bundle = new Map<number, SchPort>();
+  const owner = new Map<number, number>(); // port id -> owning box id
+  const side = new Map<number, SchPort["side"]>(); // port id -> its wall
+  const label = new Map<number, string>(); // box id -> its label
+  for (const n of graph.nodes) {
+    label.set(n.id, n.label);
+    for (const p of n.ports) {
+      owner.set(p.id, n.id);
+      side.set(p.id, p.side);
+      if (p.bundle) bundle.set(p.id, p);
+    }
+  }
+  const groups = new Map<string, TrunkGroup>();
+  for (const e of graph.edges) {
+    const bp = bundle.has(e.source) ? e.source : bundle.has(e.target) ? e.target : undefined;
+    if (bp === undefined) continue;
+    const other = bp === e.source ? e.target : e.source;
+    // A bundle-to-bundle link (#106 modport view -> consumer pin) is already a
+    // single wire — never trunk material.
+    if (bundle.has(other)) continue;
+    const box = owner.get(other);
+    if (box === undefined || box === owner.get(bp)) continue;
+    const wall = side.get(other)!;
+    const key = `${bp}:${box}:${wall}`;
+    let g = groups.get(key);
+    if (!g) {
+      const p = bundle.get(bp)!;
+      const bx = owner.get(bp)!;
+      g = { port: bp, box, side: wall, name: label.get(bx) ?? p.name, path: p.path ?? "", edges: [] };
+      groups.set(key, g);
+    }
+    g.edges.push(e);
+  }
+  return [...groups.values()].filter((g) => g.edges.length > 1);
+}
+
+/// One trunk stub's length: how far the gather bar sits off the consumer wall.
+/// Deliberately *inside* ELK's `elk.spacing.edgeNode` channel (12px) so the bar
+/// never lies along other edges' vertical runs next to the box.
+const TRUNK_STUB = 8;
+
+/// Consumer-side fan-out geometry for a trunk (#117): a vertical gather bar one
+/// stub-length off the pins' wall (`dir` = +1 off an east wall, -1 west) and a
+/// horizontal stub per member pin. No separate joint: the trunk edge is
+/// anchored at one of these pins, so its final approach crosses the bar inside
+/// the bar's y-span.
+export function gatherBar(pins: Pt[], dir: 1 | -1): { bar: [Pt, Pt]; stubs: [Pt, Pt][] } {
+  const x = pins[0].x + TRUNK_STUB * dir;
+  const ys = pins.map((p) => p.y);
+  return {
+    bar: [
+      { x, y: Math.min(...ys) },
+      { x, y: Math.max(...ys) },
+    ],
+    stubs: pins.map((p) => [p, { x, y: p.y }]),
   };
 }
 

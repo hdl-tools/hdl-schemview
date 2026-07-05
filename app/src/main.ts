@@ -6,13 +6,16 @@ import {
   FF_LABEL_PAD,
   ffRole,
   fitZoom,
+  gatherBar,
   IFACE_CAP,
   isLogicKind,
   layout,
   nodeId,
+  portId,
+  trunkGroups,
   wireLabelPlacement,
 } from "./elk";
-import type { Pt } from "./elk";
+import type { Pt, TrunkGroup } from "./elk";
 import type {
   NodeRef,
   ProbeResponse,
@@ -341,28 +344,41 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // The laid-out ELK edges keep their `e<schId>` ids, so map back to the model
   // edge for the net's canonical path (clicking a wire cross-probes that net).
   const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
+  // Bundle trunks (#117): the member taps of a raw access port were collapsed
+  // to one ELK edge (keyed by the first member's id); the trunk cross-probes
+  // the bundle itself, and the members re-fan at the consumer wall below.
+  const trunkByRep = new Map<number, TrunkGroup>();
+  for (const tg of trunkGroups(graph)) trunkByRep.set(tg.edges[0].id, tg);
+  // Left-click a wire: highlight the net and show it in source. Right-click:
+  // highlight + open the action menu (append to waveform / show in source).
+  // Shared by the routed edges and the trunk fan-out geometry below. A member
+  // stub passes its trunk's bundle path so selecting the member also lights
+  // the trunk it hangs off (but never its sibling stubs).
+  const wireHandlers = (netPath: string | undefined, trunkPath?: string) =>
+    netPath
+      ? {
+          left: (ev: Event) => {
+            ev.preventDefault();
+            selectWire(netPath, trunkPath);
+            api
+              .probeNode(netPath, context())
+              .then((r) => r && showInSource(r))
+              .catch((e) => ($("status").textContent = `error: ${e}`));
+          },
+          menu: (ev: MouseEvent) => {
+            ev.preventDefault();
+            selectWire(netPath, trunkPath);
+            crossProbePath(netPath, ev);
+          },
+        }
+      : null;
   for (const e of laid.edges ?? []) {
     const sch = edgeById.get(Number(String(e.id).slice(1)));
-    const netPath = sch?.net_path;
-    // Left-click a wire: highlight the net and show it in source. Right-click:
-    // highlight + open the action menu (append to waveform / show in source).
-    const wireLeft = netPath
-      ? (ev: Event) => {
-          ev.preventDefault();
-          selectWire(netPath);
-          api
-            .probeNode(netPath, context())
-            .then((r) => r && showInSource(r))
-            .catch((e) => ($("status").textContent = `error: ${e}`));
-        }
-      : null;
-    const wireMenu = netPath
-      ? (ev: MouseEvent) => {
-          ev.preventDefault();
-          selectWire(netPath);
-          crossProbePath(netPath, ev);
-        }
-      : null;
+    const trunk = sch ? trunkByRep.get(sch.id) : undefined;
+    const netPath = trunk ? trunk.path || undefined : sch?.net_path;
+    const handlers = wireHandlers(netPath);
+    const wireLeft = handlers?.left ?? null;
+    const wireMenu = handlers?.menu ?? null;
     const segs: [Pt, Pt][] = [];
     for (const sec of e.sections ?? []) {
       const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
@@ -408,6 +424,48 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // of the net's fan-out into view.
       item.segs.push(...segs);
     }
+  }
+
+  // 1b. Bundle trunk fan-outs (#117): each collapsed member tap gets a short
+  // stub from its pin to a gather bar one stub-length off the consumer wall —
+  // one wire reaches the wall (the trunk, routed by ELK to the representative
+  // pin, crossing the bar on its final approach), the split happens there.
+  // Stubs keep per-member cross-probing; the bar belongs to the bundle.
+  const drawWire = (pts: Pt[], netPath?: string, trunkPath?: string) => {
+    const points = pts.map((p) => `${p.x},${p.y}`).join(" ");
+    const path = document.createElementNS(SVGNS, "polyline");
+    path.setAttribute("class", netPath ? "wire clickable" : "wire");
+    path.setAttribute("points", points);
+    if (netPath) path.dataset.netPath = netPath;
+    if (trunkPath) path.dataset.trunkPath = trunkPath;
+    root.appendChild(path);
+    const handlers = wireHandlers(netPath, trunkPath);
+    if (handlers) {
+      const hit = document.createElementNS(SVGNS, "polyline");
+      hit.setAttribute("class", "wire-hit");
+      hit.setAttribute("points", points);
+      hit.onclick = handlers.left;
+      hit.oncontextmenu = handlers.menu;
+      root.appendChild(hit);
+    }
+  };
+  for (const tg of trunkByRep.values()) {
+    const box = (laid.children ?? []).find((c: any) => c.id === nodeId(tg.box));
+    if (!box) continue;
+    const dir: 1 | -1 = tg.side === "east" ? 1 : -1;
+    const members: { pt: Pt; e: (typeof tg.edges)[number] }[] = [];
+    for (const m of tg.edges) {
+      const pid = m.source === tg.port ? m.target : m.source;
+      const p = (box.ports ?? []).find((q: any) => q.id === portId(pid));
+      if (p) members.push({ pt: { x: (box.x ?? 0) + (p.x ?? 0), y: (box.y ?? 0) + (p.y ?? 0) }, e: m });
+    }
+    if (!members.length) continue;
+    const geo = gatherBar(
+      members.map((m) => m.pt),
+      dir,
+    );
+    drawWire(geo.bar, tg.path || undefined);
+    members.forEach((m, i) => drawWire(geo.stubs[i], m.e.net_path, tg.path || undefined));
   }
 
   // 2. Boxes.
@@ -1115,10 +1173,19 @@ async function schematicMenu(ev: MouseEvent, path: string) {
 
 // Highlight every wire + label carrying `netPath` (the net just clicked), and
 // clear it from the rest. Box selection (`.box.sel`) is independent and untouched.
-function selectWire(netPath: string) {
+// Highlight a net's wires. Trunk fan-outs (#117) add two rules: selecting a
+// bundle also lights its member stubs (they carry the bundle in
+// `data-trunk-path`), and selecting a member stub passes its bundle as `trunk`
+// so the trunk lights with it — sibling stubs match neither rule and stay dark.
+function selectWire(netPath: string, trunk?: string) {
   const host = $("schematic");
   host.querySelectorAll<SVGElement>(".wire, .wire-label").forEach((el) => {
-    el.classList.toggle("sel", el.dataset.netPath === netPath);
+    el.classList.toggle(
+      "sel",
+      el.dataset.netPath === netPath ||
+        el.dataset.trunkPath === netPath ||
+        (trunk !== undefined && el.dataset.netPath === trunk),
+    );
   });
 }
 
