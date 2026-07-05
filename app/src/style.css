@@ -127,10 +127,14 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
    full opacity so the accent highlight isn't washed out. */
 .pin.dangling, .pin-label.dangling { opacity:0.45; }
 .pin.dangling.sel, .pin-label.dangling.sel { opacity:1; }
+/* Modport bundle frame pin (#125): the square "interface port" glyph in the
+   bundle teal, matching the #106/#96 square pins on boxes. */
+.pin.bundle-pin { fill:var(--iface); stroke:var(--iface-stroke); }
 /* Selected pin: accent fill/outline (declared after pin-in/out so it wins). */
 .pin.sel { fill:var(--sel); stroke:var(--sel); }
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }
 .pin-label.sel { fill:var(--sel); font-weight:600; }
+.box-sublabel.sel { fill:var(--sel); }
 .const-label { fill:var(--sublabel); font-size:9px; font-family:ui-monospace, monospace; cursor:pointer; }
 .box.ff { fill:var(--box); stroke:var(--box-stroke); }
 /* Combinational logic: comb is a rectangle, assign a stadium — each its own tint.

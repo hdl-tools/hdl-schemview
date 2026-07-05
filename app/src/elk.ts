@@ -234,6 +234,14 @@ function assignChild(n: SchNode): ElkChild {
 export function toElk(graph: SchematicGraph): ElkGraph {
   const portOwner = new Set<number>();
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
+  // Edge-connected port/node ids — a modport bundle pin only fans out its
+  // wired members (an unconnected member has no in-scope semantics; the full
+  // membership stays visible on the interface instance's hexagon).
+  const wired = new Set<number>();
+  for (const e of graph.edges) {
+    wired.add(e.source);
+    wired.add(e.target);
+  }
 
   const children: ElkChild[] = graph.nodes.map((n): ElkChild => {
     // Inferred storage (register / level latch): an FF-style symbol with
@@ -265,6 +273,43 @@ export function toElk(graph: SchematicGraph): ElkGraph {
           width: 0,
           height: 0,
           layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
+        })),
+      };
+    }
+    // #125: a modport-qualified bundle is the scope's window to the outside —
+    // an interface *port*, not an instance — so it draws as a square frame pin
+    // rather than the hexagon box, sharing the _SEPARATE frame column with the
+    // scope's own boundary pins so the squares and triangles line up. (ELK
+    // reserves _SEPARATE layers for external-port dummies and calls
+    // mixed-direction edges there unsupported; elkjs 0.9.3 routes them fine —
+    // verified by the layout smoke test.) A mostly-in view feeds the design
+    // from its east side, so it sits first; a mostly-out view last. Only wired
+    // members carry ports, every one anchored at the square glyph's wall
+    // centre so the member wires visually meet the pin; unconnected members
+    // are omitted — they have no in-scope semantics.
+    if (n.kind === "Interface" && n.modport) {
+      const eastCount = n.ports.filter((p) => p.side === "east").length;
+      const first = eastCount >= n.ports.length - eastCount;
+      const members = n.ports.filter((p) => wired.has(p.id));
+      const sub = `(${n.module ?? ""}.${n.modport})`;
+      const w = Math.max(40, Math.max(n.label.length, sub.length) * PIN_CH + 24);
+      const h = 26;
+      return {
+        id: nodeId(n.id),
+        width: w,
+        height: h,
+        labels: [{ text: n.label }],
+        layoutOptions: {
+          "elk.portConstraints": "FIXED_POS",
+          "elk.layered.layering.layerConstraint": first ? "FIRST_SEPARATE" : "LAST_SEPARATE",
+        },
+        ports: members.map((p) => ({
+          id: portId(p.id),
+          width: 0,
+          height: 0,
+          x: first ? w : 0,
+          y: h / 2,
+          layoutOptions: { "elk.port.side": first ? "EAST" : "WEST" },
         })),
       };
     }
@@ -303,23 +348,12 @@ export function toElk(graph: SchematicGraph): ElkGraph {
       y: base + shift + i * pitch,
       layoutOptions: { "elk.port.side": p.side === "east" ? "EAST" : "WEST" },
     });
-    const layoutOptions: Record<string, string> = { "elk.portConstraints": "FIXED_POS" };
-    // A modport-qualified bundle is the scope's window to the outside, so it
-    // hugs the boundary (#106) — in the first/last *regular* layer, not the
-    // _SEPARATE frame column, so the scope's own boundary pins keep their
-    // exclusive layer and stay at the top corner instead of stacking under the
-    // tall bundle. Its pins are mirrored: a mostly-in view feeds the design
-    // from its east side, so it sits first; a mostly-out view last.
-    if (n.kind === "Interface" && n.modport) {
-      layoutOptions["elk.layered.layering.layerConstraint"] =
-        east.length >= west.length ? "FIRST" : "LAST";
-    }
     return {
       id: nodeId(n.id),
       width: w,
       height: h,
       labels: [{ text: n.label }],
-      layoutOptions,
+      layoutOptions: { "elk.portConstraints": "FIXED_POS" },
       ports: [
         ...west.map((p, i) => sidePort(p, i, 0)),
         ...east.map((p, i) => sidePort(p, i, w)),
