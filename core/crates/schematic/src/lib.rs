@@ -876,15 +876,16 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     }
     let mut next_edge = design.edges().len() as u32;
 
-    // Signal-join wiring: connect the scope's logic boxes (Ff/Comb) through the
-    // signals they share — the internal logic of a leaf module, whose endpoints are
-    // scope-level Vars/Nets the structural pass drops. For each signal, cross its
-    // drivers (edges out) with its loads (edges in) over the per-(box,signal) pins;
-    // the scope's own ports fold in (an input drives its signal, an output loads
-    // it). A no-op when the scope has no logic boxes, so hierarchical views are
-    // untouched.
-    let has_logic = boxes.iter().any(|&b| is_logic_box(design, b));
-    if has_logic {
+    // Signal-join wiring: connect the scope's boxes through the scope-level
+    // Vars/Nets the structural pass drops (it only resolves endpoints that sit
+    // under a box). For each signal, cross its drivers (edges out) with its
+    // loads (edges in) over the per-(box,signal) pins; the scope's own ports
+    // and plain instance ports (#116) fold in — an input drives its signal, an
+    // output loads it. Deliberately *not* gated on the scope having logic
+    // boxes (#123): each fold self-gates on its inputs and `seen` dedups
+    // against the structural pass, so in a logic-free hierarchical scope this
+    // adds exactly the instance-to-instance wires mediated by a plain net.
+    {
         // (pin id, resolved bit-select) for each end of a signal.
         type Anchor = (NodeId, Option<String>);
         let mut drivers: std::collections::HashMap<NodeId, Vec<Anchor>> =
