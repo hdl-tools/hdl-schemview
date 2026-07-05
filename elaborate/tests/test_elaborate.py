@@ -462,6 +462,136 @@ def test_bus_bitselect_on_edges(model: dict) -> None:
             assert e.get("select") is None
 
 
+def _logic_dirs(m: dict, kind: str, endpoint_path: str) -> set[str]:
+    """Directions of every edge between the (sole) `kind` logic node and the
+    signal at `endpoint_path`."""
+    byid = {n["id"]: n for n in m["nodes"]}
+    logic = next(n for n in m["nodes"] if n["kind"] == kind)
+    return {
+        e["dir"]
+        for e in m["edges"]
+        if e["port"] == logic["id"] and byid[e["endpoint"]]["path"] == endpoint_path
+    }
+
+
+def test_lhs_index_read_wires_in_not_out(tmp_path) -> None:
+    """#110: in `ram[idx] <= d` the index is a read, not an assignment target —
+    it must wire into the FF as data (`in`), never `out`. The indexed base
+    (`ram`) stays the block's output."""
+    m = _model_for(
+        "module m(input clk, input [1:0] idx, input [7:0] d, output logic [7:0] q);\n"
+        "  logic [7:0] ram [4];\n"
+        "  always_ff @(posedge clk) begin\n"
+        "    ram[idx] <= d;\n"
+        "    q <= ram[idx];\n"
+        "  end\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    assert _logic_dirs(m, "FF", "m.idx") == {"in"}
+    assert _logic_dirs(m, "FF", "m.ram") == {"out"}
+
+
+def test_lhs_nested_select_base_wires_out(tmp_path) -> None:
+    """#110: a bit-slice of an indexed store (`ram[idx][3:0] <= d`) still
+    resolves the l-value base through the nested selects; the index stays a
+    read."""
+    m = _model_for(
+        "module m(input clk, input [1:0] idx, input [3:0] d);\n"
+        "  logic [7:0] ram [4];\n"
+        "  always_ff @(posedge clk) ram[idx][3:0] <= d;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    assert _logic_dirs(m, "FF", "m.ram") == {"out"}
+    assert _logic_dirs(m, "FF", "m.idx") == {"in"}
+
+
+def test_lhs_concat_targets_wire_out(tmp_path) -> None:
+    """Every member of a concatenation LHS is an assignment target — but an
+    index used *inside* one of the members (`b[i]`) stays a read (the case a
+    whole-subtree walk of the LHS would get wrong)."""
+    m = _model_for(
+        "module m(input clk, input i, input [1:0] d, output logic a);\n"
+        "  logic [1:0] b;\n"
+        "  always_ff @(posedge clk) {a, b[i]} <= d;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    assert _logic_dirs(m, "FF", "m.a") == {"out"}
+    assert _logic_dirs(m, "FF", "m.b") == {"out"}
+    assert _logic_dirs(m, "FF", "m.i") == {"in"}
+
+
+def test_net_decl_initializer_emits_assign(tmp_path) -> None:
+    """#110: `wire w = expr;` is a continuous assign — it must emit an Assign
+    node wiring expr's signals in (with resolved selects) and the net out, so
+    the cone through `w` is traceable."""
+    m = _model_for(
+        "module m(input [3:0] a, output [1:0] y);\n"
+        "  wire [1:0] w = a[2:1];\n"
+        "  assign y = w;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    byid = {n["id"]: n for n in m["nodes"]}
+    assigns = [n for n in m["nodes"] if n["kind"] == "Assign"]
+    assert len(assigns) == 2, [n["path"] for n in assigns]
+    drivers = [
+        e
+        for e in m["edges"]
+        if e["dir"] == "out"
+        and byid[e["endpoint"]]["path"] == "m.w"
+        and byid[e["port"]]["kind"] == "Assign"
+    ]
+    assert len(drivers) == 1, drivers
+    aid = drivers[0]["port"]
+    ins = {
+        (byid[e["endpoint"]]["path"], e.get("select"))
+        for e in m["edges"]
+        if e["port"] == aid and e["dir"] == "in"
+    }
+    assert ins == {("m.a", "[2:1]")}, ins
+
+
+def test_computed_select_bound_labels_bare(tmp_path) -> None:
+    """A select bound computed from a *typed* parameter (`AW+1`, matching the
+    fixture's `localparam int unsigned AW = $clog2(WORDS)`) elaborates to a
+    sized constant that slang prints as `32'd10` — the select label must still
+    read bare (`[10:2]`), matching literal bounds. (An untyped localparam
+    already prints bare, so it would not exercise the normalization.)"""
+    m = _model_for(
+        "module m(input [31:0] a, output [8:0] y);\n"
+        "  localparam int unsigned AW = 9;\n"
+        "  assign y = a[AW+1:2];\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    byid = {n["id"]: n for n in m["nodes"]}
+    selects = {
+        e.get("select")
+        for e in m["edges"]
+        if byid[e["port"]]["kind"] == "Assign"
+        and byid[e["endpoint"]]["path"] == "m.a"
+    }
+    assert selects == {"[10:2]"}, selects
+
+
+def test_var_decl_initializer_emits_no_assign(tmp_path) -> None:
+    """A variable initializer (`logic x = ...`) runs once at time zero — it is
+    not a continuous assign, so no Assign node (mirrors `initial` being
+    non-logic). Nets only."""
+    m = _model_for(
+        "module m(input a, output z);\n"
+        "  logic x = 1'b0;\n"
+        "  assign z = a ^ x;\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    assigns = [n for n in m["nodes"] if n["kind"] == "Assign"]
+    assert len(assigns) == 1, [n["path"] for n in assigns]
+
+
 def test_enum_table_emitted(model: dict) -> None:
     """The fixture's packed enum `lane_state_e` is emitted in the normalized `enums`
     table, keyed by the same type string carried on its signals (#81)."""
