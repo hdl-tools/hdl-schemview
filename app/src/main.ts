@@ -531,20 +531,22 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     const cx = c.width / 2;
     const cy = c.height / 2;
     const name = document.createElementNS(SVGNS, "text");
-    name.setAttribute("class", "box-label");
+    name.setAttribute("class", "box-label" + (state.selected === id ? " sel" : ""));
     name.setAttribute("x", String(cx));
     name.setAttribute("y", String(node?.module ? cy - 4 : cy + 4));
     name.setAttribute("text-anchor", "middle");
     name.textContent = (c.labels?.[0]?.text ?? "") + (node?.expandable ? " ▸" : "");
+    name.dataset.nodeId = String(id);
     name.style.pointerEvents = "none";
     g.appendChild(name);
     if (node?.module) {
       const mod = document.createElementNS(SVGNS, "text");
-      mod.setAttribute("class", "box-sublabel");
+      mod.setAttribute("class", "box-sublabel" + (state.selected === id ? " sel" : ""));
       mod.setAttribute("x", String(cx));
       mod.setAttribute("y", String(cy + 12));
       mod.setAttribute("text-anchor", "middle");
       mod.textContent = `(${node.module})`;
+      mod.dataset.nodeId = String(id);
       mod.style.pointerEvents = "none";
       g.appendChild(mod);
     }
@@ -758,7 +760,7 @@ function renderBundlePin(parent: SVGElement, c: any, node: SchNode, id: number) 
   const lx = first ? edgeX - SQ - 6 : edgeX + SQ + 6;
   const anchor = first ? "end" : "start";
   const name = document.createElementNS(SVGNS, "text");
-  name.setAttribute("class", "pin-label");
+  name.setAttribute("class", "pin-label" + (state.selected === id ? " sel" : ""));
   name.setAttribute("x", String(lx));
   name.setAttribute("y", String(cy - 2));
   name.setAttribute("text-anchor", anchor);
@@ -769,7 +771,7 @@ function renderBundlePin(parent: SVGElement, c: any, node: SchNode, id: number) 
   g.appendChild(name);
   if (node.module) {
     const mod = document.createElementNS(SVGNS, "text");
-    mod.setAttribute("class", "box-sublabel");
+    mod.setAttribute("class", "box-sublabel" + (state.selected === id ? " sel" : ""));
     mod.setAttribute("x", String(lx));
     mod.setAttribute("y", String(cy + 10));
     mod.setAttribute("text-anchor", anchor);
@@ -810,10 +812,11 @@ function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
   g.appendChild(rect);
 
   const t = document.createElementNS(SVGNS, "text");
-  t.setAttribute("class", "box-label");
+  t.setAttribute("class", "box-label" + (state.selected === id ? " sel" : ""));
   t.setAttribute("x", String(W / 2));
   t.setAttribute("y", String(H / 2 + 1));
   t.setAttribute("text-anchor", "middle");
+  t.dataset.nodeId = String(id);
   t.style.pointerEvents = "none";
   t.textContent = c.labels?.[0]?.text ?? "FF";
   g.appendChild(t);
@@ -933,20 +936,22 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   const inst = c.labels?.[0]?.text ?? node.label;
   const type_ = node.module ?? null;
   const name = document.createElementNS(SVGNS, "text");
-  name.setAttribute("class", "box-label");
+  name.setAttribute("class", "box-label" + (state.selected === id ? " sel" : ""));
   name.setAttribute("x", String(cx));
   name.setAttribute("y", String(type_ ? cy - 4 : cy + 4));
   name.setAttribute("text-anchor", "middle");
   name.textContent = inst;
+  name.dataset.nodeId = String(id);
   name.style.pointerEvents = "none";
   g.appendChild(name);
   if (type_) {
     const mod = document.createElementNS(SVGNS, "text");
-    mod.setAttribute("class", "box-sublabel");
+    mod.setAttribute("class", "box-sublabel" + (state.selected === id ? " sel" : ""));
     mod.setAttribute("x", String(cx));
     mod.setAttribute("y", String(cy + 12));
     mod.setAttribute("text-anchor", "middle");
     mod.textContent = type_;
+    mod.dataset.nodeId = String(id);
     mod.style.pointerEvents = "none";
     g.appendChild(mod);
   }
@@ -1028,11 +1033,12 @@ function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
   g.appendChild(rect);
 
   const t = document.createElementNS(SVGNS, "text");
-  t.setAttribute("class", "box-label");
+  t.setAttribute("class", "box-label" + (state.selected === id ? " sel" : ""));
   t.setAttribute("x", String(W / 2));
   t.setAttribute("y", String(H / 2));
   t.setAttribute("text-anchor", "middle");
   t.setAttribute("dominant-baseline", "central");
+  t.dataset.nodeId = String(id);
   t.style.pointerEvents = "none";
   t.textContent = "assign";
   g.appendChild(t);
@@ -1175,13 +1181,18 @@ function selectNode(id: number) {
 }
 
 // Reflect `state.selected` by moving the `.sel` class only, leaving the rest of
-// the DOM intact so any pending double-click target survives. Boxes and pins both
-// carry `data-node-id`, so both highlight; wire selection (`.wire.sel`) is a
-// separate channel and left untouched.
+// the DOM intact so any pending double-click target survives. Boxes, pins and
+// caption labels (box-label / box-sublabel, #121) all carry `data-node-id`, so
+// they highlight together. Exactly one object is highlighted at a time: applying
+// a node selection also drops any highlighted wire (and `selectWire` drops the
+// node selection in return).
 function applySelection() {
   const host = $("schematic");
   host
-    .querySelectorAll(".box.sel, .pin.sel, .pin-label.sel")
+    .querySelectorAll(
+      ".box.sel, .pin.sel, .pin-label.sel, .box-label.sel, .box-sublabel.sel, " +
+        ".wire.sel, .wire-label.sel",
+    )
     .forEach((el) => el.classList.remove("sel"));
   if (state.selected != null) {
     host
@@ -1234,12 +1245,15 @@ async function schematicMenu(ev: MouseEvent, path: string) {
 }
 
 // Highlight every wire + label carrying `netPath` (the net just clicked), and
-// clear it from the rest. Box selection (`.box.sel`) is independent and untouched.
-// Highlight a net's wires. Trunk fan-outs (#117) add two rules: selecting a
+// clear it from the rest — including any selected box/pin, so exactly one
+// object is highlighted at a time (the counterpart of `applySelection` clearing
+// wires). Trunk fan-outs (#117) add two rules: selecting a
 // bundle also lights its member stubs (they carry the bundle in
 // `data-trunk-path`), and selecting a member stub passes its bundle as `trunk`
 // so the trunk lights with it — sibling stubs match neither rule and stay dark.
 function selectWire(netPath: string, trunk?: string) {
+  state.selected = null;
+  applySelection();
   const host = $("schematic");
   host.querySelectorAll<SVGElement>(".wire, .wire-label").forEach((el) => {
     el.classList.toggle(
@@ -1794,14 +1808,16 @@ async function showInSchematic(anchor: NodeRef) {
     await renderSchematic(graph, { k: zoom.k, scrollLeft: 0, scrollTop: 0 });
     // Highlight the anchor within the opened scope (a box by id, a net by path)
     // and centre it; when we drilled into the anchor itself there is nothing to
-    // highlight.
+    // highlight. Selection is single-object, so pick the channel that matches:
+    // a drawn node wins, otherwise try the anchor's path as a net.
     if (scopePath !== anchor.path) {
-      selectNode(anchor.id);
-      selectWire(anchor.path);
       const host = $("schematic");
-      const el =
-        host.querySelector<SVGGraphicsElement>(`[data-node-id="${anchor.id}"]`) ??
-        host.querySelector<SVGGraphicsElement>(".wire.sel");
+      const boxEl = host.querySelector<SVGGraphicsElement>(
+        `[data-node-id="${anchor.id}"]`,
+      );
+      if (boxEl) selectNode(anchor.id);
+      else selectWire(anchor.path);
+      const el = boxEl ?? host.querySelector<SVGGraphicsElement>(".wire.sel");
       el?.scrollIntoView({ block: "center", inline: "center" });
     }
     return;
