@@ -134,6 +134,8 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .pin.sel { fill:var(--sel); stroke:var(--sel); }
 .pin-label { fill:var(--label); font-size:9.5px; cursor:pointer; }
 .pin-label.sel { fill:var(--sel); font-weight:600; }
+/* Selected block: caption labels light up with the outline, like pin labels (#121). */
+.box-label.sel { fill:var(--sel); }
 .box-sublabel.sel { fill:var(--sel); }
 .const-label { fill:var(--sublabel); font-size:9px; font-family:ui-monospace, monospace; cursor:pointer; }
 .box.ff { fill:var(--box); stroke:var(--box-stroke); }
