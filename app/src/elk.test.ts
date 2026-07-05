@@ -9,6 +9,8 @@ import {
   FF_H,
   FF_TOP,
   FF_CLK_ZONE,
+  trunkGroups,
+  gatherBar,
   wireLabelPlacement,
   clampSegmentToRect,
 } from "./elk";
@@ -383,6 +385,125 @@ describe("storage child (latch)", () => {
     expect(rows).toEqual([FF_TOP, FF_TOP + 16]); // plain data rows, no wedge slot
     const south = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "SOUTH");
     expect(south).toHaveLength(0);
+  });
+});
+
+describe("trunk groups (#117)", () => {
+  // A bare interface's raw access port with member taps into one consumer box
+  // on *both* walls (picorv32: valid/addr drive east, ready/rdata enter west),
+  // plus an unrelated plain edge.
+  const trunkGraph: SchematicGraph = {
+    root: "s",
+    nodes: [
+      {
+        id: 1,
+        kind: "Instance",
+        label: "core",
+        path: "s.core",
+        expandable: true,
+        ports: [
+          { id: 10, name: "mem_valid", side: "east" },
+          { id: 11, name: "mem_addr", side: "east" },
+          { id: 12, name: "mem_ready", side: "west" },
+          { id: 14, name: "mem_rdata", side: "west" },
+          { id: 13, name: "clk", side: "west" },
+        ],
+      },
+      {
+        id: 2,
+        kind: "Interface",
+        label: "bus",
+        path: "s.bus",
+        expandable: false,
+        module: "mem_if",
+        ports: [{ id: 900, name: "mem_if", side: "west", path: "s.bus", bundle: true }],
+      },
+    ],
+    edges: [
+      { id: 0, source: 10, target: 900, net: "bus.valid", net_path: "s.bus.valid" },
+      { id: 1, source: 11, target: 900, net: "bus.addr", net_path: "s.bus.addr" },
+      { id: 2, source: 900, target: 12, net: "bus.ready", net_path: "s.bus.ready" },
+      { id: 4, source: 900, target: 14, net: "bus.rdata", net_path: "s.bus.rdata" },
+      { id: 3, source: 13, target: 2, net: "clk", net_path: "s.clk" }, // plain box edge
+    ],
+  };
+
+  it("groups a bundle port's member taps by consumer box and wall", () => {
+    const groups = trunkGroups(trunkGraph);
+    // One trunk per consumer *wall*: a single-sided gather bar cannot serve
+    // pins on the opposite wall (their stubs would run under the box).
+    expect(groups).toHaveLength(2);
+    const east = groups.find((g) => g.side === "east")!;
+    const west = groups.find((g) => g.side === "west")!;
+    for (const g of [east, west]) {
+      expect(g.port).toBe(900);
+      expect(g.box).toBe(1);
+      // Labelled by the bundle *instance* (unique per scope), not its interface
+      // type — two same-typed bundles must not share a merged wire label.
+      expect(g.name).toBe("bus");
+      expect(g.path).toBe("s.bus");
+    }
+    expect(east.edges.map((e) => e.id).sort()).toEqual([0, 1]);
+    expect(west.edges.map((e) => e.id).sort()).toEqual([2, 4]);
+  });
+
+  it("collapses each wall's group to one pin-anchored ELK trunk edge", () => {
+    const elk = toElk(trunkGraph);
+    const ids = elk.edges.map((e: any) => e.id);
+    expect(ids).toContain("e0"); // east representative keeps the first member's id
+    expect(ids).toContain("e2"); // west representative
+    expect(ids).not.toContain("e1");
+    expect(ids).not.toContain("e4");
+    expect(ids).toContain("e3"); // unrelated edge untouched
+    // Anchored at the representative member *pin* (not the bare box) so ELK
+    // routes the trunk into the wall at pin height instead of an arbitrary
+    // corner, and in the model's own orientation so layering stays truthful.
+    const east = elk.edges.find((e: any) => e.id === "e0")!;
+    expect(east.sources).toEqual([portId(10)]);
+    expect(east.targets).toEqual([portId(900)]);
+    // Labelled with the bundle instance's name, not one member's net.
+    expect(east.labels?.[0]?.text).toBe("bus");
+    const west = elk.edges.find((e: any) => e.id === "e2")!;
+    expect(west.sources).toEqual([portId(900)]); // bundle drives these members
+    expect(west.targets).toEqual([portId(12)]);
+  });
+
+  it("leaves singleton bundle connections alone", () => {
+    const single: SchematicGraph = {
+      ...trunkGraph,
+      edges: [trunkGraph.edges[0], trunkGraph.edges[4]],
+    };
+    expect(trunkGroups(single)).toHaveLength(0);
+    const elk = toElk(single);
+    const e0 = elk.edges.find((e: any) => e.id === "e0")!;
+    expect(e0.sources).toEqual([portId(10)]); // pin-anchored as before
+  });
+
+  it("computes the consumer-side gather bar geometry", () => {
+    // Bar one stub-length off the pins' wall — *inside* ELK's 12px edge-node
+    // channel, so it cannot lie on other edges' vertical runs. The trunk's own
+    // final approach (at its representative pin's row) crosses the bar, so no
+    // separate joint is needed.
+    const east = gatherBar([{ x: 414, y: 204 }, { x: 414, y: 240 }], 1);
+    expect(east.bar).toEqual([
+      { x: 422, y: 204 },
+      { x: 422, y: 240 },
+    ]);
+    expect(east.stubs).toEqual([
+      [
+        { x: 414, y: 204 },
+        { x: 422, y: 204 },
+      ],
+      [
+        { x: 414, y: 240 },
+        { x: 422, y: 240 },
+      ],
+    ]);
+    const west = gatherBar([{ x: 100, y: 50 }], -1);
+    expect(west.bar).toEqual([
+      { x: 92, y: 50 },
+      { x: 92, y: 50 },
+    ]);
   });
 });
 
