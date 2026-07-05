@@ -849,6 +849,68 @@ fn ff_clock_pin_carries_the_clk_role() {
 }
 
 #[test]
+fn plain_net_joins_instances_in_logic_free_scope() {
+    // #123: two instance ports meeting only through a plain scope-level net —
+    // no interface, no logic box in the scope. The structural pass drops the
+    // connection (the net endpoint resolves to no box) and the signal-join
+    // pass used to be gated on the scope having logic boxes, so no wire was
+    // drawn at all while the pins (correctly) stayed solid.
+    let doc = r#"{
+        "schema_version": 1,
+        "design": "t",
+        "files": [{"id": 0, "path": "t.sv"}],
+        "nodes": [
+            {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+             "children":[1,3,5],"symbol_key":"t"},
+            {"id":1,"kind":"Instance","name":"a","path":"t.a","parent":0,
+             "children":[2],"symbol_key":"t.a"},
+            {"id":2,"kind":"Port","name":"y","path":"t.a.y","parent":1,
+             "children":[],"symbol_key":"t.a.y","dir":"out","type":"logic"},
+            {"id":3,"kind":"Instance","name":"b","path":"t.b","parent":0,
+             "children":[4],"symbol_key":"t.b"},
+            {"id":4,"kind":"Port","name":"x","path":"t.b.x","parent":3,
+             "children":[],"symbol_key":"t.b.x","dir":"in","type":"logic"},
+            {"id":5,"kind":"Var","name":"n","path":"t.n","parent":0,
+             "children":[],"symbol_key":"t.n","type":"logic"}
+        ],
+        "edges": [
+            {"id":0,"port":2,"endpoint":5,"dir":"out"},
+            {"id":1,"port":4,"endpoint":5,"dir":"in"}
+        ]
+    }"#;
+    let d = svxprobe_ingest::from_slice(doc.as_bytes()).unwrap();
+    let g = scope_graph(&d, "t").expect("scope graph");
+
+    let wires: Vec<_> = g
+        .edges
+        .iter()
+        .filter(|e| (e.source, e.target) == (2, 4) || (e.source, e.target) == (4, 2))
+        .collect();
+    assert_eq!(
+        wires.len(),
+        1,
+        "one wire joins a.y to b.x through the plain net: {:?}",
+        g.edges
+    );
+    assert_eq!(
+        wires[0].net.as_deref(),
+        Some("n"),
+        "wire carries the net name"
+    );
+    assert_eq!(
+        wires[0].net_path.as_deref(),
+        Some("t.n"),
+        "wire cross-probes the net's canonical path"
+    );
+    // The pins stay solid: the model edges exist, so they are not dangling
+    // (#118 — dangling is a model fact, untouched by this wiring).
+    for inst in ["a", "b"] {
+        let n = g.nodes.iter().find(|n| n.label == inst).unwrap();
+        assert!(n.ports.iter().all(|p| !p.dangling), "{inst} pin dangles");
+    }
+}
+
+#[test]
 fn ff_reset_and_latch_enable_pins_carry_roles() {
     // #59: `Node.reset` (async-reset path on an FF) and `Node.enable` (gating
     // condition path on a latch) are model facts from the harness; the matching
