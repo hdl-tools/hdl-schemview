@@ -489,9 +489,11 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       renderAssign(root, c, node, id);
       continue;
     }
-    // SystemVerilog interface instance / interface port: a folded-corner bundle.
+    // SystemVerilog interface: a modport-qualified port draws as a square
+    // frame pin (#125); an interface *instance* keeps the hexagon bundle box.
     if (node?.kind === "Interface") {
-      renderInterface(root, c, node, id);
+      if (node.modport) renderBundlePin(root, c, node, id);
+      else renderInterface(root, c, node, id);
       continue;
     }
 
@@ -718,6 +720,69 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   parent.appendChild(g);
 }
 
+// A modport-qualified interface port (#125): the scope's window to the outside,
+// drawn as a square frame pin — the "interface port" glyph (#106/#96) — rather
+// than the hexagon reserved for interface *instances*. It shares the frame
+// column with the scope's own boundary pins (walls flush), and every wired
+// member wire anchors at the square (FIXED_POS ports at the wall centre) before
+// fanning out toward the design; the pin carries the instance name with the
+// `(type.view)` sublabel outboard.
+function renderBundlePin(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  // Same mostly-in/mostly-out test as toElk: a FIRST-layer pin faces the
+  // design with its east wall; a LAST-layer pin with its west wall.
+  const eastCount = node.ports.filter((p) => p.side === "east").length;
+  const first = eastCount >= node.ports.length - eastCount;
+  const edgeX = first ? W : 0;
+  const cy = H / 2;
+
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const SQ = 5; // square half-size, straddling the wall like a frame pin
+  const square = document.createElementNS(SVGNS, "path");
+  square.setAttribute("class", "pin bundle-pin" + (state.selected === id ? " sel" : ""));
+  square.setAttribute("d", `M${edgeX - SQ},${cy - SQ} h${2 * SQ} v${2 * SQ} h${-2 * SQ} Z`);
+  square.dataset.nodeId = String(id);
+  const probePin = (ev: MouseEvent) => {
+    ev.preventDefault();
+    crossProbe(id, ev);
+  };
+  square.onclick = () => selectNode(id);
+  square.oncontextmenu = probePin;
+  g.appendChild(square);
+
+  // Instance name first, `(type.view)` on the grey sublabel line — the same
+  // reading order as the hexagon, anchored away from the design side.
+  const lx = first ? edgeX - SQ - 6 : edgeX + SQ + 6;
+  const anchor = first ? "end" : "start";
+  const name = document.createElementNS(SVGNS, "text");
+  name.setAttribute("class", "pin-label");
+  name.setAttribute("x", String(lx));
+  name.setAttribute("y", String(cy - 2));
+  name.setAttribute("text-anchor", anchor);
+  name.textContent = node.label;
+  name.dataset.nodeId = String(id);
+  name.onclick = () => selectNode(id);
+  name.oncontextmenu = probePin;
+  g.appendChild(name);
+  if (node.module) {
+    const mod = document.createElementNS(SVGNS, "text");
+    mod.setAttribute("class", "box-sublabel");
+    mod.setAttribute("x", String(lx));
+    mod.setAttribute("y", String(cy + 10));
+    mod.setAttribute("text-anchor", anchor);
+    mod.textContent = `(${node.module}.${node.modport})`;
+    mod.dataset.nodeId = String(id);
+    mod.onclick = () => selectNode(id);
+    mod.oncontextmenu = probePin;
+    g.appendChild(mod);
+  }
+
+  parent.appendChild(g);
+}
+
 // An inferred storage element — register FF or level latch (#115): a box
 // captioned "FF"/"LE" in its bottom band, the data + enable inputs as labelled
 // rows down the west wall (enable in its own colour), a clock wedge (clk, left
@@ -860,16 +925,13 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   g.appendChild(body);
 
   // Instance name reads first — same convention as module boxes and the
-  // reference snapshots — with the interface type (and modport view, #106)
-  // on the grey sublabel line.
+  // reference snapshots — with the interface type on the grey sublabel line.
+  // (A modport-qualified port never reaches here — it draws as a square frame
+  // pin instead, #125.)
   const cx = W / 2;
   const cy = H / 2;
   const inst = c.labels?.[0]?.text ?? node.label;
-  const type_ = node.module
-    ? node.modport
-      ? `${node.module}.${node.modport}`
-      : node.module
-    : null;
+  const type_ = node.module ?? null;
   const name = document.createElementNS(SVGNS, "text");
   name.setAttribute("class", "box-label");
   name.setAttribute("x", String(cx));

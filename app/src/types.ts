@@ -35,8 +35,9 @@ export interface SchNode {
    * Model NodeKind, mirrored as a string. Drives the renderer's glyph choice:
    * `Instance`/`GenBlock` → module box, `Port` → boundary pin, `FF` → flip-flop,
    * `Comb` → combinational rectangle, `Assign` → stadium (function) node,
-   * `Latch` → tinted storage box with an "LE" caption, `Interface` →
-   * folded-corner "bundle" box.
+   * `Latch` → tinted storage box with an "LE" caption, `Interface` → hexagon
+   * "bundle" box for an instance, or a square frame pin when `modport` is set
+   * (#125).
    */
   kind: string;
   label: string;
@@ -49,8 +50,9 @@ export interface SchNode {
   constant?: string;
   /**
    * Modport view of a modport-qualified interface port (e.g. "mem"); absent
-   * for bare interface instances. Marks the bundle as boundary-like: it
-   * clusters at the frame and is sublabelled `(mem_if.mem)`.
+   * for bare interface instances. Draws as a square frame pin in the boundary
+   * frame column (#125), sublabelled `(mem_if.mem)`, with every wired member
+   * wire anchored at the square (unconnected members omitted).
    */
   modport?: string;
 }

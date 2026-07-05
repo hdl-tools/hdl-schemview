@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   toElk,
+  layout,
   nodeId,
   portId,
   fitZoom,
@@ -105,13 +106,12 @@ describe("toElk", () => {
   });
 
   it("clusters a modport-qualified bundle at the boundary frame", () => {
-    // #106: inside the consumer, its modport-qualified interface port is the
-    // module's window to the outside — it hugs the boundary, but in the first
-    // *regular* layer (FIRST/LAST, not the _SEPARATE frame column) so the
-    // scope's own boundary pins keep their exclusive frame layer and stay at
-    // the top corner instead of stacking under the tall bundle. A mostly-in
-    // view (pins mirrored east, feeding the design) sits first; a mostly-out
-    // view last. A bare interface instance (no modport) stays a free box.
+    // #106/#125: inside the consumer, its modport-qualified interface port is
+    // the module's window to the outside — a frame pin sharing the _SEPARATE
+    // frame column with the scope's own boundary pins, so the square lines up
+    // with them. A mostly-in view (pins mirrored east, feeding the design)
+    // sits first; a mostly-out view last. A bare interface instance (no
+    // modport) stays a free box.
     const bundle = (modport: string | undefined, sides: ("east" | "west")[]): SchematicGraph => ({
       root: "s.memory",
       nodes: [
@@ -129,11 +129,20 @@ describe("toElk", () => {
       edges: [],
     });
     const mostlyIn = toElk(bundle("mem", ["east", "east", "east", "west"])).children[0];
-    expect(mostlyIn.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("FIRST");
+    expect(mostlyIn.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("FIRST_SEPARATE");
+    // #125: the modport bundle is a frame *pin*, not a box — a pin-height node
+    // whose wired members all anchor at the square glyph on the design-facing
+    // wall; with no edges in this fixture it carries no ports at all.
+    expect(mostlyIn.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    expect(mostlyIn.height).toBe(26);
+    expect(mostlyIn.ports).toHaveLength(0);
     const mostlyOut = toElk(bundle("core", ["west", "west", "east"])).children[0];
-    expect(mostlyOut.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("LAST");
+    expect(mostlyOut.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("LAST_SEPARATE");
     const bare = toElk(bundle(undefined, ["east", "west"])).children[0];
     expect(bare.layoutOptions["elk.layered.layering.layerConstraint"]).toBeUndefined();
+    // A bare interface *instance* stays the full hexagon box.
+    expect(bare.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    expect(bare.height).toBeGreaterThan(58);
   });
 
   it("keeps comb nodes compact despite long signal names", () => {
@@ -220,6 +229,172 @@ describe("interface bundle", () => {
     expect(iface.height).toBeGreaterThan(box.height);
     // Pins keep their wall positions (below the top cap).
     expect(iface.ports[0].y).toBeGreaterThan(12);
+  });
+
+  it("gives a modport-qualified port the compact pin shape, no cap pad (#125)", () => {
+    // The hexagon (and its IFACE_CAP pad) is the interface-*instance* glyph; a
+    // modport-qualified port is drawn as a square frame pin instead.
+    const c = toElk({
+      root: "s.memory",
+      nodes: [
+        {
+          id: 1,
+          kind: "Interface",
+          label: "bus",
+          path: "s.memory.bus",
+          expandable: false,
+          module: "mem_if",
+          modport: "mem",
+          ports: [
+            { id: 10, name: "valid", side: "west" },
+            { id: 11, name: "ready", side: "east" },
+          ],
+        },
+      ],
+      edges: [],
+    }).children[0];
+    expect(c.height).toBe(26);
+  });
+});
+
+describe("modport bundle pin (#125)", () => {
+  // The real drilled soc_mem topology (fixtures golden): a modport bundle
+  // (6 east / 2 west members), the inferred FF, and the scope's own resetn
+  // boundary pin. instr/addr have no edges — unconnected in this scope.
+  const port = (id: number, name: string, side: "east" | "west", path: string): SchPort => ({
+    id,
+    name,
+    side,
+    path,
+  });
+  const drilled: SchematicGraph = {
+    root: "top.g_lane[0].memory",
+    nodes: [
+      {
+        id: 375,
+        kind: "Interface",
+        label: "bus",
+        path: "top.g_lane[0].memory.bus",
+        expandable: false,
+        module: "mem_if",
+        modport: "mem",
+        ports: [
+          port(376, "clk", "east", "top.g_lane[0].bus.clk"),
+          port(377, "valid", "east", "top.g_lane[0].bus.valid"),
+          port(378, "instr", "east", "top.g_lane[0].bus.instr"),
+          port(379, "addr", "east", "top.g_lane[0].bus.addr"),
+          port(380, "wdata", "east", "top.g_lane[0].bus.wdata"),
+          port(381, "wstrb", "east", "top.g_lane[0].bus.wstrb"),
+          port(382, "ready", "west", "top.g_lane[0].bus.ready"),
+          port(383, "rdata", "west", "top.g_lane[0].bus.rdata"),
+        ],
+      },
+      {
+        id: 389,
+        kind: "FF",
+        label: "$ff389",
+        path: "top.g_lane[0].memory.$ff389",
+        expandable: false,
+        ports: [
+          { id: 1000, name: "clk", side: "west", role: "clk" },
+          { id: 1001, name: "valid", side: "west" },
+          { id: 1002, name: "ready", side: "east" },
+          { id: 1003, name: "wdata", side: "west" },
+          { id: 1004, name: "wstrb", side: "west" },
+          { id: 1005, name: "rdata", side: "east" },
+          { id: 1006, name: "resetn", side: "west" },
+        ],
+      },
+      {
+        id: 384,
+        kind: "Port",
+        label: "resetn",
+        path: "top.g_lane[0].memory.resetn",
+        expandable: false,
+        ports: [port(384, "resetn", "east", "top.g_lane[0].memory.resetn")],
+      },
+    ],
+    edges: [
+      { id: 1222, source: 376, target: 1000, net: "clk", net_path: "top.g_lane[0].bus.clk" },
+      { id: 1223, source: 377, target: 1001, net: "valid", net_path: "top.g_lane[0].bus.valid" },
+      { id: 1224, source: 1002, target: 382, net: "ready", net_path: "top.g_lane[0].bus.ready" },
+      { id: 1225, source: 380, target: 1003, net: "wdata", net_path: "top.g_lane[0].bus.wdata" },
+      { id: 1226, source: 381, target: 1004, net: "wstrb", net_path: "top.g_lane[0].bus.wstrb" },
+      { id: 1227, source: 1005, target: 383, net: "rdata", net_path: "top.g_lane[0].bus.rdata" },
+      {
+        id: 1228,
+        source: 384,
+        target: 1006,
+        net: "resetn",
+        net_path: "top.g_lane[0].memory.resetn",
+      },
+    ],
+  };
+
+  it("emits the bundle as a compact frame pin with only wired members", () => {
+    const bundle = toElk(drilled).children[0];
+    expect(bundle.id).toBe(nodeId(375));
+    expect(bundle.layoutOptions["elk.layered.layering.layerConstraint"]).toBe("FIRST_SEPARATE");
+    expect(bundle.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    // 6 of 8 members carry edges (instr/addr are unconnected — omitted); all
+    // anchor at the square glyph on the design-facing wall, so every member
+    // wire visually meets the pin.
+    expect(bundle.ports).toHaveLength(6);
+    for (const p of bundle.ports) {
+      expect(p.layoutOptions["elk.port.side"]).toBe("EAST");
+      expect(p.x).toBe(bundle.width);
+      expect(p.y).toBe(bundle.height / 2);
+    }
+    expect(bundle.height).toBe(26);
+    // Wide enough for the sublabel "(mem_if.mem)" beside the square.
+    expect(bundle.width).toBeGreaterThanOrEqual(98);
+    expect(bundle.labels[0].text).toBe("bus");
+  });
+
+  it("keeps every member-tap edge — no trunk grouping without bundle flags", () => {
+    expect(trunkGroups(drilled)).toHaveLength(0);
+    const elk = toElk(drilled);
+    expect(elk.edges.map((e: any) => e.id).sort()).toEqual([
+      "e1222",
+      "e1223",
+      "e1224",
+      "e1225",
+      "e1226",
+      "e1227",
+      "e1228",
+    ]);
+    for (const e of elk.edges as any[]) expect(e.labels?.[0]?.text).toBeTruthy();
+  });
+
+  it("lays out the bundle inside the canvas, left of the FF", async () => {
+    const laid = await layout(drilled);
+    const child = (id: number) => laid.children.find((c: any) => c.id === nodeId(id));
+    const bundle = child(375)!;
+    const ff = child(389)!;
+    const resetn = child(384)!;
+    for (const c of [bundle, ff, resetn]) {
+      expect(typeof c.x).toBe("number");
+      expect(typeof c.y).toBe("number");
+    }
+    // The bundle shares the _SEPARATE frame column with resetn (#125): both
+    // frame pins occupy the same layer — horizontally overlapping, aligned at
+    // the design-facing wall — left of the FF that consumes them.
+    expect(bundle.x).toBeLessThan(resetn.x + resetn.width);
+    expect(resetn.x).toBeLessThan(bundle.x + bundle.width);
+    expect(bundle.x + bundle.width).toBeCloseTo(resetn.x + resetn.width, 5);
+    expect(bundle.x + bundle.width).toBeLessThanOrEqual(ff.x);
+    // Every routed point stays inside the reported canvas (regression for the
+    // out-of-bounds theory from the original #125 report).
+    for (const e of laid.edges ?? []) {
+      for (const s of e.sections ?? []) {
+        for (const p of [s.startPoint, ...(s.bendPoints ?? []), s.endPoint]) {
+          expect(p.x).toBeGreaterThanOrEqual(0);
+          expect(p.x).toBeLessThanOrEqual(laid.width);
+          expect(p.y).toBeGreaterThanOrEqual(0);
+          expect(p.y).toBeLessThanOrEqual(laid.height);
+        }
+      }
+    }
   });
 });
 
