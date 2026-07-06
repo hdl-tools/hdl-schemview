@@ -76,6 +76,13 @@ fn is_parameter(t: VarType) -> bool {
 impl LoadedWave {
     /// Open a waveform file, auto-detecting the format from its contents.
     pub fn open(path: &str) -> Result<Self> {
+        // Validate the path up front: wellen panics (expect) on a file it
+        // cannot open, so a missing/unreadable trace must be caught here.
+        let meta =
+            std::fs::metadata(path).with_context(|| format!("cannot open trace '{path}'"))?;
+        if !meta.is_file() {
+            anyhow::bail!("trace path '{path}' is not a file");
+        }
         let wave = wellen::simple::read_with_options(path, &LoadOptions::default())
             .map_err(|e| anyhow::anyhow!("{e:?}"))
             .with_context(|| format!("opening waveform {path}"))?;

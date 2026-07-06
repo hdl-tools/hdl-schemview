@@ -33,6 +33,31 @@ fn loads_vcd() {
 }
 
 #[test]
+fn missing_trace_is_a_clean_error() {
+    // wellen panics (expect) on a file it cannot open; open() must catch the
+    // bad path first and return an error naming it (issue #132).
+    let Err(err) = LoadedWave::open("no/such/file.vcd") else {
+        panic!("missing trace must not open");
+    };
+    assert!(
+        format!("{err:#}").contains("no/such/file.vcd"),
+        "error should name the path: {err:#}"
+    );
+}
+
+#[test]
+fn directory_trace_is_a_clean_error() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let Err(err) = LoadedWave::open(dir) else {
+        panic!("a directory must not open as a trace");
+    };
+    assert!(
+        format!("{err:#}").contains("not a file"),
+        "error should say it's not a file: {err:#}"
+    );
+}
+
+#[test]
 fn fst_and_vcd_agree() {
     // The two traces come from the same deterministic run, so their hierarchies
     // must match in size.
