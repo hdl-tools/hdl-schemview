@@ -68,6 +68,17 @@ def _kind_name(sym: Any) -> str:
     return str(sym.kind).replace("SymbolKind.", "")
 
 
+class _NetInitializer:
+    """Presents a net declaration initializer (``wire w = expr;``) to
+    ``_logic_edges`` as a continuous assign (#110): ``assignment`` is the RHS
+    expression and ``target_path`` the initialized net's canonical path — its
+    l-value, which the RHS-only expression tree cannot name itself."""
+
+    def __init__(self, expr: Any, target_path: str) -> None:
+        self.assignment = expr
+        self.target_path = target_path
+
+
 def _value_sym_path(sym: Any) -> Optional[str]:
     """Canonical path of a referenced value symbol. A ModportPort is slang's view
     of an interface member as seen through a modport-qualified port (its own path,
@@ -494,6 +505,30 @@ class Elaborator:
             pass
         return out
 
+    def _lvalue_bases(self, node: Any) -> set[str]:
+        """Hierarchical paths of the symbols an assignment LHS actually stores
+        to (#110). Selects peel to their base — ``ram[idx]`` targets ``ram``,
+        the index is a read — member access to its underlying value (a struct
+        field store targets the struct; an interface member like ``bus.rdata``
+        arrives as a HierarchicalValue, not a MemberAccess), and concatenations
+        descend per operand. Unrecognized shapes fall back to every value ref
+        in the subtree, over-approximating ``assigned`` (the old behavior)
+        rather than silently dropping outputs."""
+        if node is None:
+            return set()
+        k = _kind_name(node)
+        if "NamedValue" in k or "HierarchicalValue" in k:
+            p = _value_sym_path(getattr(node, "symbol", None))
+            return {p} if p else set()
+        if "ElementSelect" in k or "RangeSelect" in k or "MemberAccess" in k:
+            return self._lvalue_bases(getattr(node, "value", None))
+        if "Concatenation" in k and "Streaming" not in k:
+            out: set[str] = set()
+            for op in getattr(node, "operands", None) or []:
+                out |= self._lvalue_bases(op)
+            return out
+        return self._value_refs(node)
+
     @staticmethod
     def _const_bit(expr: Any) -> Optional[str]:
         """Elaborated constant value of a select bound (`gi` -> `0`), else None.
@@ -505,7 +540,13 @@ class Elaborator:
         if c is None or getattr(c, "bad", False):
             return None
         s = str(c)
-        return s if s and s != "None" else None
+        if not s or s == "None":
+            return None
+        # A computed bound (e.g. `AW+1`) prints as a sized constant (`32'd10`)
+        # while a literal prints bare — normalize so select labels are uniform
+        # (`[10:2]`, never `[32'd10:2]`).
+        m = re.fullmatch(r"\d+'s?d(\d+)", s)
+        return m.group(1) if m else s
 
     @staticmethod
     def _base_path(node: Any) -> Optional[str]:
@@ -579,12 +620,17 @@ class Elaborator:
             if "Assignment" in _kind_name(n):
                 left = getattr(n, "left", None)
                 if left is not None:
-                    assigned.update(self._value_refs(left))
+                    assigned.update(self._lvalue_bases(left))
 
         try:
             root.visit(cb)
         except Exception:
             pass
+        # A net declaration initializer's target is not in the expression tree
+        # (there is no Assignment node) — the adapter names it directly.
+        target = getattr(sym, "target_path", None)
+        if target is not None:
+            assigned.add(target)
         data = self._value_refs(root) - assigned - clock
         # Resolved bit-selects (e.g. `core_trap[gi]` -> `[0]`) for the signals
         # this block touches, so each wire is labelled with the bit it carries.
@@ -677,6 +723,19 @@ class Elaborator:
             # A modport-specialized interface port pins its members (#64).
             if kname == "InterfacePort" and self.nodes[my_id]["modport"]:
                 self._add_modport_pins(sym, my_id)
+            # `wire w = expr;` — a net declaration initializer is a continuous
+            # assign the member walk otherwise misses (#110): emit an Assign
+            # node so the cone through `w` stays traceable. A *variable*
+            # initializer runs once at time zero (like `initial`) and stays
+            # non-logic. Passing the net symbol anchors `def_range` at the
+            # declaration for source cross-probe.
+            if kind == "Net":
+                init = getattr(sym, "initializer", None)
+                if init is not None:
+                    aid = self._add_logic(sym, parent, "assign")
+                    self.logic_blocks.append(
+                        (aid, _NetInitializer(init, self.nodes[my_id]["path"]), "assign")
+                    )
 
         members = self._members(sym)
         if members is None:
