@@ -167,8 +167,9 @@ def _build_compilation(
     if top:
         opts.topModules = {top}
     sm = SourceManager()
-    if include_dirs:
-        sm.addUserDirectories(include_dirs)
+    # pyslang's addUserDirectories takes one path per call, not a list.
+    for inc in include_dirs or []:
+        sm.addUserDirectories(inc)
     comp = Compilation(Bag([opts]))
     comp.addSyntaxTree(SyntaxTree.fromFiles(files, sm))
     return comp, sm
