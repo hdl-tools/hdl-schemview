@@ -136,8 +136,9 @@ class Elaborator:
         # Share one SourceManager so `\`include` directives resolve against the
         # user-supplied include dirs (needed for real cores).
         self.sm = SourceManager()
-        if include_dirs:
-            self.sm.addUserDirectories(include_dirs)
+        # pyslang's addUserDirectories takes one path per call, not a list.
+        for inc in include_dirs or []:
+            self.sm.addUserDirectories(inc)
         self.comp = Compilation(Bag([opts]))
         self.comp.addSyntaxTree(SyntaxTree.fromFiles(files, self.sm))
         self.nodes: list[dict[str, Any]] = []

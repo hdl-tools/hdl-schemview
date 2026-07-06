@@ -540,3 +540,26 @@ def test_main_surfaces_diagnostics_and_fails_on_empty_design(
     assert rc == 1
     assert "produced no design" in err, err
     assert not out2.exists(), "no model should be written when nothing elaborated"
+
+
+def test_multiple_include_dirs(tmp_path: Path) -> None:
+    """`include resolves against every -I dir. pyslang's addUserDirectories
+    takes one path per call — passing the whole list raised TypeError, so any
+    filelist with more than zero incdirs crashed before elaboration."""
+    inc_a = tmp_path / "inc_a"
+    inc_b = tmp_path / "inc_b"
+    inc_a.mkdir()
+    inc_b.mkdir()
+    (inc_a / "width_a.svh").write_text("`define WIDTH_A 4\n")
+    (inc_b / "width_b.svh").write_text("`define WIDTH_B 2\n")
+    src = tmp_path / "dut.sv"
+    src.write_text(
+        '`include "width_a.svh"\n'
+        '`include "width_b.svh"\n'
+        "module m(input logic [`WIDTH_A-1:0] a, output logic [`WIDTH_B-1:0] b);\n"
+        "  assign b = a[`WIDTH_B-1:0];\n"
+        "endmodule\n"
+    )
+    model = build_model([str(src)], top="m", include_dirs=[str(inc_a), str(inc_b)])
+    ports = {n["name"] for n in model["nodes"] if n["kind"] == "Port"}
+    assert {"a", "b"} <= ports, ports
