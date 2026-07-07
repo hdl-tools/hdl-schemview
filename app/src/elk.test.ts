@@ -171,8 +171,8 @@ describe("toElk", () => {
     expect(c.width).toBeLessThan(100);
   });
 
-  it("lays out an assign node as a valid capsule, sized by inputs not names", () => {
-    const make = (name: string): SchematicGraph => ({
+  it("lays out an assign node as a small anonymous square (#135)", () => {
+    const make = (name: string, inputs = 3): SchematicGraph => ({
       root: "s",
       nodes: [
         {
@@ -182,23 +182,33 @@ describe("toElk", () => {
           path: "s.a",
           expandable: false,
           ports: [
-            { id: 10, name, side: "west" },
-            { id: 11, name, side: "west" },
-            { id: 12, name, side: "west" },
-            { id: 13, name, side: "east" },
+            ...Array.from({ length: inputs }, (_, i) => ({
+              id: 10 + i,
+              name,
+              side: "west" as const,
+            })),
+            { id: 20, name, side: "east" as const },
           ],
         },
       ],
       edges: [],
     });
     const c = toElk(make("x")).children[0];
-    // Capsule end caps (radius H/2) are only valid when width >= height.
-    expect(c.width).toBeGreaterThanOrEqual(c.height);
-    const sides = c.ports.map((p) => p.layoutOptions["elk.port.side"]);
-    expect(sides.filter((s) => s === "EAST").length).toBe(1); // single output
-    expect(sides.filter((s) => s === "WEST").length).toBe(3); // inputs spread
-    // Width is driven by input count, not the (unrendered) signal-name length.
-    expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(c.width);
+    // Fixed 16px width; height grows a couple px per input (max(16, 4 + rows*6)).
+    expect(c.width).toBe(16);
+    expect(c.height).toBe(22);
+    expect(toElk(make("x", 1)).children[0].height).toBe(16);
+    // Anonymous: the "assign" text label is gone — wire net labels carry the meaning.
+    expect(c.labels).toHaveLength(0);
+    const westPorts = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "WEST");
+    const eastPorts = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "EAST");
+    expect(eastPorts.length).toBe(1); // single output
+    expect(westPorts.length).toBe(3); // inputs spread
+    // Ports sit flush on the walls — the capsule-curve inset is gone.
+    for (const p of westPorts) expect(p.x).toBe(0);
+    expect(eastPorts[0].x).toBe(16);
+    // Width is unaffected by the (unrendered) signal-name length.
+    expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(16);
   });
 });
 
