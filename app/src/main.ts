@@ -484,9 +484,9 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       renderStorage(root, c, node, id);
       continue;
     }
-    // Continuous assign: a stadium (rounded-end capsule) function node.
+    // Continuous assign: a small anonymous square function node (#135).
     if (node?.kind === "Assign") {
-      renderAssign(root, c, node, id);
+      renderAssign(root, c, id);
       continue;
     }
     // SystemVerilog interface: a modport-qualified port draws as a square
@@ -1007,70 +1007,29 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   parent.appendChild(g);
 }
 
-// A continuous assign, drawn as a stadium (rounded-end capsule): a combinational
-// function reducing its inputs (west) to a single output (east). Distinct from the
-// comb rectangle and the module box. Pins sit on the rounded edge. Pin labels are
-// skipped (the wire carries the net name), like the other logic nodes.
-function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
-  const W = c.width;
-  const H = c.height;
-  const r = H / 2; // capsule end radius
+// A continuous assign: a small anonymous square (#135) — no text label, no pin
+// glyphs (at 16 px they would outsize the box). The wire net labels carry the
+// meaning; the shape keeps selection and click/right-click cross-probe.
+function renderAssign(parent: SVGElement, c: any, id: number) {
   const g = document.createElementNS(SVGNS, "g");
   g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
   const rect = document.createElementNS(SVGNS, "rect");
   rect.setAttribute("class", "box assign" + (state.selected === id ? " sel" : ""));
-  rect.setAttribute("width", String(W));
-  rect.setAttribute("height", String(H));
-  rect.setAttribute("rx", String(r));
-  rect.setAttribute("ry", String(r));
+  rect.setAttribute("width", String(c.width));
+  rect.setAttribute("height", String(c.height));
+  rect.setAttribute("rx", "2");
+  rect.setAttribute("ry", "2");
   rect.dataset.nodeId = String(id);
   rect.onclick = () => selectNode(id);
   rect.oncontextmenu = (e) => {
     e.preventDefault();
     crossProbe(id, e);
   };
+  const tip = document.createElementNS(SVGNS, "title");
+  tip.textContent = "assign";
+  rect.appendChild(tip);
   g.appendChild(rect);
-
-  const t = document.createElementNS(SVGNS, "text");
-  t.setAttribute("class", "box-label" + (state.selected === id ? " sel" : ""));
-  t.setAttribute("x", String(W / 2));
-  t.setAttribute("y", String(H / 2));
-  t.setAttribute("text-anchor", "middle");
-  t.setAttribute("dominant-baseline", "central");
-  t.dataset.nodeId = String(id);
-  t.style.pointerEvents = "none";
-  t.textContent = "assign";
-  g.appendChild(t);
-
-  const portById = new Map<number, SchPort>();
-  node.ports.forEach((p) => portById.set(p.id, p));
-  const PIN = 8; // triangle depth
-  for (const p of c.ports ?? []) {
-    const pid = Number(String(p.id).slice(1));
-    const sp = portById.get(pid);
-    if (!sp) continue;
-    const py = p.y ?? H / 2;
-    const west = sp.side !== "east";
-    // Inset the pin to the capsule's curved edge at this height so the triangle
-    // sits on the rounded wall rather than floating left/right of it.
-    const dy = Math.min(Math.abs(py - r), r);
-    const inset = r - Math.sqrt(Math.max(0, r * r - dy * dy));
-    const edgeX = west ? inset : W - inset;
-    const arrow = document.createElementNS(SVGNS, "path");
-    arrow.setAttribute(
-      "class",
-      "pin " + (west ? "pin-in" : "pin-out") + (sp.dangling ? " dangling" : ""),
-    );
-    arrow.setAttribute(
-      "d",
-      west
-        ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
-        : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
-    );
-    arrow.onclick = () => selectNode(pid);
-    g.appendChild(arrow);
-  }
   parent.appendChild(g);
 }
 

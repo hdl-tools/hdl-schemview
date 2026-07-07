@@ -174,36 +174,30 @@ function storageChild(n: SchNode): ElkChild {
   };
 }
 
-// A continuous assign, laid out as a stadium (rounded-end capsule): inputs spread
-// down the west wall, a single output centred on the east. Height grows with the
-// input count; width is kept >= height so the capsule's end caps (radius H/2) are
-// valid, with extra room for the "assign" label in the flat middle.
+// A continuous assign, drawn as a small anonymous square (#135): inputs spread
+// down the west wall, the single output leaves the east wall centre. No label —
+// the wires' net labels carry the meaning; the square only marks "a function
+// happens here". Height grows a couple px per input so heavy fan-in reads.
 function assignChild(n: SchNode): ElkChild {
   const west = n.ports.filter((p) => p.side !== "east");
   const east = n.ports.filter((p) => p.side === "east");
   const rows = Math.max(west.length, 1);
-  const h = Math.max(34, 14 + rows * 16);
-  const w = Math.max(h + 44, "assign".length * PIN_CH + h);
+  const w = 16;
+  const h = Math.max(16, 4 + rows * 6);
   const ports: ElkPort[] = [];
-  // Inputs spread within an inset band so they land on the curved wall, not the caps.
-  // Each port's x is pushed in to the capsule edge at its height (matching the pin
-  // triangle in renderAssign) so wires terminate on the rounded wall, not in space.
-  const r = h / 2;
-  const capInset = (y: number) => r - Math.sqrt(Math.max(0, r * r - Math.min(Math.abs(y - r), r) ** 2));
-  const top = 10;
+  const top = 4;
   const span = Math.max(0, h - 2 * top);
   west.forEach((p, i) => {
-    const y = west.length > 1 ? top + (span * i) / (west.length - 1) : h / 2;
     ports.push({
       id: portId(p.id),
       width: 0,
       height: 0,
-      x: capInset(y),
-      y,
+      x: 0,
+      y: west.length > 1 ? top + (span * i) / (west.length - 1) : h / 2,
       layoutOptions: { "elk.port.side": "WEST" },
     });
   });
-  // The assigned LHS — normally one output, centred on the east cap.
+  // The assigned LHS — normally one output, centred on the east wall.
   east.forEach((p) =>
     ports.push({
       id: portId(p.id),
@@ -218,7 +212,7 @@ function assignChild(n: SchNode): ElkChild {
     id: nodeId(n.id),
     width: w,
     height: h,
-    labels: [{ text: "assign" }],
+    labels: [],
     layoutOptions: { "elk.portConstraints": "FIXED_POS" },
     ports,
   };
