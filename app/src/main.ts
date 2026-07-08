@@ -1217,7 +1217,16 @@ function selectWire(netPath: string, trunk?: string) {
 // list any ambiguous alternatives. Waveform display is now an explicit, additive
 // action (the menu's "Append to waveform"), so it is no longer touched here.
 async function showInSource(resp: ProbeResponse) {
-  if (resp.source) await renderSource(resp.source.file, resp.source.line);
+  // Surface a source read failure (missing .sv, wrong src-root) in the status bar
+  // instead of leaving the pane silently empty — the menu path calls this without
+  // its own catch, so an unhandled `source_text` rejection otherwise vanishes.
+  if (resp.source) {
+    try {
+      await renderSource(resp.source.file, resp.source.line);
+    } catch (e) {
+      $("status").textContent = `source unavailable: ${e}`;
+    }
+  }
   renderPicker(resp);
 }
 
