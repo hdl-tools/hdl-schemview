@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 
-use svxprobe_gui::{ProbeResponse, Session, TreeNode};
+use svxprobe_gui::{ProbeResponse, Session, StartupArgs, StartupError, TreeNode};
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
 use tauri::State;
@@ -13,6 +13,10 @@ use tauri::State;
 /// The loaded session (None until `load_design`).
 #[derive(Default)]
 struct AppState(Mutex<Option<Session>>);
+
+/// CLI launch arguments parsed before the window opened (#136); `None` for a
+/// normal no-argument launch. The frontend pulls this once via `startup_args`.
+struct StartupState(Option<StartupArgs>);
 
 type CmdResult<T> = Result<T, String>;
 
@@ -129,10 +133,61 @@ fn trace_timescale(state: State<AppState>) -> CmdResult<Option<TraceTimescale>> 
     with_session(&state, |s| Ok(s.trace_timescale()))
 }
 
+/// The launch arguments parsed from argv (#136), or `null` for a normal launch.
+/// The frontend queries this once at init: if present it prefills the load form
+/// and auto-loads, byte-identical to clicking **Load**.
+#[tauri::command]
+fn startup_args(startup: State<StartupState>) -> Option<StartupArgs> {
+    startup.0.clone()
+}
+
+/// Parse (and path-resolve) the CLI launch arguments before any window opens
+/// (#136). Exits the process directly on the terminal cases, EDA-tool style:
+/// `-h`/`--help` prints usage to stdout and exits 0; a usage error prints to
+/// stderr and exits 2; a missing filelist/trace prints to stderr and exits 1.
+/// A normal no-argument launch returns `StartupState(None)`.
+fn resolve_startup() -> StartupState {
+    use svxprobe_gui::startup::{self, USAGE};
+    // `args_os` + lossy conversion, not `args()` — the latter panics on a
+    // non-UTF-8 argument, which in a release (windows_subsystem) build would
+    // make the app vanish with no console output, the worst mode for a CLI.
+    let argv = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned());
+    let parsed = match startup::parse(argv) {
+        Ok(None) => return StartupState(None),
+        Ok(Some(a)) => a,
+        Err(StartupError::Help) => {
+            println!("{USAGE}");
+            std::process::exit(0);
+        }
+        Err(StartupError::Usage(msg)) => {
+            eprintln!("error: {msg}\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    };
+    // Resolve relative paths against the directory the user launched from —
+    // INIT_CWD under `npm run tauri dev` (the tauri CLI runs the binary from
+    // src-tauri), else the process cwd for a bundled binary — so a relative
+    // `-f`/`-trace` means the same thing in both, and fail fast on a bad path.
+    let cwd = startup::invocation_dir(
+        std::env::var_os("INIT_CWD"),
+        std::env::current_dir().ok(),
+    );
+    match parsed.resolve(&cwd) {
+        Ok(a) => StartupState(Some(a)),
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            std::process::exit(1);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .manage(resolve_startup())
         .invoke_handler(tauri::generate_handler![
             load_design,
             elaborate_and_load,
@@ -146,6 +201,7 @@ pub fn run() {
             signal_values,
             source_text,
             trace_timescale,
+            startup_args,
         ])
         .run(tauri::generate_context!())
         .expect("error while running hdl-schemview");

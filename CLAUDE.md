@@ -119,6 +119,11 @@ Delegate to a global `AppState(Mutex<Session>)`.
 | `signal_values` | `signalRef` | `ValueChange[]` |
 | `source_text` | `file` (id) | `String` |
 | `trace_timescale` | — | `TraceTimescale \| null` (factor + normalized unit) |
+| `startup_args` | — | `StartupArgs \| null` (#136) — CLI launch args (`-f/-top/-I/-trace/-src-root`) parsed by the shell before the window opened; the frontend prefills the load form + auto-loads |
+
+The shell parses `std::env::args()` in `run()` **before** any window (see
+`svxprobe-gui::startup`): `-h`/`--help` → usage + exit 0; a usage error → stderr + exit 2;
+a missing filelist/trace → stderr + exit 1; no args → normal GUI boot.
 
 ## Key data structures
 

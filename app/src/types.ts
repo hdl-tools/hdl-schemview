@@ -128,3 +128,15 @@ export interface TraceTimescale {
   factor: number;
   unit: string;
 }
+
+// CLI launch args parsed by the Tauri shell before the window opened (#136),
+// mirroring svxprobe-gui's StartupArgs. Present only when the app was launched
+// with `-f <filelist> -top <name> [-I <dir>]... [-trace <path>] [-src-root <dir>]`;
+// the frontend prefills the load form from it and auto-loads.
+export interface StartupArgs {
+  filelist: string;
+  top: string;
+  incdirs: string[];
+  trace: string;
+  src_root: string;
+}

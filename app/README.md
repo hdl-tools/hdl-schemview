@@ -45,6 +45,42 @@ In the window, the model/trace/source-root fields are prefilled for the bundled
 fixture; click **Load**. (Paths are resolved relative to the app's working
 directory — use absolute paths if needed.)
 
+## Command line
+
+Launch straight into a design, EDA-tool style — the shell parses argv before the
+window opens, prefills the load form, and auto-loads (identical to clicking **Load**):
+
+```bash
+hdl-schemview -f soc_top.f -top soc_top -I rtl/include -trace sim.fst -src-root .
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `-f <filelist.f>` | designlist (`.f`) to elaborate — **required with `-top`** |
+| `-top <name>` | top module name — **required with `-f`** |
+| `-I <incdir>` | include directory (repeatable) |
+| `-trace <path>` | waveform trace (VCD/FST) to load (optional) |
+| `-src-root <dir>` | source root for the source view (optional, default `.`) |
+| `-h`, `--help` | print usage and exit |
+
+Long flags take either one dash (`-top`, the EDA convention) or two (`--top`).
+Relative paths resolve against the **directory you launched from** (under
+`npm run tauri dev`, `INIT_CWD` — not the `src-tauri` build dir). Exit codes:
+**0** help, **1** a missing filelist/trace, **2** a usage error. With no arguments
+the app opens the normal load form.
+
+Elaborating a `.f` designlist (`-f`/`-top`, same as the in-app flow) shells out to
+**`svxprobe-elaborate`**, which must be on `PATH`. It ships as a console script in
+the `elaborate/` package's venv — launch from a shell that has it on `PATH`, e.g.
+prepend `elaborate/.venv/Scripts` (Windows) or `elaborate/.venv/bin` (Unix), or
+`uv run` inside `elaborate/`.
+
+Under the dev server the extra `--` levels pass argv through Vite → Tauri → the app:
+
+```bash
+npm run tauri dev -- -- -- -f ../fixtures/picorv32_soc/picorv32_soc.f -top picorv32_soc
+```
+
 ## Tests
 
 - Frontend logic: `npm test` (vitest — the ELK adapter).
