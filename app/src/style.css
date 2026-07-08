@@ -45,10 +45,27 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #breadcrumb { padding:2px 8px; background:var(--crumb); font-size:12px; color:var(--crumb-fg); }
 #breadcrumb span { cursor:pointer; }
 #breadcrumb span:hover { text-decoration:underline; }
-#panes { flex:1; display:flex; min-height:0; }
-/* Instance-hierarchy tree: the top-left slot (#92). Fixed width; the tree
+/* Default layout grid (#98, epic #94): top row is tree | content (schematic over
+   source); a draggable splitter; then a full-width bottom drawer (waveform). The
+   minmax(0,…) tracks let a zoomed SVG / long content scroll inside its pane instead
+   of blowing the track out. The bottom row height is user-draggable via --bottom-h
+   (persisted); tabs (#4b) and the log pane (#4c) build on this scaffold. */
+#panes {
+  flex:1; min-height:0;
+  display:grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 6px var(--bottom-h, 220px);
+  grid-template-areas:
+    "tree     content"
+    "splitter splitter"
+    "bottom   bottom";
+}
+/* Instance-hierarchy tree: the top-left slot (#92). Fixed-width column; the tree
    scrolls inside it. */
-#hier-pane { flex:0 0 220px; min-width:140px; }
+#hier-pane { grid-area:tree; }
+/* Top-right content column: schematic stacked over source (#98). #4b later swaps the
+   stack for a source↔schematic tab. */
+#content { grid-area:content; display:flex; flex-direction:column; min-width:0; min-height:0; }
 #hierarchy { flex:1; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; }
 #hierarchy ul { list-style:none; margin:0; padding-left:14px; }
 #hierarchy > ul { padding-left:2px; }
@@ -58,11 +75,10 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #hierarchy .twist { width:12px; flex:0 0 12px; text-align:center; color:var(--muted); cursor:pointer; }
 #hierarchy .tlabel { color:var(--fg); }
 #hierarchy .tmod { color:var(--sublabel); font-size:11px; }
-/* min-width:0 lets the schematic pane shrink to its flex share so a zoomed-up
-   SVG scrolls inside #schematic (overflow:auto) instead of widening the pane and
-   pushing the source/waveform panes off-screen. */
+/* Schematic and source split the content column's height; min-width/height:0 (via
+   .pane) let a zoomed-up SVG scroll inside #schematic (overflow:auto) instead of
+   widening the pane. */
 #schematic-pane { flex:1; min-width:0; }
-#right { width:46%; display:flex; flex-direction:column; min-width:0; }
 .pane { display:flex; flex-direction:column; min-height:0; min-width:0; border:1px solid var(--border); margin:3px; }
 .pane h2 { margin:0; padding:3px 8px; background:var(--panel); font-size:12px; font-weight:600; }
 #schematic { flex:1; min-width:0; min-height:0; overflow:auto; background:var(--canvas); user-select:none; -webkit-user-select:none; }
@@ -74,9 +90,15 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #source .line { padding:0 8px; white-space:pre; }
 #source .line .ln { color:var(--muted); display:inline-block; width:42px; text-align:right; margin-right:8px; user-select:none; }
 #source .line.hl { background:var(--hl); }
-/* Pinned height: never grows or shrinks, so the waveform stays visible regardless
-   of how large the source file is. */
-#wave-pane { flex:0 0 200px; }
+/* Full-width bottom drawer (#98). Its height is the --bottom-h grid track, dragged
+   via #row-splitter, so the waveform stays visible regardless of the content above. */
+#wave-pane { grid-area:bottom; }
+/* Horizontal splitter between the content row and the bottom drawer (#98). Mirrors the
+   waveform column resizer (.col-resizer): a persistent divider line (light-on-dark /
+   dark-on-light) with the accent on hover/drag. */
+#row-splitter { grid-area:splitter; cursor:row-resize; box-shadow:inset 0 -1px 0 rgba(255,255,255,0.45); }
+:root[data-theme="light"] #row-splitter { box-shadow:inset 0 -1px 0 rgba(0,0,0,0.4); }
+#row-splitter:hover, :root[data-theme="light"] #row-splitter:hover { box-shadow:inset 0 -2px 0 var(--accent); }
 /* Zoom controls + marker readout in the waveform header, mirroring the schematic. */
 #wave-pane h2 { display:flex; align-items:center; gap:8px; }
 #wave-readout { margin-left:auto; color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }

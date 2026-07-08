@@ -47,7 +47,7 @@ SystemVerilog RTL
                       └─ gui        → Session + serializable DTOs (UI-toolkit-free, CI-testable)
                            └─ app/src-tauri/src/lib.rs  → 12 #[tauri::command]s over Mutex<Session>
                                 └─ app/src/api.ts         → typed invoke() wrappers
-                                     └─ app/src/main.ts    → 3 panes: schematic (SVG/elk.ts), source, waveform (canvas)
+                                     └─ app/src/main.ts    → CSS-grid panes (#98): tree | schematic (SVG/elk.ts) over source | full-width waveform (canvas)
 ```
 
 ### Rust crates (`core/crates/`, edition 2021, toolchain pinned to 1.94)
@@ -70,7 +70,7 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 
 | File | Role |
 | --- | --- |
-| `app/index.html` | Pane layout (hierarchy tree / schematic / source / waveform) + toolbar/breadcrumb. |
+| `app/index.html` | CSS-grid pane layout (#98): top-left hierarchy tree, top-right `#content` (schematic over source), a draggable `#row-splitter`, and a full-width bottom waveform + toolbar/breadcrumb. |
 | `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache, pinned waveform traces). |
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
 | `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |

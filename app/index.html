@@ -28,40 +28,41 @@
         <h2>Hierarchy</h2>
         <div id="hierarchy"></div>
       </section>
-      <section id="schematic-pane" class="pane">
-        <h2>
-          Schematic
-          <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
-            <button id="zoom-out" aria-label="Zoom out">−</button>
-            <button id="zoom-reset" title="Fit schematic to view (Ctrl/⌘+0)" aria-label="Fit schematic to view">100%</button>
-            <button id="zoom-in" aria-label="Zoom in">+</button>
-          </span>
-        </h2>
-        <div id="schematic"></div>
-      </section>
-      <section id="right">
+      <section id="content">
+        <section id="schematic-pane" class="pane">
+          <h2>
+            Schematic
+            <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
+              <button id="zoom-out" aria-label="Zoom out">−</button>
+              <button id="zoom-reset" title="Fit schematic to view (Ctrl/⌘+0)" aria-label="Fit schematic to view">100%</button>
+              <button id="zoom-in" aria-label="Zoom in">+</button>
+            </span>
+          </h2>
+          <div id="schematic"></div>
+        </section>
         <section id="source-pane" class="pane">
           <h2>Source <span id="source-path"></span></h2>
           <div id="source"></div>
         </section>
-        <section id="wave-pane" class="pane">
-          <h2>
-            Waveform
-            <span id="wave-readout"></span>
-            <select id="wave-unit" title="Time display unit">
-              <option value="ps">ps</option>
-              <option value="ns">ns</option>
-              <option value="us">µs</option>
-              <option value="ms">ms</option>
-            </select>
-            <span id="wave-zoombar" title="Zoom (Ctrl/⌘ + scroll over the tracks); drag to pan">
-              <button id="wave-zoom-out" aria-label="Zoom out">−</button>
-              <button id="wave-zoom-reset" title="Fit waveform to data" aria-label="Fit waveform to data">⤢</button>
-              <button id="wave-zoom-in" aria-label="Zoom in">+</button>
-            </span>
-          </h2>
-          <div id="wave-list"></div>
-        </section>
+      </section>
+      <div id="row-splitter" title="Drag to resize the bottom pane"></div>
+      <section id="wave-pane" class="pane">
+        <h2>
+          Waveform
+          <span id="wave-readout"></span>
+          <select id="wave-unit" title="Time display unit">
+            <option value="ps">ps</option>
+            <option value="ns">ns</option>
+            <option value="us">µs</option>
+            <option value="ms">ms</option>
+          </select>
+          <span id="wave-zoombar" title="Zoom (Ctrl/⌘ + scroll over the tracks); drag to pan">
+            <button id="wave-zoom-out" aria-label="Zoom out">−</button>
+            <button id="wave-zoom-reset" title="Fit waveform to data" aria-label="Fit waveform to data">⤢</button>
+            <button id="wave-zoom-in" aria-label="Zoom in">+</button>
+          </span>
+        </h2>
+        <div id="wave-list"></div>
       </section>
     </main>
     <div id="picker"></div>
