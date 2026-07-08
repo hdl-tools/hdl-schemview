@@ -1441,6 +1441,54 @@ function loadRowSplit() {
   }
 }
 
+// Column splitter between the tree column and the content column (#139). Drag to
+// resize: the width lives in the --tree-w grid track on #panes and is persisted.
+// Mirrors setupRowSplitter above; computes width from the pointer's x relative to
+// #panes rather than the bottom edge. `startColSplit` (not `startColResize`, the #84
+// waveform column resizer) keeps the two drag handlers distinct.
+const TREE_MIN = 140; // px — keep the tree pane usable
+const CONTENT_MIN = 240; // px — keep the content column from collapsing
+
+function setupColSplitter() {
+  $("col-splitter").addEventListener("mousedown", startColSplit);
+}
+
+function startColSplit(ev: MouseEvent) {
+  ev.preventDefault();
+  const panes = $("panes");
+  const onMove = (e: MouseEvent) => {
+    const rect = panes.getBoundingClientRect();
+    const max = Math.max(TREE_MIN, rect.width - CONTENT_MIN);
+    const w = Math.min(Math.max(TREE_MIN, e.clientX - rect.left), max);
+    panes.style.setProperty("--tree-w", `${w}px`);
+  };
+  const onUp = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    persistColSplit();
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
+
+function persistColSplit() {
+  try {
+    const w = $("panes").style.getPropertyValue("--tree-w");
+    if (w) localStorage.setItem("treeColW", w);
+  } catch {
+    /* ignore persistence failure */
+  }
+}
+
+function loadColSplit() {
+  try {
+    const saved = localStorage.getItem("treeColW");
+    if (saved) $("panes").style.setProperty("--tree-w", saved);
+  } catch {
+    /* ignore malformed/persisted-state failure */
+  }
+}
+
 // Rescale the waveform canvases whenever the wave list's box changes — a window resize
 // or a row-splitter drag (#98), which fires no window "resize" event. A ResizeObserver
 // catches both; rAF-coalesced so a burst of size changes triggers a single redraw.
@@ -2027,6 +2075,8 @@ async function init() {
   loadColWidths();
   loadRowSplit();
   setupRowSplitter();
+  loadColSplit(); // #139
+  setupColSplitter(); // #139
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source right-click menu (#19), and dismissals.
   $("source").addEventListener("contextmenu", onSourceContextMenu);

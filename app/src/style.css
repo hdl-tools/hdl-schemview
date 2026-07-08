@@ -53,15 +53,15 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #panes {
   flex:1; min-height:0;
   display:grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: var(--tree-w, 220px) 6px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 6px var(--bottom-h, 220px);
   grid-template-areas:
-    "tree     content"
-    "splitter splitter"
-    "bottom   bottom";
+    "tree     tsplit   content"
+    "splitter splitter splitter"
+    "bottom   bottom   bottom";
 }
-/* Instance-hierarchy tree: the top-left slot (#92). Fixed-width column; the tree
-   scrolls inside it. */
+/* Instance-hierarchy tree: the top-left slot (#92). Width is the user-draggable
+   --tree-w grid track (#col-splitter, #139); the tree scrolls inside it. */
 #hier-pane { grid-area:tree; }
 /* Top-right content column: schematic stacked over source (#98). #4b later swaps the
    stack for a source↔schematic tab. */
@@ -99,6 +99,12 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #row-splitter { grid-area:splitter; cursor:row-resize; box-shadow:inset 0 -1px 0 rgba(255,255,255,0.45); }
 :root[data-theme="light"] #row-splitter { box-shadow:inset 0 -1px 0 rgba(0,0,0,0.4); }
 #row-splitter:hover, :root[data-theme="light"] #row-splitter:hover { box-shadow:inset 0 -2px 0 var(--accent); }
+/* Vertical splitter between the tree column and the content column (#139). Mirrors
+   #row-splitter but drags the --tree-w grid track; the vertical inset line follows
+   the .col-resizer style. */
+#col-splitter { grid-area:tsplit; cursor:col-resize; box-shadow:inset -1px 0 0 rgba(255,255,255,0.45); }
+:root[data-theme="light"] #col-splitter { box-shadow:inset -1px 0 0 rgba(0,0,0,0.4); }
+#col-splitter:hover, :root[data-theme="light"] #col-splitter:hover { box-shadow:inset -2px 0 0 var(--accent); }
 /* Zoom controls + marker readout in the waveform header, mirroring the schematic. */
 #wave-pane h2 { display:flex; align-items:center; gap:8px; }
 #wave-readout { margin-left:auto; color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }
