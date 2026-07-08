@@ -8,7 +8,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+
+pub mod startup;
 use serde::Serialize;
+pub use startup::{StartupArgs, StartupError};
 use svxprobe_matcher::MatchOptions;
 use svxprobe_model::{Design, EnumMember, NodeId, NodeKind};
 use svxprobe_schematic::{cone, expand, module_of, scope_graph, SchematicGraph};

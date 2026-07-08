@@ -1,6 +1,13 @@
 // Typed wrappers over the Tauri commands exposed by app/src-tauri.
 import { invoke } from "@tauri-apps/api/core";
-import type { ProbeResponse, SchematicGraph, TraceTimescale, TreeNode, ValueChange } from "./types";
+import type {
+  ProbeResponse,
+  SchematicGraph,
+  StartupArgs,
+  TraceTimescale,
+  TreeNode,
+  ValueChange,
+} from "./types";
 
 export const api = {
   loadDesign: (model: string, trace: string, excluded: string[], srcRoot: string) =>
@@ -32,4 +39,5 @@ export const api = {
     invoke<ValueChange[]>("signal_values", { signalRef }),
   sourceText: (file: number) => invoke<string>("source_text", { file }),
   traceTimescale: () => invoke<TraceTimescale | null>("trace_timescale", {}),
+  startupArgs: () => invoke<StartupArgs | null>("startup_args", {}),
 };

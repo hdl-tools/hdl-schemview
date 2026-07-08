@@ -22,6 +22,7 @@ import type {
   SchematicGraph,
   SchNode,
   SchPort,
+  StartupArgs,
   TraceTimescale,
   TreeNode,
   WaveLink,
@@ -125,8 +126,10 @@ async function load() {
   const model = (($("model") as HTMLInputElement).value || "").trim();
   const trace = (($("trace") as HTMLInputElement).value || "").trim();
   const srcRoot = (($("srcroot") as HTMLInputElement).value || ".").trim();
-  // Elaboration can take seconds; block re-entry until this load settles.
+  // Elaboration can take seconds; block re-entry until this load settles — the
+  // disabled flag also guards against the auto-load (#136) racing a manual click.
   const button = $("load") as HTMLButtonElement;
+  if (button.disabled) return;
   button.disabled = true;
   try {
     let top: string;
@@ -1947,7 +1950,7 @@ function setupWaveInteraction() {
   });
 }
 
-function init() {
+async function init() {
   ($("model") as HTMLInputElement).value =
     "../../fixtures/picorv32_soc/golden/hierarchy.json";
   ($("filelist") as HTMLInputElement).value = "../../fixtures/picorv32_soc/picorv32_soc.f";
@@ -1977,9 +1980,34 @@ function init() {
     redrawTracks();
     if (fitted) fitView();
   });
+
+  // Launched from the command line with a designlist (#136): the Tauri shell
+  // parsed argv before the window opened. Prefill the filelist form from it
+  // (incdirs re-joined with ";", the inverse of the split in load()) and
+  // auto-load — the exact path a manual Load click takes. Guarded so a
+  // browser-only dev server (no Tauri `invoke`) still falls through to the form.
+  let startup: StartupArgs | null = null;
+  try {
+    startup = await api.startupArgs();
+  } catch (e) {
+    // Expected under a browser-only dev server (no Tauri `invoke`); log so a
+    // real IPC/DTO regression on a CLI launch is still visible in devtools.
+    console.warn("startup_args unavailable, using the load form:", e);
+    startup = null;
+  }
+  if (startup) {
+    ($("load-mode") as HTMLSelectElement).value = "filelist";
+    ($("filelist") as HTMLInputElement).value = startup.filelist;
+    ($("top") as HTMLInputElement).value = startup.top;
+    ($("incdir") as HTMLInputElement).value = startup.incdirs.join(";");
+    ($("trace") as HTMLInputElement).value = startup.trace;
+    ($("srcroot") as HTMLInputElement).value = startup.src_root;
+    syncLoadMode();
+    await load();
+  }
 }
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => void init());
 
 // Keep nodeId referenced for potential external callers / tree-shaking clarity.
 export { nodeId };
