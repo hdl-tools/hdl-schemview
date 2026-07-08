@@ -70,7 +70,7 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 
 | File | Role |
 | --- | --- |
-| `app/index.html` | CSS-grid pane layout (#98): top-left hierarchy tree, top-right `#content` (schematic over source), a draggable `#row-splitter`, and a full-width bottom waveform + toolbar/breadcrumb. |
+| `app/index.html` | CSS-grid pane layout (#98): top-left hierarchy tree, top-right `#content` (schematic over source), a draggable `#row-splitter`, a vertical `#col-splitter` between the tree and content columns (#139, drags the `--tree-w` track), and a full-width bottom waveform + toolbar/breadcrumb. |
 | `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache, pinned waveform traces). |
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
 | `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |
