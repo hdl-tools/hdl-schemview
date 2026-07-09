@@ -37,9 +37,22 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #toolbar .hidden { display:none; }
 #toolbar button { background:var(--accent); border:0; color:#fff; padding:4px 12px; cursor:pointer; }
 #toolbar #theme-toggle { background:transparent; color:var(--fg); border:1px solid var(--border); padding:4px 8px; flex:0 0 auto; }
-/* Zoom controls live in the schematic pane header, pushed to its right edge. */
-#schematic-pane h2 { display:flex; align-items:center; gap:8px; }
-#zoombar { display:flex; gap:2px; margin-left:auto; }
+/* Tab groups (#99): the top-right (source ↔ schematic) and bottom (status ↔
+   waveform) columns each host a .tabbar header over stacked .tab-panels; only the
+   .active panel is shown. Each tab's own controls (zoom bar, marker readout) ride
+   in a .tab-aux that is visible only while its tab is active. */
+.tab-group { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.tabbar { flex:0 0 auto; display:flex; align-items:center; gap:2px; padding:0 4px; background:var(--panel); border-bottom:1px solid var(--border); }
+.tab { background:transparent; color:var(--muted); border:0; border-bottom:2px solid transparent; padding:4px 10px; margin-bottom:-1px; cursor:pointer; font-size:12px; font-weight:600; }
+.tab:hover { color:var(--fg); }
+.tab.active { color:var(--fg); border-bottom-color:var(--accent); }
+.tab-aux { display:flex; align-items:center; gap:8px; margin-left:auto; }
+.tab-aux[hidden] { display:none; }
+/* Inactive panels are laid out (display) only when active; the active one fills the
+   group's spare height and scrolls internally (min-height:0 via .pane). */
+.tab-panel { flex:1; }
+.tab-panel:not(.active) { display:none; }
+#zoombar { display:flex; gap:2px; }
 #zoombar button { background:transparent; color:var(--fg); border:1px solid var(--border); padding:1px 6px; cursor:pointer; min-width:26px; font-size:12px; line-height:1.4; }
 #zoombar #zoom-reset { min-width:46px; font-variant-numeric:tabular-nums; }
 #breadcrumb { padding:2px 8px; background:var(--crumb); font-size:12px; color:var(--crumb-fg); }
@@ -49,7 +62,8 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
    source); a draggable splitter; then a full-width bottom drawer (waveform). The
    minmax(0,…) tracks let a zoomed SVG / long content scroll inside its pane instead
    of blowing the track out. The bottom row height is user-draggable via --bottom-h
-   (persisted); tabs (#4b) and the log pane (#4c) build on this scaffold. */
+   (persisted); the source↔schematic and status↔waveform tabs (#99) and the log
+   pane (#4c) build on this scaffold. */
 #panes {
   flex:1; min-height:0;
   display:grid;
@@ -63,9 +77,9 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 /* Instance-hierarchy tree: the top-left slot (#92). Width is the user-draggable
    --tree-w grid track (#col-splitter, #139); the tree scrolls inside it. */
 #hier-pane { grid-area:tree; }
-/* Top-right content column: schematic stacked over source (#98). #4b later swaps the
-   stack for a source↔schematic tab. */
-#content { grid-area:content; display:flex; flex-direction:column; min-width:0; min-height:0; }
+/* Top-right content column: a source↔schematic tab group (#99), source active by
+   default. .tab-group supplies the flex column; this just anchors it to the grid. */
+#content { grid-area:content; }
 #hierarchy { flex:1; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; }
 #hierarchy ul { list-style:none; margin:0; padding-left:14px; }
 #hierarchy > ul { padding-left:2px; }
@@ -90,9 +104,13 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #source .line { padding:0 8px; white-space:pre; }
 #source .line .ln { color:var(--muted); display:inline-block; width:42px; text-align:right; margin-right:8px; user-select:none; }
 #source .line.hl { background:var(--hl); }
-/* Full-width bottom drawer (#98). Its height is the --bottom-h grid track, dragged
-   via #row-splitter, so the waveform stays visible regardless of the content above. */
-#wave-pane { grid-area:bottom; }
+/* Full-width bottom drawer (#98): the status ↔ waveform tab group (#99). Its height
+   is the --bottom-h grid track, dragged via #row-splitter, so the drawer stays
+   visible regardless of the content above. #wave-pane / #status-pane are its tabs. */
+#bottom-group { grid-area:bottom; }
+/* Status/log placeholder (#99): the pane exists so the Status tab has a home; its
+   log content lands in #4c. */
+#status-log { flex:1; min-height:0; overflow:auto; padding:6px 8px; color:var(--muted); font-size:12px; }
 /* Horizontal splitter between the content row and the bottom drawer (#98). Mirrors the
    waveform column resizer (.col-resizer): a persistent divider line (light-on-dark /
    dark-on-light) with the accent on hover/drag. */
@@ -105,9 +123,8 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #col-splitter { grid-area:tsplit; cursor:col-resize; box-shadow:inset -1px 0 0 rgba(255,255,255,0.45); }
 :root[data-theme="light"] #col-splitter { box-shadow:inset -1px 0 0 rgba(0,0,0,0.4); }
 #col-splitter:hover, :root[data-theme="light"] #col-splitter:hover { box-shadow:inset -2px 0 0 var(--accent); }
-/* Zoom controls + marker readout in the waveform header, mirroring the schematic. */
-#wave-pane h2 { display:flex; align-items:center; gap:8px; }
-#wave-readout { margin-left:auto; color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }
+/* Marker readout + zoom controls ride in the waveform tab's .tab-aux (#99). */
+#wave-readout { color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }
 #wave-unit { background:var(--field); color:var(--fg); border:1px solid var(--border); font-size:11px; padding:1px 2px; cursor:pointer; }
 #wave-zoombar { display:flex; gap:2px; }
 #wave-zoombar button { background:transparent; color:var(--fg); border:1px solid var(--border); padding:1px 6px; cursor:pointer; min-width:26px; font-size:12px; line-height:1.4; }

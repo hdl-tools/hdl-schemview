@@ -293,6 +293,9 @@ function jumpToScope(path: string) {
   rememberCurrentView();
   const frames = scopeFrames(path);
   state.stack = frames.slice(0, -1);
+  // Tree navigation is a "show me this scope" action → surface the schematic tab
+  // (source is the default, on-demand layout) before it renders (#99).
+  activateTab("schematic-pane");
   setScope(path, frames[frames.length - 1].label);
 }
 
@@ -312,6 +315,11 @@ const MAX_ZOOM = 6;
 // Current zoom factor. Manual zoom (setZoom) mutates it in place; a scope change
 // resets it via renderSchematic's zoom-to-fit (or restores a saved view on back).
 const zoom = { k: 1 };
+
+// The schematic renders into #schematic even when its tab is hidden (clientWidth
+// 0 → a degenerate fit). renderSchematic sets this when it draws while hidden; the
+// next schematic-tab activation re-fits against the now-visible pane (#99).
+let schematicDirty = false;
 
 async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const host = $("schematic");
@@ -620,6 +628,9 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   host.scrollTop = restore ? restore.scrollTop : 0;
   // Place labels against the final viewport (orientation + visible-portion).
   placeWireLabels();
+  // Drawn while the schematic tab is hidden (0-width host → a degenerate fit):
+  // defer the real fit until the tab is next shown (#99).
+  schematicDirty = host.clientWidth === 0;
 }
 
 // Position each net label on the currently-visible portion of its wire, rotated
@@ -1071,6 +1082,40 @@ function fitView() {
   placeWireLabels();
 }
 
+// -- tabs (#99) ------------------------------------------------------------
+
+// Show the panel `panelId` within its .tab-group, hide its siblings, sync the tab
+// buttons + per-tab aux controls, and redraw the now-visible view — its canvas/SVG
+// had zero size while hidden, so it must re-fit/redraw against the real dimensions.
+function activateTab(panelId: string) {
+  const group = document.getElementById(panelId)?.closest(".tab-group");
+  if (!group) return;
+  group.querySelectorAll<HTMLElement>(".tab-panel").forEach((p) =>
+    p.classList.toggle("active", p.id === panelId),
+  );
+  group.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) => {
+    const on = b.dataset.panel === panelId;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
+  });
+  group.querySelectorAll<HTMLElement>(".tab-aux").forEach((a) => {
+    a.hidden = a.dataset.panel !== panelId;
+  });
+  if (panelId === "schematic-pane") refreshSchematic();
+  else if (panelId === "wave-pane") redrawTracks();
+}
+
+// Re-fit the schematic if it was last drawn while hidden (#99); otherwise just
+// re-place the net labels against the now-visible viewport.
+function refreshSchematic() {
+  if (schematicDirty) {
+    schematicDirty = false;
+    fitView();
+  } else {
+    placeWireLabels();
+  }
+}
+
 // Zoom affects the schematic SVG only — never the page/webview. Ctrl/⌘ + wheel
 // and Ctrl/⌘ + (+/-/0) are intercepted at the document (capture, non-passive) so
 // the browser/webview can't page-zoom the whole window; the gesture is routed to
@@ -1217,6 +1262,7 @@ function selectWire(netPath: string, trunk?: string) {
 // list any ambiguous alternatives. Waveform display is now an explicit, additive
 // action (the menu's "Append to waveform"), so it is no longer touched here.
 async function showInSource(resp: ProbeResponse) {
+  activateTab("source-pane"); // reveal + focus the source tab (#99)
   // Surface a source read failure (missing .sv, wrong src-root) in the status bar
   // instead of leaving the pane silently empty — the menu path calls this without
   // its own catch, so an unhandled `source_text` rejection otherwise vanishes.
@@ -1858,6 +1904,9 @@ function framesForScope(path: string): ScopeFrame[] {
 // Navigate the schematic to show `anchor`: drill into it if it is itself a scope,
 // else open the nearest enclosing scope and highlight the box/wire it maps to.
 async function showInSchematic(anchor: NodeRef) {
+  // Reveal + focus the schematic tab first, so it renders into a sized pane (a
+  // hidden 0-width host would fit wrong) and scrollIntoView lands correctly (#99).
+  activateTab("schematic-pane");
   const segs = anchor.path.split(".");
   for (let n = segs.length; n >= 1; n--) {
     const scopePath = segs.slice(0, n).join(".");
@@ -1912,6 +1961,7 @@ async function addToWaveform(wave: WaveLink) {
     showName: enumMap !== undefined,
   });
   renderWaves();
+  activateTab("wave-pane"); // reveal + focus the waveform tab on append (#99)
 }
 
 // -- bootstrap -------------------------------------------------------------
@@ -2077,6 +2127,13 @@ async function init() {
   setupRowSplitter();
   loadColSplit(); // #139
   setupColSplitter(); // #139
+  // Tab groups (#99): a tab click activates its panel; the toolbar buttons reveal +
+  // focus the on-demand schematic / waveform views.
+  document.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) =>
+    b.addEventListener("click", () => activateTab(b.dataset.panel!)),
+  );
+  $("show-schematic").addEventListener("click", () => activateTab("schematic-pane"));
+  $("show-waveform").addEventListener("click", () => activateTab("wave-pane"));
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source right-click menu (#19), and dismissals.
   $("source").addEventListener("contextmenu", onSourceContextMenu);

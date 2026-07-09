@@ -70,8 +70,8 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 
 | File | Role |
 | --- | --- |
-| `app/index.html` | CSS-grid pane layout (#98): top-left hierarchy tree, top-right `#content` (schematic over source), a draggable `#row-splitter`, a vertical `#col-splitter` between the tree and content columns (#139, drags the `--tree-w` track), and a full-width bottom waveform + toolbar/breadcrumb. |
-| `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache, pinned waveform traces). |
+| `app/index.html` | CSS-grid pane layout (#98): top-left hierarchy tree, a vertical `#col-splitter` (#139, drags the `--tree-w` track), a draggable `#row-splitter`, plus two tab groups (#99): top-right `#content` (source ↔ schematic, **source** active by default) and bottom `#bottom-group` (status ↔ waveform, **status** active by default). Each `.tab-group` has a `.tabbar` header; a tab's own controls (zoom bar, marker readout/unit) ride in a per-tab `.tab-aux`. The `#status-pane` is an empty placeholder (log content lands in #4c). Toolbar `#show-schematic`/`#show-waveform` buttons reveal + focus the on-demand views. |
+| `app/src/main.ts` | UI logic + app state (graph, nav stack, selection, source cache, pinned waveform traces). Tabs (#99): `activateTab(panelId)` toggles `.active` within a `.tab-group` and redraws the now-visible view (schematic/waveform have 0-size containers while hidden — `refreshSchematic` re-fits a `schematicDirty` schematic, `redrawTracks` the canvas); `showInSource`/`showInSchematic`/`addToWaveform`/`jumpToScope` reveal the matching tab. |
 | `app/src/api.ts` | Typed wrappers over Tauri `invoke()`. |
 | `app/src/types.ts` | DTO interfaces mirroring Rust serde types. |
 | `app/src/elk.ts` (+ `elk.test.ts`) | `SchematicGraph` → ELK layout → SVG DOM. |
