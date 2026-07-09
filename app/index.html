@@ -20,6 +20,10 @@
       <input id="srcroot" placeholder="source root" />
       <button id="load">Load</button>
       <span id="status"></span>
+      <!-- Reveal + focus the on-demand views (#99): the default layout opens with
+           source + status; these bring the schematic / waveform tab forward. -->
+      <button id="show-schematic" title="Show the schematic view">Show schematic</button>
+      <button id="show-waveform" title="Show the waveform view">Show waveform</button>
       <button id="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">◐</button>
     </header>
     <div id="breadcrumb"></div>
@@ -29,41 +33,58 @@
         <div id="hierarchy"></div>
       </section>
       <div id="col-splitter" title="Drag to resize the tree pane"></div>
-      <section id="content">
-        <section id="schematic-pane" class="pane">
-          <h2>
-            Schematic
+      <!-- Top-right tab group (#99): source ↔ schematic, source active by default.
+           The tab bar is the pane header; each tab's own controls (source path,
+           zoom bar) live in a .tab-aux shown only while that tab is active. -->
+      <section id="content" class="tab-group">
+        <div class="tabbar" role="tablist">
+          <button class="tab active" data-panel="source-pane" role="tab" aria-selected="true">Source</button>
+          <button class="tab" data-panel="schematic-pane" role="tab" aria-selected="false">Schematic</button>
+          <span class="tab-aux" data-panel="source-pane"><span id="source-path"></span></span>
+          <span class="tab-aux" data-panel="schematic-pane" hidden>
             <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
               <button id="zoom-out" aria-label="Zoom out">−</button>
               <button id="zoom-reset" title="Fit schematic to view (Ctrl/⌘+0)" aria-label="Fit schematic to view">100%</button>
               <button id="zoom-in" aria-label="Zoom in">+</button>
             </span>
-          </h2>
-          <div id="schematic"></div>
-        </section>
-        <section id="source-pane" class="pane">
-          <h2>Source <span id="source-path"></span></h2>
+          </span>
+        </div>
+        <section id="source-pane" class="pane tab-panel active">
           <div id="source"></div>
+        </section>
+        <section id="schematic-pane" class="pane tab-panel">
+          <div id="schematic"></div>
         </section>
       </section>
       <div id="row-splitter" title="Drag to resize the bottom pane"></div>
-      <section id="wave-pane" class="pane">
-        <h2>
-          Waveform
-          <span id="wave-readout"></span>
-          <select id="wave-unit" title="Time display unit">
-            <option value="ps">ps</option>
-            <option value="ns">ns</option>
-            <option value="us">µs</option>
-            <option value="ms">ms</option>
-          </select>
-          <span id="wave-zoombar" title="Zoom (Ctrl/⌘ + scroll over the tracks); drag to pan">
-            <button id="wave-zoom-out" aria-label="Zoom out">−</button>
-            <button id="wave-zoom-reset" title="Fit waveform to data" aria-label="Fit waveform to data">⤢</button>
-            <button id="wave-zoom-in" aria-label="Zoom in">+</button>
+      <!-- Bottom tab group (#99): status/log ↔ waveform, status active by default.
+           The status pane is an empty placeholder here; its log content lands in
+           #4c. The waveform tab keeps the marker readout / unit / zoom controls. -->
+      <section id="bottom-group" class="tab-group">
+        <div class="tabbar" role="tablist">
+          <button class="tab active" data-panel="status-pane" role="tab" aria-selected="true">Status</button>
+          <button class="tab" data-panel="wave-pane" role="tab" aria-selected="false">Waveform</button>
+          <span class="tab-aux" data-panel="wave-pane" hidden>
+            <span id="wave-readout"></span>
+            <select id="wave-unit" title="Time display unit">
+              <option value="ps">ps</option>
+              <option value="ns">ns</option>
+              <option value="us">µs</option>
+              <option value="ms">ms</option>
+            </select>
+            <span id="wave-zoombar" title="Zoom (Ctrl/⌘ + scroll over the tracks); drag to pan">
+              <button id="wave-zoom-out" aria-label="Zoom out">−</button>
+              <button id="wave-zoom-reset" title="Fit waveform to data" aria-label="Fit waveform to data">⤢</button>
+              <button id="wave-zoom-in" aria-label="Zoom in">+</button>
+            </span>
           </span>
-        </h2>
-        <div id="wave-list"></div>
+        </div>
+        <section id="status-pane" class="pane tab-panel active">
+          <div id="status-log"></div>
+        </section>
+        <section id="wave-pane" class="pane tab-panel">
+          <div id="wave-list"></div>
+        </section>
       </section>
     </main>
     <div id="picker"></div>
