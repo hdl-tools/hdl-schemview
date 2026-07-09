@@ -28,6 +28,7 @@ import type {
   WaveLink,
 } from "./types";
 import { scopeFrames } from "./tree";
+import { formatLogEntry, type LogLevel } from "./log";
 import {
   defaultDisplayUnit,
   displayScale,
@@ -52,6 +53,27 @@ import {
 
 const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
+
+// Append a timestamped, level-tagged row to the #status-log pane (#100, epic #94
+// 4c) and echo the latest line to the compact toolbar #status. Errors also bring
+// the Status tab forward, so a failure is never hidden behind the Waveform tab.
+function log(level: LogLevel, message: string) {
+  const entry = formatLogEntry(level, message, new Date());
+  const pane = $("status-log");
+  const row = document.createElement("div");
+  row.className = `log-row log-${entry.level}`;
+  const ts = document.createElement("span");
+  ts.className = "log-ts";
+  ts.textContent = entry.ts;
+  const msg = document.createElement("span");
+  msg.className = "log-msg";
+  msg.textContent = entry.message;
+  row.append(ts, msg);
+  pane.appendChild(row);
+  pane.scrollTop = pane.scrollHeight; // keep the newest entry in view
+  $("status").textContent = entry.message; // compact latest-state echo
+  if (level === "error") activateTab("status-pane");
+}
 
 // A saved viewport: zoom factor + scroll offsets, remembered per scope so
 // breadcrumb-back restores the view you left rather than re-fitting.
@@ -140,7 +162,7 @@ async function load() {
         .split(";")
         .map((s) => s.trim())
         .filter(Boolean);
-      $("status").textContent = "elaborating…";
+      log("info", `elaborating ${filelist || "designlist"}…`);
       top = await api.elaborateAndLoad(
         filelist,
         topName,
@@ -150,9 +172,10 @@ async function load() {
         srcRoot,
       );
     } else {
+      log("info", `loading model ${model}…`);
       top = await api.loadDesign(model, trace, ["TOP", "tb", "soc_pkg"], srcRoot);
     }
-    $("status").textContent = `loaded ${top}`;
+    log("info", `loaded ${top}`);
     state.stack = [];
     viewCache.clear();
     // A new design invalidates the old traces (signal_refs are model-specific).
@@ -166,7 +189,7 @@ async function load() {
     await initHierarchy(top);
     await setScope(top, top);
   } catch (e) {
-    $("status").textContent = `error: ${e}`;
+    log("error", `load failed: ${e}`);
   } finally {
     button.disabled = false;
   }
@@ -366,7 +389,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
             api
               .probeNode(netPath, context())
               .then((r) => r && showInSource(r))
-              .catch((e) => ($("status").textContent = `error: ${e}`));
+              .catch((e) => log("error", `probe failed: ${e}`));
           },
           menu: (ev: MouseEvent) => {
             ev.preventDefault();
@@ -1215,7 +1238,7 @@ async function schematicMenu(ev: MouseEvent, path: string) {
   try {
     resp = await api.probeNode(path, context());
   } catch (e) {
-    $("status").textContent = `error: ${e}`;
+    log("error", `probe failed: ${e}`);
     return;
   }
   if (!resp) return;
@@ -1263,14 +1286,14 @@ function selectWire(netPath: string, trunk?: string) {
 // action (the menu's "Append to waveform"), so it is no longer touched here.
 async function showInSource(resp: ProbeResponse) {
   activateTab("source-pane"); // reveal + focus the source tab (#99)
-  // Surface a source read failure (missing .sv, wrong src-root) in the status bar
+  // Surface a source read failure (missing .sv, wrong src-root) in the status log
   // instead of leaving the pane silently empty — the menu path calls this without
   // its own catch, so an unhandled `source_text` rejection otherwise vanishes.
   if (resp.source) {
     try {
       await renderSource(resp.source.file, resp.source.line);
     } catch (e) {
-      $("status").textContent = `source unavailable: ${e}`;
+      log("warn", `source unavailable: ${e}`);
     }
   }
   renderPicker(resp);

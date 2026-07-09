@@ -3,6 +3,7 @@
   /* UI chrome */
   --chrome:#111; --panel:#252525; --field:#222; --border:#333;
   --crumb:#181818; --crumb-fg:#9cf; --muted:#666; --hl:#3a3000; --wavebg:#151515;
+  --warn:#e0a83a; --error:#ff6b6b;
   /* schematic */
   --canvas:#1e1e1e;
   --box:#2d3b52; --box-stroke:#46608f;
@@ -18,6 +19,7 @@
   --bg:#f4f5f7; --fg:#1c2330; --accent:#2563eb; --sel:#c87f00;
   --chrome:#e3e6ec; --panel:#e9ecf2; --field:#ffffff; --border:#c7ccd6;
   --crumb:#eceef3; --crumb-fg:#1d4ed8; --muted:#8893a6; --hl:#fff3c4; --wavebg:#fbfbfd;
+  --warn:#b26a00; --error:#c0392b;
   --canvas:#ffffff;
   --box:#eef2fb; --box-stroke:#5b6b8c;
   --comb:#e6f5ef; --comb-stroke:#4f9b80;
@@ -108,9 +110,15 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
    is the --bottom-h grid track, dragged via #row-splitter, so the drawer stays
    visible regardless of the content above. #wave-pane / #status-pane are its tabs. */
 #bottom-group { grid-area:bottom; }
-/* Status/log placeholder (#99): the pane exists so the Status tab has a home; its
-   log content lands in #4c. */
-#status-log { flex:1; min-height:0; overflow:auto; padding:6px 8px; color:var(--muted); font-size:12px; }
+/* Status / log pane (#100, epic #94 4c): timestamped, level-tagged rows of designlist
+   parsing, model/trace loading, and API errors — the full history the toolbar #status
+   only echoes the latest of. */
+#status-log { flex:1; min-height:0; overflow:auto; padding:6px 8px; font-family:ui-monospace, monospace; font-size:12px; }
+.log-row { display:flex; gap:8px; padding:1px 0; white-space:pre-wrap; word-break:break-word; }
+.log-row .log-ts { flex:0 0 auto; color:var(--muted); }
+.log-row .log-msg { flex:1; color:var(--fg); }
+.log-row.log-warn .log-msg { color:var(--warn); }
+.log-row.log-error .log-msg { color:var(--error); }
 /* Horizontal splitter between the content row and the bottom drawer (#98). Mirrors the
    waveform column resizer (.col-resizer): a persistent divider line (light-on-dark /
    dark-on-light) with the accent on hover/drag. */
