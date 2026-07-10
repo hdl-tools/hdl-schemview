@@ -107,6 +107,11 @@ const LOGIC_PIN_BASE: NodeId = 1 << 30;
 /// below `LOGIC_PIN_BASE`.
 const RAW_PORT_BASE: NodeId = 3 << 28;
 
+/// Synthetic id base for a drilled interface's per-view boundary frame port
+/// (#97), keyed by the `Modport` node id. Disjoint from `CONST_ID_BASE`
+/// (`1 << 28`), `RAW_PORT_BASE` (`3 << 28`), and `LOGIC_PIN_BASE` (`1 << 30`).
+const MODPORT_FRAME_BASE: NodeId = 2 << 28;
+
 /// Allocates a distinct, stable synthetic pin id per `(box, signal)` pair. Keying
 /// on the box (not the signal alone) keeps several boxes that share one net — a
 /// clock fanning out to many registers — from collapsing onto a single pin.
@@ -202,6 +207,21 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
         }
     }
     out
+}
+
+/// A bare interface *instance* (a signal bundle) that carries `modport` views —
+/// the thing #97 drills into. Excludes a modport-qualified interface *port* on a
+/// consumer (`modport` set) and a bundle with no views (nothing to drill to).
+/// Public so the GUI's hierarchy tree agrees with the schematic on what is a
+/// drillable interface scope (single source of truth, like [`module_of`]).
+pub fn is_bare_interface(design: &Design, id: NodeId) -> bool {
+    design.node(id).is_some_and(|n| {
+        n.kind == NodeKind::Interface
+            && n.modport.is_none()
+            && n.children
+                .iter()
+                .any(|&c| is_kind(design, c, NodeKind::Modport))
+    })
 }
 
 /// The box (from `boxes`) that `node` lives in — its nearest ancestor that is a
@@ -498,8 +518,11 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         path: n.path.clone(),
         // A module instance always has an interior (its module body), so it is
         // always drillable — even a leaf with no child boxes (drilling renders its
-        // I/O frame). Other box kinds are drillable only if they contain boxes.
-        expandable: n.kind == NodeKind::Instance || !child_boxes(design, bx).is_empty(),
+        // I/O frame). A bare interface bundle drills into its modport views (#97).
+        // Other box kinds are drillable only if they contain boxes.
+        expandable: n.kind == NodeKind::Instance
+            || is_bare_interface(design, bx)
+            || !child_boxes(design, bx).is_empty(),
         ports,
         module: module_of(design, n),
         constant: None,
@@ -665,6 +688,212 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
     })
 }
 
+/// The interior of a bare interface bundle (#97): each `modport` view as a box
+/// (one directional pin per member), the interface's own ports (e.g. `clk`) as
+/// boundary frame pins, and a boundary frame port per view marking its external
+/// face. Wires connect every member one view drives and another reads, plus the
+/// interface's own inputs into the views that read them (clk into both). Each
+/// member pin resolves to its underlying bundle signal via
+/// [`Design::modport_member_nodes`], so its `path` — and any wire's `net_path` —
+/// cross-probes the real signal. No heuristics; the modport membership is a model
+/// fact from the harness.
+fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> SchematicGraph {
+    let Some(ifnode) = design.node(iface) else {
+        return SchematicGraph {
+            root: scope_path.to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        };
+    };
+    let views: Vec<NodeId> = ifnode
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| is_kind(design, c, NodeKind::Modport))
+        .collect();
+    let own_ports: Vec<NodeId> = ifnode
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| is_kind(design, c, NodeKind::Port))
+        .collect();
+
+    let mut pins = PinAlloc::new();
+    let mut nodes: Vec<SchNode> = Vec::new();
+    // Underlying member signal -> the pins that drive / read it, so a signal one
+    // view outputs and another inputs (or an interface input port feeding both
+    // views) is wired between them. Keyed on the *first node at the member's
+    // canonical path* so a modport member and the interface's own port for the
+    // same signal (e.g. `clk`) share a bucket. BTreeMap keeps wires deterministic.
+    let mut drivers: std::collections::BTreeMap<NodeId, Vec<NodeId>> = Default::default();
+    let mut loads: std::collections::BTreeMap<NodeId, Vec<NodeId>> = Default::default();
+    let key_of = |sig: NodeId| -> NodeId {
+        design
+            .node(sig)
+            .and_then(|n| design.nodes_at_path(&n.path).first().copied())
+            .unwrap_or(sig)
+    };
+
+    // 1. Each modport view as a box, one directional pin per member. Record each
+    //    member's (pin, signal) so the view's frame port (step 4) can fan out to
+    //    the exact I/O the modport lists rather than the box corner.
+    let mut view_pins: std::collections::BTreeMap<NodeId, Vec<(NodeId, NodeId)>> =
+        Default::default();
+    for &mp in &views {
+        let Some(mn) = design.node(mp) else { continue };
+        let members = mn.members.as_deref().unwrap_or_default();
+        let mut ports = Vec::with_capacity(members.len());
+        for m in members {
+            // The member's own signal node in the bundle (path lookup, not a
+            // guess); skip a member that doesn't resolve rather than fabricate a
+            // colliding synthetic pin. The pin id is per (view, signal) so the
+            // two views that share a member keep distinct pins.
+            let Some(sig) = design.modport_member_nodes(mp, &m.name).first().copied() else {
+                continue;
+            };
+            let signode = design.node(sig);
+            let pin = pins.pin(mp, sig);
+            ports.push(SchPort {
+                id: pin,
+                name: m.name.clone(),
+                side: side_of(m.dir),
+                path: signode.map(|s| s.path.clone()).unwrap_or_default(),
+                width: signode.and_then(|s| pin_width(design, &s.type_)),
+                role: None,
+                bundle: false,
+                dangling: false,
+            });
+            view_pins.entry(mp).or_default().push((pin, sig));
+            let key = key_of(sig);
+            match m.dir {
+                Dir::Out => drivers.entry(key).or_default().push(pin),
+                Dir::In => loads.entry(key).or_default().push(pin),
+                _ => {
+                    drivers.entry(key).or_default().push(pin);
+                    loads.entry(key).or_default().push(pin);
+                }
+            }
+        }
+        nodes.push(SchNode {
+            id: mp,
+            kind: NodeKind::Modport,
+            label: relative_to(&mn.path, scope_path),
+            path: mn.path.clone(),
+            expandable: false,
+            ports,
+            module: None,
+            constant: None,
+            modport: None,
+        });
+    }
+
+    // 2. The interface's own ports (e.g. `clk`) as boundary frame pins, folded by
+    //    declared direction so an input port drives the member pins reading it.
+    //    Keyed the same way as the members so clk reaches both views' clk pins;
+    //    `own_keys` marks those signals so step 4 leaves them off the frame fan
+    //    (clk is already wired to its own boundary pin).
+    let mut own_keys: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    for &p in &own_ports {
+        nodes.extend(make_boundary_pin(design, p));
+        let key = key_of(p);
+        own_keys.insert(key);
+        match design.node(p).and_then(|n| n.dir) {
+            Some(Dir::Out) => loads.entry(key).or_default().push(p),
+            Some(Dir::In) => drivers.entry(key).or_default().push(p),
+            _ => {
+                drivers.entry(key).or_default().push(p);
+                loads.entry(key).or_default().push(p);
+            }
+        }
+    }
+
+    // 3. Cross drivers x loads into wires. `seen` (min,max) dedups a pair so an
+    //    inout member shared by two views draws one wire, not two.
+    let mut edges = Vec::new();
+    let mut next_edge = 0u32;
+    let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
+    for (&sig, ds) in &drivers {
+        let Some(ls) = loads.get(&sig) else { continue };
+        let signode = design.node(sig);
+        let net = signode.map(|n| relative_to(&n.path, scope_path));
+        let net_path = signode.map(|n| n.path.clone());
+        for &d in ds {
+            for &l in ls {
+                if d == l || !seen.insert((d.min(l), d.max(l))) {
+                    continue;
+                }
+                edges.push(SchEdge {
+                    id: next_edge,
+                    source: d,
+                    target: l,
+                    net: net.clone(),
+                    net_path: net_path.clone(),
+                });
+                next_edge += 1;
+            }
+        }
+    }
+
+    // 4. A boundary frame port per modport view (its external face), fanned out to
+    //    the view's own member pins — the inputs and outputs the modport lists — so
+    //    the frame connects to the I/O rows, not the box corner. A member backed by
+    //    an interface port (clk) is already wired to that boundary pin, so it is
+    //    left off the fan. A mostly-driving view sits on the west frame, a
+    //    mostly-reading one on the east, so the internal core->mem flow reads
+    //    left-to-right.
+    for &mp in &views {
+        let Some(mn) = design.node(mp) else { continue };
+        let members = mn.members.as_deref().unwrap_or_default();
+        let outs = members.iter().filter(|m| m.dir == Dir::Out).count();
+        let side = if outs * 2 > members.len() {
+            Side::East
+        } else {
+            Side::West
+        };
+        let fid = MODPORT_FRAME_BASE + mp;
+        nodes.push(SchNode {
+            id: fid,
+            kind: NodeKind::Port,
+            label: mn.name.clone(),
+            path: mn.path.clone(),
+            expandable: false,
+            ports: vec![SchPort {
+                id: fid,
+                name: mn.name.clone(),
+                side,
+                path: mn.path.clone(),
+                width: None,
+                role: None,
+                bundle: true,
+                dangling: false,
+            }],
+            module: None,
+            constant: None,
+            modport: None,
+        });
+        for &(pin, sig) in view_pins.get(&mp).map(Vec::as_slice).unwrap_or_default() {
+            if own_keys.contains(&key_of(sig)) {
+                continue;
+            }
+            let signode = design.node(sig);
+            edges.push(SchEdge {
+                id: next_edge,
+                source: fid,
+                target: pin,
+                net: signode.map(|n| relative_to(&n.path, scope_path)),
+                net_path: signode.map(|n| n.path.clone()),
+            });
+            next_edge += 1;
+        }
+    }
+
+    SchematicGraph {
+        root: scope_path.to_string(),
+        nodes,
+        edges,
+    }
+}
+
 /// The schematic of one scope: child-instance boxes wired by the connections
 /// whose two ends both live inside the scope. Connections that leave the scope
 /// (e.g. to a top-level clock) are omitted here; use [`cone`] to trace those.
@@ -673,8 +902,13 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         matches!(
             design.node(id).map(|n| n.kind),
             Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
-        )
+        ) || is_bare_interface(design, id)
     })?;
+    // A bare interface bundle drills into its modport views/members (#97), a
+    // different projection than the instance-wiring path below.
+    if is_bare_interface(design, scope) {
+        return Some(interface_interior(design, scope, scope_path));
+    }
 
     let boxes = child_boxes(design, scope);
     let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();

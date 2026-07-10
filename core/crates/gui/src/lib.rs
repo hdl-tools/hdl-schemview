@@ -14,7 +14,7 @@ use serde::Serialize;
 pub use startup::{StartupArgs, StartupError};
 use svxprobe_matcher::MatchOptions;
 use svxprobe_model::{Design, EnumMember, NodeId, NodeKind};
-use svxprobe_schematic::{cone, expand, module_of, scope_graph, SchematicGraph};
+use svxprobe_schematic::{cone, expand, is_bare_interface, module_of, scope_graph, SchematicGraph};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
@@ -77,12 +77,15 @@ pub struct TreeNode {
 }
 
 /// A structural scope the hierarchy tree shows — the kinds `scope_graph`
-/// accepts as roots, so clicking any tree node yields a schematic.
+/// accepts as roots, so clicking any tree node yields a schematic. Instances and
+/// generate blocks, plus a bare interface bundle with modport views (#97): it
+/// drills into its modports, so it is navigable too. The interface test reuses
+/// the schematic crate's `is_bare_interface` so the two never disagree.
 fn is_tree_scope(design: &Design, id: NodeId) -> bool {
     matches!(
         design.node(id).map(|n| n.kind),
         Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
-    )
+    ) || is_bare_interface(design, id)
 }
 
 /// A generate-for's array container: a named `GenBlock` (`g_lane`) whose

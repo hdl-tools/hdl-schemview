@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use svxprobe_model::{Design, Dir, NodeId};
+use svxprobe_model::{Design, Dir, NodeId, NodeKind};
 use svxprobe_schematic::{cone, scope_graph, PinRole, Side};
 
 fn design() -> Design {
@@ -247,7 +247,175 @@ fn interface_instance_is_a_bundle_box() {
         Some("mem_if"),
         "interface type sublabel"
     );
-    assert!(!bus.expandable, "an interface bundle is not drillable");
+    // #97: a bare interface bundle drills into its modport views/members.
+    assert!(bus.expandable, "an interface bundle is drillable");
+}
+
+#[test]
+fn drill_interface_shows_modport_boxes() {
+    // #97: drilling a bare interface bundle renders each of its `modport` views
+    // as a box, one directional pin per member. The member pin's `path` is the
+    // underlying bundle signal (so a click cross-probes it), while its id is a
+    // synthetic per-(view, member) pin — the two views share the signal but not
+    // the pin.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].bus").expect("interface is drillable");
+
+    let boxes: Vec<&str> = g
+        .nodes
+        .iter()
+        .filter(|n| n.kind == NodeKind::Modport)
+        .map(|n| n.label.as_str())
+        .collect();
+    assert!(boxes.contains(&"core"), "modport boxes: {boxes:?}");
+    assert!(boxes.contains(&"mem"), "modport boxes: {boxes:?}");
+
+    let mem = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Modport && n.label == "mem")
+        .expect("mem view box");
+
+    // `valid` is an input to the `mem` view (driven by the core), so it reads
+    // from the west; its path cross-probes to the bundle member.
+    let mvalid = mem
+        .ports
+        .iter()
+        .find(|p| p.name == "valid")
+        .expect("mem.valid pin");
+    assert_eq!(mvalid.path, "picorv32_soc.g_lane[0].bus.valid");
+    assert!(
+        !d.nodes_at_path(&mvalid.path).is_empty(),
+        "member path resolves to the bundle signal"
+    );
+    assert_eq!(
+        mvalid.side,
+        Side::West,
+        "an `in` member reads from the west"
+    );
+
+    // The `core` view drives `valid` (output) — east — and gets its own pin id.
+    let core = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Modport && n.label == "core")
+        .unwrap();
+    let cvalid = core.ports.iter().find(|p| p.name == "valid").unwrap();
+    assert_eq!(
+        cvalid.side,
+        Side::East,
+        "an `out` member drives to the east"
+    );
+    assert_ne!(cvalid.id, mvalid.id, "each view gets a distinct pin");
+}
+
+#[test]
+fn drill_interface_wires_shared_members() {
+    // #97: a member driven by one view and read by another is wired between the
+    // two view boxes, cross-probing to the member's canonical path.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].bus").expect("interface is drillable");
+    let modport = |label: &str| {
+        g.nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Modport && n.label == label)
+            .unwrap()
+    };
+    let core = modport("core");
+    let mem = modport("mem");
+    let cvalid = core.ports.iter().find(|p| p.name == "valid").unwrap();
+    let mvalid = mem.ports.iter().find(|p| p.name == "valid").unwrap();
+
+    let wire = g
+        .edges
+        .iter()
+        .find(|e| {
+            (e.source == cvalid.id && e.target == mvalid.id)
+                || (e.source == mvalid.id && e.target == cvalid.id)
+        })
+        .expect("a wire joins the two views' `valid` pins");
+    assert_eq!(
+        wire.net_path.as_deref(),
+        Some("picorv32_soc.g_lane[0].bus.valid"),
+        "the wire cross-probes to the bundle member"
+    );
+}
+
+#[test]
+fn drill_interface_frames_clk_and_views() {
+    // #97: the drilled bundle shows the interface's own `clk` as a boundary pin
+    // wired into both views' clk pins (clk comes from outside the interface), plus
+    // a boundary frame port per modport view marking its external face.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].bus").expect("interface is drillable");
+    let modport = |label: &str| {
+        g.nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Modport && n.label == label)
+            .expect("modport box")
+    };
+
+    // The interface's own `clk` input renders as a boundary pin (kind Port),
+    // wired to the `clk` member pin on BOTH modport views (nothing internal
+    // drives clk, so without this the pins would float).
+    let clk = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Port && n.label == "clk")
+        .expect("clk boundary pin");
+    let clk_pin = clk.ports[0].id;
+    for view in ["core", "mem"] {
+        let mp = modport(view);
+        let cpin = mp.ports.iter().find(|p| p.name == "clk").unwrap().id;
+        assert!(
+            g.edges.iter().any(|e| {
+                (e.source == clk_pin && e.target == cpin)
+                    || (e.source == cpin && e.target == clk_pin)
+            }),
+            "clk wired into the {view} view"
+        );
+    }
+
+    // Each modport view has a boundary frame port (kind Port) that fans out to the
+    // view's member pins (the I/O the modport lists), not the box corner, and
+    // cross-probes to the Modport node.
+    for view in ["core", "mem"] {
+        let mp = modport(view);
+        let frame = g
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Port && n.label == view)
+            .unwrap_or_else(|| panic!("{view} frame port"));
+        let fpin = frame.ports[0].id;
+        // Fans to the view's `valid` member pin — a listed I/O.
+        let vpin = mp.ports.iter().find(|p| p.name == "valid").unwrap().id;
+        assert!(
+            g.edges.iter().any(|e| {
+                (e.source == fpin && e.target == vpin) || (e.source == vpin && e.target == fpin)
+            }),
+            "{view} frame port fans to its member pins"
+        );
+        // Not anchored on the box node corner.
+        assert!(
+            !g.edges.iter().any(|e| {
+                (e.source == fpin && e.target == mp.id) || (e.source == mp.id && e.target == fpin)
+            }),
+            "{view} frame does not anchor on the box corner"
+        );
+        // clk is served by its own boundary pin, so it is left off the fan.
+        let clk_member = mp.ports.iter().find(|p| p.name == "clk").unwrap().id;
+        assert!(
+            !g.edges.iter().any(|e| {
+                (e.source == fpin && e.target == clk_member)
+                    || (e.source == clk_member && e.target == fpin)
+            }),
+            "{view} frame skips clk (already on its own boundary pin)"
+        );
+        assert!(
+            d.nodes_at_path(&frame.path).contains(&mp.id),
+            "{view} frame port cross-probes the Modport node"
+        );
+    }
 }
 
 #[test]
@@ -720,12 +888,14 @@ fn leaf_instance_is_drillable() {
     );
     assert!(core.expandable, "leaf instance must be drillable");
 
-    // Non-instance boxes/pins stay non-expandable (inferred FFs, boundary ports).
-    for n in g
-        .nodes
-        .iter()
-        .filter(|n| n.kind != svxprobe_model::NodeKind::Instance)
-    {
+    // Inferred logic boxes and boundary pins stay non-expandable; an interface
+    // bundle is the one non-instance exception — it drills into its modports (#97).
+    for n in g.nodes.iter().filter(|n| {
+        !matches!(
+            n.kind,
+            svxprobe_model::NodeKind::Instance | svxprobe_model::NodeKind::Interface
+        )
+    }) {
         assert!(
             !n.expandable,
             "non-instance node should not be expandable: {} ({:?})",
