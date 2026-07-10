@@ -926,7 +926,8 @@ function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
 // top-right corner (a "dog-ear") so it reads as a bundle rather than a module
 // instance. Carries its interface type as a sublabel (e.g. `(mem_if)`) and any
 // interface ports (e.g. `clk`) as pins. Single-click selects, right-click
-// cross-probes; an interface is a leaf bundle, so there is no drill.
+// cross-probes; a bundle with modport views is drillable (#97) — double-click
+// descends into its modports/members (the caret ▸ marks it).
 function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) {
   const W = c.width;
   const H = c.height;
@@ -948,6 +949,12 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   );
   body.dataset.nodeId = String(id);
   body.onclick = () => selectNode(id);
+  body.ondblclick = () => {
+    if (node.expandable) {
+      rememberCurrentView();
+      setScope(node.path ?? "", node.label);
+    }
+  };
   body.oncontextmenu = (e) => {
     e.preventDefault();
     crossProbe(id, e);
@@ -967,7 +974,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
   name.setAttribute("x", String(cx));
   name.setAttribute("y", String(type_ ? cy - 4 : cy + 4));
   name.setAttribute("text-anchor", "middle");
-  name.textContent = inst;
+  name.textContent = inst + (node.expandable ? " ▸" : "");
   name.dataset.nodeId = String(id);
   name.style.pointerEvents = "none";
   g.appendChild(name);

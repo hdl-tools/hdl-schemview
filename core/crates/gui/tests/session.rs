@@ -125,9 +125,9 @@ fn hierarchy_tree_is_lazy_and_navigable() {
     let labels: Vec<&str> = lane.children.iter().map(|c| c.label.as_str()).collect();
     assert!(labels.contains(&"core"), "children: {labels:?}");
     assert!(labels.contains(&"memory"), "children: {labels:?}");
-    // Interface instances are not structural scopes (scope_graph rejects them
-    // as roots), so the tree keeps them out — every node stays navigable.
-    assert!(!labels.contains(&"bus"), "children: {labels:?}");
+    // A bare interface bundle is a navigable scope now (#97) — it drills into
+    // its modport views — so the tree lists it alongside the instances.
+    assert!(labels.contains(&"bus"), "children: {labels:?}");
     let core = lane.children.iter().find(|c| c.label == "core").unwrap();
     assert_eq!(core.module.as_deref(), Some("picorv32"), "module sublabel");
 
@@ -136,9 +136,9 @@ fn hierarchy_tree_is_lazy_and_navigable() {
         assert!(s.scope_graph(&c.path).is_some(), "{} is navigable", c.path);
     }
 
-    // Unknown / non-structural scopes yield None.
+    // Unknown scopes yield None; a bare interface bundle resolves (#97).
     assert!(s.hierarchy_tree("nope", 1).is_none());
-    assert!(s.hierarchy_tree("picorv32_soc.g_lane[0].bus", 1).is_none());
+    assert!(s.hierarchy_tree("picorv32_soc.g_lane[0].bus", 1).is_some());
 }
 
 #[test]
