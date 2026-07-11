@@ -48,3 +48,29 @@ jobs:
       - name: Elaborate real core (stress the pyslang harness)
         run: bash fixtures/ibex_soc/elaborate.sh
 
+  scale-bench:
+    name: Scalability harness (smoke, non-blocking)
+    runs-on: ubuntu-latest
+    # Benchmarks are noisy and slow; never fail the nightly on perf variance.
+    # This exercises the report path (665 + 100K) and a fast criterion sanity
+    # pass end-to-end. The generator's validity is gated separately by
+    # `cargo test --all` in ci.yml (tests/valid.rs).
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      # Single-shot report (665 golden + 665 synth + 100K synth); no --full (1M).
+      - name: Scalability report
+        run: cargo run -p scale-bench --release --bin report
+      # Quick criterion sanity at the default sizes (1M skipped without
+      # SCALE_BENCH_FULL); short warm-up/measurement to keep it fast.
+      - name: Criterion smoke
+        run: cargo bench -p scale-bench -- --warm-up-time 1 --measurement-time 3
+
