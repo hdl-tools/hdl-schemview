@@ -348,7 +348,16 @@ fn access_ports(design: &Design, iface: NodeId) -> (Vec<(NodeId, String, Side)>,
     };
     let mut used: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let (mut raw_in, mut raw_out) = (0usize, 0usize);
-    for e in design.edges() {
+    // Only edges incident on the bundle or its interior can touch it — gather
+    // those via conn_index instead of scanning every edge. BTreeSet dedups the
+    // port/endpoint dual-listing so a raw port's tap is counted once.
+    let mut cand: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    cand.extend(design.edge_indices_of(iface).iter().copied());
+    for &c in &n.children {
+        cand.extend(design.edge_indices_of(c).iter().copied());
+    }
+    for &ci in &cand {
+        let e = &design.edges()[ci as usize];
         // A connection *into* the bundle: its endpoint is the instance, one of
         // its members, or a modport view — from a port outside the interface.
         if (e.endpoint != iface && !inside.contains(&e.endpoint))
@@ -1077,9 +1086,32 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         })
     };
 
+    // Gather the scope-local candidate edges once (the structural and signal-join
+    // passes below share it). Every edge those passes act on has its `port`
+    // incident on an in-scope box, one of a box's child ports, or the scope
+    // boundary — so the union of incident edges over those nodes is a superset of
+    // what a full scan would touch (extra candidates hit the same `continue`
+    // guards). BTreeSet<u32> dedups the port/endpoint dual-listing AND preserves
+    // ascending `doc.edges` position order, so edge ids, `seen` winners, pin
+    // allocation, and the `next_edge` sequence stay byte-identical to the scan.
+    let mut cand: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    {
+        let mut seed: std::collections::HashSet<NodeId> = box_set.clone();
+        for &b in &boxes {
+            if let Some(bn) = design.node(b) {
+                seed.extend(bn.children.iter().copied());
+            }
+        }
+        seed.extend(boundary_of.keys().copied());
+        for &id in &seed {
+            cand.extend(design.edge_indices_of(id).iter().copied());
+        }
+    }
+
     let mut edges = Vec::new();
     let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
-    for (i, e) in design.edges().iter().enumerate() {
+    for &i in &cand {
+        let e = &design.edges()[i as usize];
         // Logic boxes wire through the scope-level signals they read and assign;
         // that is done by the signal-join pass below. Here we draw only the
         // structural (instance) connections, both ends resolving to in-scope boxes.
@@ -1099,7 +1131,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                     endpoint.map(|n| with_select(relative_to(&n.path, scope_path), &e.select));
                 let net_path = endpoint.map(|n| n.path.clone());
                 edges.push(SchEdge {
-                    id: i as u32,
+                    id: i,
                     source: src,
                     target: tgt,
                     net,
@@ -1126,7 +1158,10 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             std::collections::HashMap::new();
         let mut loads: std::collections::HashMap<NodeId, Vec<Anchor>> =
             std::collections::HashMap::new();
-        for e in design.edges() {
+        // Same scope-local candidate set as the structural pass (ascending edge
+        // order preserved) — not a full scan.
+        for &i in &cand {
+            let e = &design.edges()[i as usize];
             // Join a boundary signal under its boundary pin so a port and its
             // backing net share a bucket; other signals key on the signal node.
             let key = *boundary_of.get(&e.endpoint).unwrap_or(&e.endpoint);

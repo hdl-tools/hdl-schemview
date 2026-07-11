@@ -341,6 +341,14 @@ impl Design {
             None => Vec::new(),
         }
     }
+
+    /// Positions into [`edges`](Self::edges) incident on `node` (as port or
+    /// endpoint). These are the same `doc.edges` indices a full `enumerate()`
+    /// scan would yield for `node`, so callers can gather a scope-local edge set
+    /// without scanning every edge. Empty when `node` has no incident edges.
+    pub fn edge_indices_of(&self, node: NodeId) -> &[u32] {
+        self.conn_index.get(&node).map(Vec::as_slice).unwrap_or(&[])
+    }
 }
 
 #[cfg(test)]
