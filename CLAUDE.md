@@ -62,6 +62,7 @@ SystemVerilog RTL
 | `schematic` | `svxprobe-schematic` | Layout-agnostic graph extractor: `scope_graph()`, `expand()`, `cone()`. |
 | `gui` | `svxprobe-gui` | `Session` logic + serializable DTOs. No UI toolkit — CI-testable. |
 | `cli` | `svxprobe` | Dev/test binary. Subcommands: `ingest`, `wave`, `match`, `graph`, `probe`. |
+| `scale-bench` | `scale-bench` | **Dev-only (#24, Phase 4).** Deterministic synthetic-model generator (`generate`/`build_design`/`synth_signals`, seeded SplitMix64) + criterion benches (`load`/`query`/`matcher`) + a `report` bin. Measures the eager load path, scoped queries, high-fanout `cone()`, and matcher at 665/100K/1M nodes. `publish = false`; 1M gated behind `SCALE_BENCH_FULL`. A **real-design basis** loads any elaborated model via `SCALE_BENCH_MODEL=<hierarchy.json>` (handles auto-derived by `derive_handles`) — e.g. `claude_verilog_test` (`soc_top`, ~5.7K nodes) as a realism anchor. |
 
 Tauri shell (`app/src-tauri/`, package `hdl-schemview-app`) is a thin `cdylib`/`lib`
 wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
@@ -206,7 +207,10 @@ Nightly — Verilator trace regeneration.
 - **No heuristics** — resolve via model indices (single source of truth).
 - **Roadmap** — Phase 0–2 = model/matcher/cross-probe; Phase 3 = schematic + Tauri app
   (done, incl. 3d internal-logic drill-down); Phase 4 = scalability hardening (active
-  area — benchmark → lazy/LoD audit → rkyv cache → redb/SQLite). See `docs/ROADMAP.md`.
+  area — benchmark → lazy/LoD audit → rkyv cache → redb/SQLite). The benchmark step
+  landed first: the `scale-bench` crate (#24) measures the eager path at 665/100K/1M
+  and already shows `scope_graph`/`expand`'s full-edge scan blowing up ~300× by 100K.
+  See `docs/ROADMAP.md`.
 
 ## Commit messages
 

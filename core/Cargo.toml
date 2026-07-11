@@ -9,6 +9,7 @@ members = [
     "crates/schematic",
     "crates/gui",
     "crates/cli",
+    "crates/scale-bench",
 ]
 
 [workspace.package]
@@ -26,6 +27,8 @@ wellen = "0.25"
 # rust-lapper: interval tree for the source-range reverse index (src_index).
 rust-lapper = "1.3"
 clap = { version = "4", features = ["derive"] }
+# criterion: statistical benchmark harness for the scale-bench crate (dev-only).
+criterion = { version = "0.5", features = ["html_reports"] }
 
 # Internal crates
 svxprobe-model = { path = "crates/model" }
