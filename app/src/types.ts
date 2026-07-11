@@ -73,6 +73,10 @@ export interface SchematicGraph {
   root: string;
   nodes: SchNode[];
   edges: SchEdge[];
+  /** True when a cone() hit the per-net fan-out cap and omitted some
+   * connections (a global clock/reset net would otherwise pull in the whole
+   * design). Absent (falsy) for scope graphs and untruncated cones. */
+  truncated?: boolean;
 }
 
 export interface NodeRef {

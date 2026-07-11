@@ -1146,3 +1146,98 @@ fn ff_reset_and_latch_enable_pins_carry_roles() {
     );
     assert_eq!(role_of(Latch, "d"), None, "latch data input is untagged");
 }
+
+#[test]
+fn cone_caps_high_fanout_net() {
+    // A clock net driving one input port in each of 100 instances — fan-out far
+    // above the cone's per-net cap. Without the cap the cone would pull in all
+    // 100 boxes; with it, the cone stays bounded and flags itself truncated.
+    use svxprobe_model::{Document, Edge, FileEntry, Generator, Node};
+
+    let mk =
+        |id: NodeId, kind: NodeKind, name: &str, path: &str, parent: Option<NodeId>, dir| Node {
+            id,
+            kind,
+            name: name.to_string(),
+            path: path.to_string(),
+            parent,
+            children: Vec::new(),
+            symbol_key: path.to_string(),
+            def_range: None,
+            inst_range: None,
+            type_: None,
+            dir,
+            const_value: None,
+            modport: None,
+            members: None,
+            reset: None,
+            enable: None,
+            drivers: Vec::new(),
+            loads: Vec::new(),
+        };
+
+    let n: u32 = 100;
+    let mut nodes = vec![
+        mk(0, NodeKind::Instance, "top", "top", None, None),
+        mk(1, NodeKind::Net, "clk", "top.clk", Some(0), None),
+    ];
+    let mut edges = Vec::new();
+    for i in 0..n {
+        let inst = 2 + i * 2;
+        let port = 3 + i * 2;
+        let mut inst_node = mk(
+            inst,
+            NodeKind::Instance,
+            &format!("u{i}"),
+            &format!("top.u{i}"),
+            Some(0),
+            None,
+        );
+        inst_node.children = vec![port];
+        nodes.push(inst_node);
+        nodes.push(mk(
+            port,
+            NodeKind::Port,
+            "clk",
+            &format!("top.u{i}.clk"),
+            Some(inst),
+            Some(Dir::In),
+        ));
+        edges.push(Edge {
+            id: i,
+            port: 1,
+            endpoint: port,
+            dir: Dir::Out,
+            select: None,
+        });
+    }
+    nodes[0].children = std::iter::once(1)
+        .chain((0..n).map(|i| 2 + i * 2))
+        .collect();
+
+    let doc = Document {
+        schema_version: 1,
+        design: "top".into(),
+        generator: Generator::default(),
+        files: vec![FileEntry {
+            id: 0,
+            path: "t.sv".into(),
+        }],
+        nodes,
+        edges,
+        enums: std::collections::HashMap::new(),
+    };
+    let design = Design::from_document(doc);
+
+    let g = cone(&design, 1, Dir::Out, 1);
+    assert!(g.truncated, "a high-fan-out cone flags itself truncated");
+    assert!(
+        g.nodes.len() <= 64,
+        "cone bounded to the fan-out cap, got {} boxes",
+        g.nodes.len()
+    );
+
+    // A low-fan-out net (only the first instance) stays complete.
+    let small = cone(&design, 3, Dir::In, 1);
+    assert!(!small.truncated, "a small cone is not truncated");
+}

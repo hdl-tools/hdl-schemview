@@ -165,6 +165,16 @@ pub struct SchematicGraph {
     pub root: String,
     pub nodes: Vec<SchNode>,
     pub edges: Vec<SchEdge>,
+    /// True when [`cone`] hit the per-net fan-out cap and omitted some
+    /// connections (a global clock/reset net would otherwise pull the whole
+    /// design into the cone). Always false for scope graphs. Omitted from JSON
+    /// when false, so scope-graph output is unaffected.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn side_of(dir: Dir) -> Side {
@@ -712,6 +722,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
             root: scope_path.to_string(),
             nodes: Vec::new(),
             edges: Vec::new(),
+            truncated: false,
         };
     };
     let views: Vec<NodeId> = ifnode
@@ -900,6 +911,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
         root: scope_path.to_string(),
         nodes,
         edges,
+        truncated: false,
     }
 }
 
@@ -1317,6 +1329,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         root: scope_path.to_string(),
         nodes,
         edges,
+        truncated: false,
     })
 }
 
@@ -1328,15 +1341,22 @@ pub fn expand(design: &Design, instance: NodeId) -> Option<SchematicGraph> {
 
 /// Fan-in/out cone of a node (typically a net or port): the boxes directly
 /// connected to it, following edge direction up to `depth` hops.
+/// Max edges a cone expands through a single node — bounds the frontier so a
+/// global clock/reset net (fan-out = every FF) can't pull the whole design into
+/// the cone. Beyond it the graph is flagged `truncated`.
+const CONE_FANOUT_CAP: usize = 64;
+
 pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> SchematicGraph {
     let mut frontier = vec![start];
     let mut seen_boxes = std::collections::BTreeSet::new();
     let mut edges: Vec<SchEdge> = Vec::new();
     let mut seen_edge_ids = std::collections::BTreeSet::new();
+    let mut truncated = false;
 
     for _ in 0..depth.max(1) {
         let mut next = Vec::new();
         for &node in &frontier {
+            let mut expanded = 0usize;
             for e in incident_edges(design, node) {
                 // Direction filter: downstream follows 'out' from the node side.
                 let keep = match dir {
@@ -1347,6 +1367,14 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
                 if !keep || !seen_edge_ids.insert(e.id) {
                     continue;
                 }
+                // Cap fan-out through one node so a clock/reset net driving every
+                // FF can't explode the cone; flag the graph so it isn't read as
+                // complete.
+                if expanded >= CONE_FANOUT_CAP {
+                    truncated = true;
+                    break;
+                }
+                expanded += 1;
                 let endpoint = design.node(e.endpoint);
                 let net =
                     endpoint.map(|n| with_select(last_segment(&n.path).to_string(), &e.select));
@@ -1380,7 +1408,12 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
         .node(start)
         .map(|n| n.path.clone())
         .unwrap_or_default();
-    SchematicGraph { root, nodes, edges }
+    SchematicGraph {
+        root,
+        nodes,
+        edges,
+        truncated,
+    }
 }
 
 fn incident_edges(design: &Design, node: NodeId) -> Vec<Edge> {
