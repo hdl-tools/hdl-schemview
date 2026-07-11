@@ -375,8 +375,10 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // the bundle itself, and the members re-fan at the consumer wall below.
   const trunkByRep = new Map<number, TrunkGroup>();
   for (const tg of trunkGroups(graph)) trunkByRep.set(tg.edges[0].id, tg);
-  // Left-click a wire: highlight the net and show it in source. Right-click:
-  // highlight + open the action menu (append to waveform / show in source).
+  // Left-click a wire: highlight the net only — a plain click selects/cross-probes
+  // but never navigates away (#147). Jumping to source is the explicit right-click
+  // "Show in source" action. Right-click: highlight + open the action menu (append
+  // to waveform / show in source).
   // Shared by the routed edges and the trunk fan-out geometry below. A member
   // stub passes its trunk's bundle path so selecting the member also lights
   // the trunk it hangs off (but never its sibling stubs).
@@ -386,10 +388,6 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
           left: (ev: Event) => {
             ev.preventDefault();
             selectWire(netPath, trunkPath);
-            api
-              .probeNode(netPath, context())
-              .then((r) => r && showInSource(r))
-              .catch((e) => log("error", `probe failed: ${e}`));
           },
           menu: (ev: MouseEvent) => {
             ev.preventDefault();
