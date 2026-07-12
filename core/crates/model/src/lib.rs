@@ -297,6 +297,21 @@ impl WaveIndex {
         self.by_node.insert(node, sig);
         self.by_signal.insert(sig, node);
     }
+    /// Rebuild the index from a flat `(node, signal)` list — the inverse of
+    /// [`pairs`](Self::pairs). Lets the matcher's output be persisted as a plain
+    /// `Vec` and restored without re-running the match (#153 wave cache).
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (NodeId, WaveSignalRef)>) -> Self {
+        let mut idx = WaveIndex::default();
+        for (node, sig) in pairs {
+            idx.insert(node, sig);
+        }
+        idx
+    }
+    /// The `(node, signal)` bijection as a flat iterator — the serializable form
+    /// of the index (both maps rebuild from it via [`from_pairs`](Self::from_pairs)).
+    pub fn pairs(&self) -> impl Iterator<Item = (NodeId, WaveSignalRef)> + '_ {
+        self.by_node.iter().map(|(&node, &sig)| (node, sig))
+    }
     pub fn node_of(&self, sig: WaveSignalRef) -> Option<NodeId> {
         self.by_signal.get(&sig).copied()
     }
@@ -535,6 +550,26 @@ mod tests {
         assert_eq!(d.edges_of(1).len(), 1);
         assert_eq!(d.edges_of(2)[0].dir, Dir::Out);
         assert!(d.edges_of(0).is_empty());
+    }
+
+    #[test]
+    fn wave_index_round_trips_via_pairs() {
+        // The matcher's durable output is a flat (node, signal) list; the two
+        // lookup maps must be fully reconstructable from it (#153 wave cache).
+        let mut wi = WaveIndex::default();
+        wi.insert(3, WaveSignalRef(10));
+        wi.insert(7, WaveSignalRef(20));
+
+        let mut pairs: Vec<(NodeId, WaveSignalRef)> = wi.pairs().collect();
+        pairs.sort_by_key(|(node, sig)| (*node, sig.0));
+        assert_eq!(pairs, vec![(3, WaveSignalRef(10)), (7, WaveSignalRef(20))]);
+
+        let rebuilt = WaveIndex::from_pairs(pairs);
+        assert_eq!(rebuilt.len(), 2);
+        assert_eq!(rebuilt.node_of(WaveSignalRef(10)), Some(3));
+        assert_eq!(rebuilt.node_of(WaveSignalRef(20)), Some(7));
+        assert_eq!(rebuilt.signal_of(3), Some(WaveSignalRef(10)));
+        assert_eq!(rebuilt.signal_of(7), Some(WaveSignalRef(20)));
     }
 
     #[test]

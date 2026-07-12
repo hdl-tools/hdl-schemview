@@ -138,13 +138,20 @@ fn write_cache(model: &Path, doc: Document) -> (Document, Result<()>) {
 
 fn serialize_and_write(cache: &Path, archive: &CacheArchive) -> Result<()> {
     let bytes = rkyv::to_bytes::<RkyvError>(archive).context("serializing rkyv cache")?;
+    write_bytes_atomic(cache, &bytes)
+}
+
+/// Write `bytes` to `cache` via a temp file + rename, so a crash mid-write can't
+/// leave a truncated archive resident (a later run would reject it, but this
+/// avoids the churn). Shared by the model cache and the wave_index cache (#153).
+fn write_bytes_atomic(cache: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(dir) = cache.parent() {
         fs::create_dir_all(dir).with_context(|| format!("creating cache dir {}", dir.display()))?;
     }
-    // Write a temp file then rename, so a crash mid-write can't leave a truncated
-    // archive resident (a later run would reject it, but this avoids the churn).
-    let tmp = cache.with_extension("rkyv.tmp");
-    fs::write(&tmp, &bytes).with_context(|| format!("writing cache {}", tmp.display()))?;
+    let mut tmp = cache.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    fs::write(&tmp, bytes).with_context(|| format!("writing cache {}", tmp.display()))?;
     fs::rename(&tmp, cache).with_context(|| format!("finalizing cache {}", cache.display()))?;
     Ok(())
 }
@@ -158,6 +165,94 @@ struct CacheArchive {
     src_len: u64,
     src_mtime_ns: u64,
     doc: Document,
+}
+
+// --- wave_index cache (#153, ADR 0003 Phase-A follow-up) ---
+//
+// The matcher's `wave_index` (trace signal ↔ model NodeId) is computation, not
+// I/O, so the #21 model cache can't skip it. Persisting the resolved pairs makes
+// that ~O(signals × path_len) pass a one-time cost. The pairs map *trace* var_refs
+// to *model* NodeIds, so the cache is keyed on BOTH files' staleness plus a hash
+// of the match options (a changed model can renumber node ids; changed exclusions
+// change the mapping). It lives beside the model JSON, like the model cache.
+
+/// Bumped whenever the wave_index archive layout changes incompatibly (#153);
+/// independent of [`RKYV_FORMAT_VERSION`], which gates the model cache.
+pub const WAVE_INDEX_FORMAT_VERSION: u32 = 1;
+
+/// `<model dir>/.schemview_data/<model name>.<trace name>.waveidx.rkyv`. Keyed by
+/// both file names so distinct model/trace pairs in one dir don't collide.
+pub fn wave_index_cache_path(model: &Path, trace: &Path) -> PathBuf {
+    let dir = model
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let model_name = model.file_name().unwrap_or_default().to_string_lossy();
+    let trace_name = trace.file_name().unwrap_or_default().to_string_lossy();
+    dir.join(CACHE_DIR)
+        .join(format!("{model_name}.{trace_name}.waveidx.rkyv"))
+}
+
+/// Try to load a fresh, version-matched `wave_index` for `(model, trace, opts_hash)`.
+/// Returns the persisted `(NodeId, var_ref)` pairs, or `None` on any miss: absent
+/// cache, unreadable source, version mismatch, either file stale, a different
+/// `opts_hash`, or a corrupt/invalid archive. `None` means "re-run the matcher".
+pub fn try_load_wave_index(model: &Path, trace: &Path, opts_hash: u64) -> Option<Vec<(u32, u64)>> {
+    let (model_len, model_mtime_ns) = source_meta(model).ok()?;
+    let (trace_len, trace_mtime_ns) = source_meta(trace).ok()?;
+    let cache = wave_index_cache_path(model, trace);
+    let file = File::open(&cache).ok()?;
+    // SAFETY: read-only mmap of a regular file we just opened, used only within
+    // this function; the validating `access` below rejects a concurrently
+    // truncated mapping (→ `None` → re-match) rather than risking UB.
+    let mmap = unsafe { Mmap::map(&file) }.ok()?;
+    let archived = rkyv::access::<ArchivedWaveIndexArchive, RkyvError>(&mmap).ok()?;
+    if archived.wave_index_format_version.to_native() != WAVE_INDEX_FORMAT_VERSION
+        || archived.model_len.to_native() != model_len
+        || archived.model_mtime_ns.to_native() != model_mtime_ns
+        || archived.trace_len.to_native() != trace_len
+        || archived.trace_mtime_ns.to_native() != trace_mtime_ns
+        || archived.opts_hash.to_native() != opts_hash
+    {
+        return None;
+    }
+    rkyv::deserialize::<Vec<(u32, u64)>, RkyvError>(&archived.pairs).ok()
+}
+
+/// Persist the resolved `wave_index` pairs for `(model, trace, opts_hash)`. Called
+/// best-effort at the match site — a write failure must not fail the load.
+pub fn write_wave_index(
+    model: &Path,
+    trace: &Path,
+    opts_hash: u64,
+    pairs: &[(u32, u64)],
+) -> Result<()> {
+    let (model_len, model_mtime_ns) = source_meta(model)?;
+    let (trace_len, trace_mtime_ns) = source_meta(trace)?;
+    let archive = WaveIndexArchive {
+        wave_index_format_version: WAVE_INDEX_FORMAT_VERSION,
+        model_len,
+        model_mtime_ns,
+        trace_len,
+        trace_mtime_ns,
+        opts_hash,
+        pairs: pairs.to_vec(),
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&archive).context("serializing wave_index cache")?;
+    write_bytes_atomic(&wave_index_cache_path(model, trace), &bytes)
+}
+
+/// Version + dual-staleness header for the wave_index cache, checked on the
+/// archived view before the `pairs` are deserialized.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct WaveIndexArchive {
+    wave_index_format_version: u32,
+    model_len: u64,
+    model_mtime_ns: u64,
+    trace_len: u64,
+    trace_mtime_ns: u64,
+    opts_hash: u64,
+    pairs: Vec<(u32, u64)>,
 }
 
 /// Cheap referential-integrity checks beyond serde's structural parse.
@@ -451,5 +546,101 @@ mod tests {
         let d2 = from_path(&model).unwrap();
         assert_eq!(d2.nodes().len(), 3, "stale cache rebuilt from new JSON");
         assert_eq!(d2.nodes_at_path("t.b"), &[2]);
+    }
+
+    // --- wave_index cache (#153) ---
+
+    /// Write a model + a stand-in trace file (the cache only stats the trace) and
+    /// return their paths.
+    fn model_and_trace(dir: &Path) -> (PathBuf, PathBuf) {
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        let trace = dir.join("dump.vcd");
+        std::fs::write(&trace, b"$version fake $end").unwrap();
+        (model, trace)
+    }
+
+    #[test]
+    fn wave_index_cache_miss_then_hit() {
+        let dir = scratch("wi_hit");
+        let (model, trace) = model_and_trace(&dir);
+        let pairs = vec![(1u32, 10u64), (0u32, 20u64)];
+
+        // Fresh: nothing written yet.
+        assert!(try_load_wave_index(&model, &trace, 42).is_none());
+
+        write_wave_index(&model, &trace, 42, &pairs).unwrap();
+
+        // Hit: identical pairs come back.
+        let got = try_load_wave_index(&model, &trace, 42).expect("cache hit");
+        assert_eq!(got, pairs);
+    }
+
+    #[test]
+    fn wave_index_cache_stale_on_opts_change() {
+        let dir = scratch("wi_opts");
+        let (model, trace) = model_and_trace(&dir);
+        write_wave_index(&model, &trace, 1, &[(0u32, 7u64)]).unwrap();
+        // A different match-options hash must not be served the old pairs.
+        assert!(try_load_wave_index(&model, &trace, 2).is_none());
+    }
+
+    #[test]
+    fn wave_index_cache_stale_on_model_change() {
+        let dir = scratch("wi_model");
+        let (model, trace) = model_and_trace(&dir);
+        write_wave_index(&model, &trace, 1, &[(0u32, 7u64)]).unwrap();
+
+        // Rewriting the model (different length ⇒ node ids may renumber) must bust
+        // the wave_index cache, since it maps var_refs to model NodeIds.
+        std::fs::write(&model, format!("{DOC}   ")).unwrap();
+        assert!(try_load_wave_index(&model, &trace, 1).is_none());
+    }
+
+    #[test]
+    fn wave_index_cache_stale_on_trace_change() {
+        let dir = scratch("wi_trace");
+        let (model, trace) = model_and_trace(&dir);
+        write_wave_index(&model, &trace, 1, &[(0u32, 7u64)]).unwrap();
+
+        std::fs::write(&trace, b"$version different $end padding").unwrap();
+        assert!(try_load_wave_index(&model, &trace, 1).is_none());
+    }
+
+    #[test]
+    fn wave_index_cache_corrupt_is_miss() {
+        let dir = scratch("wi_corrupt");
+        let (model, trace) = model_and_trace(&dir);
+        write_wave_index(&model, &trace, 1, &[(0u32, 7u64)]).unwrap();
+
+        let cache = wave_index_cache_path(&model, &trace);
+        std::fs::write(&cache, b"garbage, not an rkyv archive").unwrap();
+        // Corruption is a miss, never a panic or error.
+        assert!(try_load_wave_index(&model, &trace, 1).is_none());
+    }
+
+    #[test]
+    fn cache_loaded_document_matches_json_parsed() {
+        // #154: a cache hit must reproduce the JSON-parsed Document field-for-field,
+        // or a warm launch would silently diverge from a cold parse. Compared via
+        // serde_json::Value so HashMap key ordering (e.g. `enums`) doesn't matter.
+        let dir = scratch("fidelity");
+        let model = dir.join("hierarchy.json");
+        let golden = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/picorv32_soc/golden/hierarchy.json");
+        let bytes = std::fs::read(&golden).unwrap();
+        std::fs::write(&model, &bytes).unwrap();
+
+        // Cold JSON parse vs. warm rkyv-cache load of the same source.
+        let from_json = from_slice(&bytes).unwrap();
+        build_cache(&model).unwrap();
+        let from_cache = from_path(&model).unwrap();
+
+        let v_json = serde_json::to_value(&from_json.doc).unwrap();
+        let v_cache = serde_json::to_value(&from_cache.doc).unwrap();
+        assert_eq!(
+            v_json, v_cache,
+            "cache-loaded Document diverges from the JSON parse"
+        );
     }
 }

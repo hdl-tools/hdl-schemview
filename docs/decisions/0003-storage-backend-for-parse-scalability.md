@@ -149,11 +149,20 @@ through the pyslang harness. The benchmark output is the input to the Phase-B en
     self-describing header (`RKYV_FORMAT_VERSION` + `schema_version` + source `len`/`mtime_ns`
     staleness key). A hit **mmaps + validates (bytecheck) + deserializes** into an owned
     `Document` (**Option A** — not zero-copy `&Archived`; that stays a future item for when a
-    design outgrows RAM, at which point it converges with Phase B). Indices and `wave_index`
-    are still rebuilt (persisting them is a follow-up). Any miss/stale/corrupt archive falls
+    design outgrows RAM, at which point it converges with Phase B). The `path_index`/
+    `src_index`/`conn_index` are still rebuilt on load. Any miss/stale/corrupt archive falls
     back to the JSON and rewrites the cache (best-effort). `svxprobe cache <model.json>`
     pre-builds the archive for cache-less/ephemeral deploys. Measured at 100K synthetic nodes:
     cold `from_slice` ~603 ms → warm `cache_hit` ~210 ms (~2.9×).
+  - **wave_index cache follow-up (#153, as built):** the matcher's resolved `wave_index`
+    (trace signal ↔ NodeId) is now persisted too, closing the "persisting them is a follow-up"
+    gap above. `ingest::{try_load_wave_index, write_wave_index}` cache the flat `(NodeId,
+    var_ref)` pairs in a sibling `.schemview_data/<model>.<trace>.waveidx.rkyv` archive, keyed
+    on **both** files' `len`/`mtime_ns` + a `MatchOptions` hash + `WAVE_INDEX_FORMAT_VERSION`
+    (a changed model can renumber node ids, so the key must bust on either file). `CrossProbe::
+    build_cached` consults it and skips `run_match` on a hit — turning the matcher's ~O(signals
+    × path_len) pass (the dominant per-launch cost once the parse is cached) into a one-time
+    cost. The `svxprobe match` gate still runs the live matcher (it needs the `MatchReport`).
 - **A load-time benchmark** at 665 / ~6K / synthetic 100K nodes should be added as a CI perf
   guard so regressions are caught.
 - **Phase B remains open and is gated on a benchmark.** If a future workload needs to browse a

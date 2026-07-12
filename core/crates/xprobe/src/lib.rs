@@ -10,6 +10,8 @@
 //! results. It reuses the Phase 1 matcher to populate the node ↔ signal index.
 
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 
 use svxprobe_matcher::{run_match, MatchOptions, MatchReport};
 use svxprobe_model::{Design, NodeId, NodeKind, Range, WaveSignalRef};
@@ -51,13 +53,26 @@ pub enum WaveTarget {
     NotInTrace,
 }
 
+/// A hash of the match options that affect the resulting `wave_index` (excluded
+/// scopes + forced anchor). Keys the wave_index cache so a different exclusion set
+/// or anchor is never served a stale mapping (#153). Stability across toolchains
+/// isn't required — a hash change simply forces a (safe) cache miss + re-match.
+pub fn match_opts_hash(opts: &MatchOptions) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    opts.excluded_scopes.hash(&mut h);
+    opts.anchor.hash(&mut h);
+    h.finish()
+}
+
 /// The cross-probe engine over a matched design + loaded trace.
 pub struct CrossProbe {
     design: Design,
     var_by_ref: HashMap<u32, WaveVar>,
     ref_by_name: HashMap<String, u32>,
     context: Option<NodeId>,
-    report: MatchReport,
+    /// The match run's diagnostics — `None` when the `wave_index` was restored
+    /// from the persisted cache instead of matched (#153), which carries no report.
+    report: Option<MatchReport>,
 }
 
 impl CrossProbe {
@@ -66,6 +81,42 @@ impl CrossProbe {
     pub fn build(mut design: Design, wave: &LoadedWave, opts: &MatchOptions) -> Self {
         let signals = wave.signals();
         let report = run_match(&mut design, &signals, opts);
+        Self::assemble(design, wave, Some(report))
+    }
+
+    /// Like [`build`](Self::build), but reuses a persisted `wave_index` when a
+    /// fresh cache exists for `(model, trace, opts)` — skipping the ~O(signals ×
+    /// path_len) matcher pass, the dominant per-launch cost once the model parse
+    /// is cached (#21). On a miss it matches as normal and best-effort persists
+    /// the result. `model`/`trace` are the on-disk paths that key the cache.
+    pub fn build_cached(
+        mut design: Design,
+        wave: &LoadedWave,
+        opts: &MatchOptions,
+        model: &Path,
+        trace: &Path,
+    ) -> Self {
+        let opts_hash = match_opts_hash(opts);
+        if let Some(pairs) = svxprobe_ingest::try_load_wave_index(model, trace, opts_hash) {
+            design.wave_index = svxprobe_model::WaveIndex::from_pairs(
+                pairs.into_iter().map(|(n, s)| (n, WaveSignalRef(s))),
+            );
+            return Self::assemble(design, wave, None);
+        }
+        // Miss: run the matcher, then persist the resolved pairs (best-effort — a
+        // cache-write failure must not fail the load).
+        let signals = wave.signals();
+        let report = run_match(&mut design, &signals, opts);
+        let pairs: Vec<(u32, u64)> = design.wave_index.pairs().map(|(n, s)| (n, s.0)).collect();
+        let _ = svxprobe_ingest::write_wave_index(model, trace, opts_hash, &pairs);
+        Self::assemble(design, wave, Some(report))
+    }
+
+    /// Capture the trace's var table (name/ref lookups) around an already-populated
+    /// `wave_index`. Shared by [`build`](Self::build) and
+    /// [`build_cached`](Self::build_cached).
+    fn assemble(design: Design, wave: &LoadedWave, report: Option<MatchReport>) -> Self {
+        let signals = wave.signals();
         let mut var_by_ref = HashMap::with_capacity(signals.len());
         let mut ref_by_name = HashMap::with_capacity(signals.len());
         for s in signals {
@@ -85,8 +136,10 @@ impl CrossProbe {
         &self.design
     }
 
-    pub fn report(&self) -> &MatchReport {
-        &self.report
+    /// The match run's diagnostics, or `None` if the `wave_index` was restored
+    /// from cache (#153).
+    pub fn report(&self) -> Option<&MatchReport> {
+        self.report.as_ref()
     }
 
     pub fn set_context(&mut self, ctx: NodeId) {

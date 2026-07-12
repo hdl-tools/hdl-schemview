@@ -9,6 +9,4 @@ repository.workspace = true
 svxprobe-model = { workspace = true }
 svxprobe-wave = { workspace = true }
 svxprobe-matcher = { workspace = true }
-
-[dev-dependencies]
 svxprobe-ingest = { workspace = true }

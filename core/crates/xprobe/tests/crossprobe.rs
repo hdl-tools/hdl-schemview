@@ -2,10 +2,10 @@
 //! bidirectional source↔waveform, generate ambiguity via context + picker, and
 //! loud trace-misses.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use svxprobe_matcher::MatchOptions;
-use svxprobe_model::NodeId;
+use svxprobe_model::{NodeId, WaveSignalRef};
 use svxprobe_xprobe::{CrossProbe, WaveTarget};
 
 fn fixture(rel: &str) -> String {
@@ -29,6 +29,35 @@ fn build(ext: &str) -> CrossProbe {
 
 fn path_of(cp: &CrossProbe, id: NodeId) -> String {
     cp.design().node(id).unwrap().path.clone()
+}
+
+/// `build_cached` must consult the persisted wave_index instead of re-matching.
+/// Pre-seed a fabricated cache holding a single, deliberately-wrong pair: a real
+/// match populates hundreds of entries, so a resulting `len() == 1` proves the
+/// hit path (deserialize + `from_pairs`) was taken (#153).
+#[test]
+fn build_cached_uses_persisted_wave_index() {
+    let model = fixture("golden/hierarchy.json");
+    let trace = fixture("traces/picorv32_soc.vcd");
+    let opts = MatchOptions {
+        excluded_scopes: vec!["TOP".into(), "tb".into(), "soc_pkg".into()],
+        anchor: None,
+    };
+
+    let opts_hash = svxprobe_xprobe::match_opts_hash(&opts);
+    svxprobe_ingest::write_wave_index(Path::new(&model), Path::new(&trace), opts_hash, &[(0, 999)])
+        .unwrap();
+
+    let design = svxprobe_ingest::from_path(&model).unwrap();
+    let wave = svxprobe_wave::LoadedWave::open(&trace).unwrap();
+    let cp = CrossProbe::build_cached(design, &wave, &opts, Path::new(&model), Path::new(&trace));
+
+    assert_eq!(
+        cp.design().wave_index.len(),
+        1,
+        "served from the fabricated cache, not re-matched"
+    );
+    assert_eq!(cp.design().wave_index.node_of(WaveSignalRef(999)), Some(0));
 }
 
 /// waveform → source → waveform, for a known interface signal.
