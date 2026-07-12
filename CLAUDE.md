@@ -55,10 +55,10 @@ SystemVerilog RTL
 | Crate | Package | Purpose |
 | --- | --- | --- |
 | `model` | `svxprobe-model` | Elaborated node model + indices (`path_index`, `src_index` interval tree, `wave_index`). The spine. |
-| `ingest` | `svxprobe-ingest` | JSON → `Design` deserialization + referential-integrity validation (ref ranges + within-scope name uniqueness, whitelisting the port/backing-net dual-node pattern). **rkyv load cache (#21):** `from_path` gates on a `<model dir>/.schemview_data/<file>.rkyv` archive (header = `RKYV_FORMAT_VERSION` + `schema_version` + source `len`/`mtime_ns`); a fresh hit mmaps + bytecheck-validates + deserializes an owned `Document` (Option A, not zero-copy), skipping the JSON parse; any miss/stale/corrupt falls back to JSON + rewrites. `build_cache`/`svxprobe cache` pre-warm it. |
+| `ingest` | `svxprobe-ingest` | JSON → `Design` deserialization + referential-integrity validation (ref ranges + within-scope name uniqueness, whitelisting the port/backing-net dual-node pattern). **rkyv load cache (#21):** `from_path` gates on a `<model dir>/.schemview_data/<file>.rkyv` archive (header = `RKYV_FORMAT_VERSION` + `schema_version` + source `len`/`mtime_ns`); a fresh hit mmaps + bytecheck-validates + deserializes an owned `Document` (Option A, not zero-copy), skipping the JSON parse; any miss/stale/corrupt falls back to JSON + rewrites. `build_cache`/`svxprobe cache` pre-warm it. **wave_index cache (#153):** `try_load_wave_index`/`write_wave_index` also persist the matcher's resolved `(NodeId, var_ref)` pairs in a sibling `.schemview_data/<model>.<trace>.waveidx.rkyv` archive (header = `WAVE_INDEX_FORMAT_VERSION` + both files' `len`/`mtime_ns` + a `MatchOptions` hash), so a warm launch skips the matcher entirely. |
 | `wave` | `svxprobe-wave` | VCD/FST/GHW trace loader via `wellen` (lazy per-signal). |
 | `matcher` | `svxprobe-matcher` | Phase-1 canonical-path matcher. **≥95% hit-rate is a hard PR gate.** |
-| `xprobe` | `svxprobe-xprobe` | Cross-probe engine: source ↔ waveform ↔ schematic. |
+| `xprobe` | `svxprobe-xprobe` | Cross-probe engine: source ↔ waveform ↔ schematic. `CrossProbe::build` matches fresh; `build_cached` reuses the persisted `wave_index` (#153) when a fresh cache exists for `(model, trace, opts)`, else matches + writes it. |
 | `schematic` | `svxprobe-schematic` | Layout-agnostic graph extractor: `scope_graph()`, `expand()`, `cone()`. |
 | `gui` | `svxprobe-gui` | `Session` logic + serializable DTOs. No UI toolkit — CI-testable. |
 | `cli` | `svxprobe` | Dev/test binary. Subcommands: `ingest`, `cache` (pre-build the #21 rkyv load cache), `wave`, `match`, `graph`, `probe`. |
@@ -212,7 +212,10 @@ Nightly — Verilator trace regeneration.
   and already shows `scope_graph`/`expand`'s full-edge scan blowing up ~300× by 100K.
   The **rkyv load cache (#21)** then landed (ADR 0003 Phase A / Option A): `ingest`
   caches the parsed `Document` in `.schemview_data/` and mmaps it on repeat launches,
-  ~2.9× faster load at 100K (`load` bench `cache_hit` vs `from_slice`). See `docs/ROADMAP.md`.
+  ~2.9× faster load at 100K (`load` bench `cache_hit` vs `from_slice`). The **wave_index
+  cache (#153)** followed, persisting the matcher's output so a warm launch also skips the
+  ~5–10s matcher pass — the dominant per-launch cost once the parse is cached. See
+  `docs/ROADMAP.md`.
 
 ## Commit messages
 

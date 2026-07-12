@@ -147,7 +147,7 @@ impl Session {
         src_root: impl AsRef<Path>,
     ) -> Result<Self> {
         let design = svxprobe_ingest::from_path(model)?;
-        Self::from_design(design, trace, excluded, src_root)
+        Self::from_design(design, Some(model), trace, excluded, src_root)
     }
 
     /// Elaborate a designlist with the external pyslang harness, then load the
@@ -196,11 +196,13 @@ impl Session {
              and the filelist. Harness output: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
-        Self::from_design(design, trace, excluded, src_root)
+        // No model file on disk (elaborated in-memory), so no wave_index cache key.
+        Self::from_design(design, None, trace, excluded, src_root)
     }
 
     fn from_design(
         design: Design,
+        model: Option<&str>,
         trace: &str,
         excluded: Vec<String>,
         src_root: impl AsRef<Path>,
@@ -210,7 +212,14 @@ impl Session {
             excluded_scopes: excluded,
             anchor: None,
         };
-        let cross = CrossProbe::build(design, &wave, &opts);
+        // With a model file on disk, reuse the persisted wave_index (skips the
+        // matcher on repeat launches, #153); otherwise match fresh.
+        let cross = match model {
+            Some(m) => {
+                CrossProbe::build_cached(design, &wave, &opts, Path::new(m), Path::new(trace))
+            }
+            None => CrossProbe::build(design, &wave, &opts),
+        };
         // Re-open: build() borrowed `wave`; we keep a fresh handle for lazy value
         // loading. (Opening twice is cheap — only the header is parsed.)
         wave = LoadedWave::open(trace)?;
