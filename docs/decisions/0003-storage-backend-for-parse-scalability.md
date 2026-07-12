@@ -1,6 +1,6 @@
 # ADR 0003 — Storage backend for parse/load scalability
 
-- **Status:** Proposed (Phase A recommended; Phase B deferred)
+- **Status:** Phase A **implemented** (#21, Option A / Document-only cache); Phase B deferred
 - **Date:** 2026-06-26
 - **Deciders:** project maintainers
 - **Relates to:** `core/crates/{model,ingest,matcher}`, ROADMAP Phase 0–2 (model/matcher), Phase 5 (load path)
@@ -144,6 +144,16 @@ through the pyslang harness. The benchmark output is the input to the Phase-B en
   structs) and `core/crates/ingest` (cache gate + JSON→rkyv transcode + `rkyv_format_version`
   const). The Python harness, the TS wire format, and the 1.94 toolchain are all unchanged. The
   archive is a build/cache artifact, not committed.
+  - **As built (#21):** rkyv 0.8 derives sit alongside serde on the `model` wire types;
+    `ingest::from_path` gates on a `<model dir>/.schemview_data/<file>.rkyv` archive with a
+    self-describing header (`RKYV_FORMAT_VERSION` + `schema_version` + source `len`/`mtime_ns`
+    staleness key). A hit **mmaps + validates (bytecheck) + deserializes** into an owned
+    `Document` (**Option A** — not zero-copy `&Archived`; that stays a future item for when a
+    design outgrows RAM, at which point it converges with Phase B). Indices and `wave_index`
+    are still rebuilt (persisting them is a follow-up). Any miss/stale/corrupt archive falls
+    back to the JSON and rewrites the cache (best-effort). `svxprobe cache <model.json>`
+    pre-builds the archive for cache-less/ephemeral deploys. Measured at 100K synthetic nodes:
+    cold `from_slice` ~603 ms → warm `cache_hit` ~210 ms (~2.9×).
 - **A load-time benchmark** at 665 / ~6K / synthetic 100K nodes should be added as a CI perf
   guard so regressions are caught.
 - **Phase B remains open and is gated on a benchmark.** If a future workload needs to browse a

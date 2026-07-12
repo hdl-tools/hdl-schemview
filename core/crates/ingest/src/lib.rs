@@ -4,10 +4,21 @@
 //! crate to build indices. The JSON contract is `elaborate/schema/model.schema.json`.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
+use memmap2::Mmap;
+use rkyv::rancor::Error as RkyvError;
 use svxprobe_model::{Design, Document, Node, NodeKind};
+
+/// Bumped whenever the rkyv archive layout changes incompatibly; gates a cache
+/// hit alongside the JSON `schema_version` (#21, ADR 0003).
+pub const RKYV_FORMAT_VERSION: u32 = 1;
+
+/// Hidden directory, beside the model JSON, holding derived rkyv load caches.
+const CACHE_DIR: &str = ".schemview_data";
 
 /// Parse a Node-model document from a byte slice and build a [`Design`].
 pub fn from_slice(bytes: &[u8]) -> Result<Design> {
@@ -16,12 +27,137 @@ pub fn from_slice(bytes: &[u8]) -> Result<Design> {
     Ok(Design::from_document(doc))
 }
 
-/// Read and parse a Node-model document from a file path.
+/// Read and parse a Node-model document from a file path, using a derived rkyv
+/// cache beside the JSON when a fresh, version-matched one exists.
+///
+/// Cache path: `<model dir>/.schemview_data/<file name>.rkyv`. On a hit the
+/// archive is mmap'd and deserialized, skipping the JSON parse + validation. On
+/// a miss, a stale source, a version mismatch, or any corruption, the JSON is
+/// parsed as before and the cache is (best-effort) rewritten.
 pub fn from_path(path: impl AsRef<Path>) -> Result<Design> {
+    let path = path.as_ref();
+    if let Some(design) = try_load_cache(path) {
+        return Ok(design);
+    }
+    let bytes =
+        std::fs::read(path).with_context(|| format!("reading model file {}", path.display()))?;
+    let doc: Document = serde_json::from_slice(&bytes).context("deserializing Node-model JSON")?;
+    validate(&doc)?;
+    // Best-effort: a cache-write failure (read-only dir, full disk) must not fail
+    // the load — the JSON stays golden.
+    let (doc, _) = write_cache(path, doc);
+    Ok(Design::from_document(doc))
+}
+
+/// Parse + validate the JSON and (re)write the rkyv cache beside it, without
+/// building a `Design`. Backs the `svxprobe cache` pre-warm subcommand (#21) so a
+/// deploy can generate the archive ahead of a cache-less launch. Returns the
+/// archive path.
+pub fn build_cache(path: impl AsRef<Path>) -> Result<PathBuf> {
     let path = path.as_ref();
     let bytes =
         std::fs::read(path).with_context(|| format!("reading model file {}", path.display()))?;
-    from_slice(&bytes)
+    let doc: Document = serde_json::from_slice(&bytes).context("deserializing Node-model JSON")?;
+    validate(&doc)?;
+    let (_, res) = write_cache(path, doc);
+    res?;
+    Ok(cache_path_for(path))
+}
+
+/// `<model dir>/.schemview_data/<model file name>.rkyv`.
+fn cache_path_for(model: &Path) -> PathBuf {
+    let dir = model
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut name = model
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(".rkyv");
+    dir.join(CACHE_DIR).join(name)
+}
+
+/// (byte length, mtime ns since the Unix epoch) of the source JSON — the
+/// staleness key. Any error (missing file, pre-epoch mtime) means "no basis to
+/// trust a cache", so the caller reparses.
+fn source_meta(model: &Path) -> Result<(u64, u64)> {
+    let md = fs::metadata(model)?;
+    let mtime = md
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| anyhow::anyhow!("source mtime precedes the Unix epoch: {e}"))?
+        .as_nanos() as u64;
+    Ok((md.len(), mtime))
+}
+
+/// Try to satisfy the load from a fresh, valid cache. Returns `None` (so the
+/// caller falls back to JSON) on any miss: absent cache, unreadable source,
+/// version mismatch, stale source, or a corrupt/invalid archive.
+fn try_load_cache(model: &Path) -> Option<Design> {
+    let (src_len, src_mtime_ns) = source_meta(model).ok()?;
+    let cache = cache_path_for(model);
+    let file = File::open(&cache).ok()?;
+    // SAFETY: a read-only mmap of a regular file we just opened; the mapping is
+    // used only within this function and dropped before it returns. A concurrent
+    // truncation could yield garbage, but the validating `access` below rejects
+    // it (→ `None` → JSON fallback), never UB in safe code paths.
+    let mmap = unsafe { Mmap::map(&file) }.ok()?;
+    let archived = rkyv::access::<ArchivedCacheArchive, RkyvError>(&mmap).ok()?;
+    if archived.rkyv_format_version.to_native() != RKYV_FORMAT_VERSION
+        || archived.schema_version.to_native() != 1
+        || archived.src_len.to_native() != src_len
+        || archived.src_mtime_ns.to_native() != src_mtime_ns
+    {
+        return None;
+    }
+    // Fresh + valid: the cache was validated when built, so skip the
+    // referential-integrity pass; just materialize the doc and rebuild indices.
+    let doc: Document = rkyv::deserialize::<Document, RkyvError>(&archived.doc).ok()?;
+    Some(Design::from_document(doc))
+}
+
+/// Serialize `doc` (wrapped with the version + staleness header) to the cache
+/// path, moving `doc` in and back out so no clone is needed. Returns `doc` plus
+/// the write result (best-effort at the call site).
+fn write_cache(model: &Path, doc: Document) -> (Document, Result<()>) {
+    let (src_len, src_mtime_ns) = match source_meta(model) {
+        Ok(m) => m,
+        Err(e) => return (doc, Err(e)),
+    };
+    let archive = CacheArchive {
+        rkyv_format_version: RKYV_FORMAT_VERSION,
+        schema_version: doc.schema_version,
+        src_len,
+        src_mtime_ns,
+        doc,
+    };
+    let res = serialize_and_write(&cache_path_for(model), &archive);
+    (archive.doc, res)
+}
+
+fn serialize_and_write(cache: &Path, archive: &CacheArchive) -> Result<()> {
+    let bytes = rkyv::to_bytes::<RkyvError>(archive).context("serializing rkyv cache")?;
+    if let Some(dir) = cache.parent() {
+        fs::create_dir_all(dir).with_context(|| format!("creating cache dir {}", dir.display()))?;
+    }
+    // Write a temp file then rename, so a crash mid-write can't leave a truncated
+    // archive resident (a later run would reject it, but this avoids the churn).
+    let tmp = cache.with_extension("rkyv.tmp");
+    fs::write(&tmp, &bytes).with_context(|| format!("writing cache {}", tmp.display()))?;
+    fs::rename(&tmp, cache).with_context(|| format!("finalizing cache {}", cache.display()))?;
+    Ok(())
+}
+
+/// Self-describing cache: a version + staleness header, checked on the archived
+/// view before the (large) `doc` is deserialized.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct CacheArchive {
+    rkyv_format_version: u32,
+    schema_version: u32,
+    src_len: u64,
+    src_mtime_ns: u64,
+    doc: Document,
 }
 
 /// Cheap referential-integrity checks beyond serde's structural parse.
@@ -207,7 +343,7 @@ mod tests {
         // schematic's modport rendering builds on.
         let golden = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/picorv32_soc/golden/hierarchy.json");
-        let d = from_path(golden).unwrap();
+        let d = from_slice(&std::fs::read(golden).unwrap()).unwrap();
         let modports: Vec<_> = d
             .nodes()
             .iter()
@@ -238,6 +374,82 @@ mod tests {
         // it must still load cleanly under the uniqueness check.
         let golden = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/picorv32_soc/golden/hierarchy.json");
-        assert!(from_path(golden).is_ok());
+        assert!(from_slice(&std::fs::read(golden).unwrap()).is_ok());
+    }
+
+    // --- rkyv derived cache (#21) ---
+
+    /// A fresh, isolated scratch dir under the system temp dir for a cache test.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("svxprobe_ingest_{}_{}", std::process::id(), name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn cache_miss_writes_archive_then_hits() {
+        let dir = scratch("hit");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        let cache = dir.join(".schemview_data").join("hierarchy.json.rkyv");
+
+        // First load misses → parses JSON and writes the archive beside it.
+        let d1 = from_path(&model).unwrap();
+        assert!(cache.exists(), "cache archive written on miss");
+        assert_eq!(d1.nodes().len(), 2);
+        assert_eq!(d1.nodes_at_path("t.a"), &[1]);
+
+        // Second load: the archive is fresh → served from cache, identical design.
+        let d2 = from_path(&model).unwrap();
+        assert_eq!(d2.nodes().len(), 2);
+        assert_eq!(d2.nodes_at_path("t.a"), &[1]);
+    }
+
+    #[test]
+    fn corrupt_cache_falls_back_to_json() {
+        let dir = scratch("corrupt");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+
+        // Build a valid cache, then clobber it with garbage.
+        let cache = build_cache(&model).unwrap();
+        std::fs::write(&cache, b"not a valid rkyv archive at all").unwrap();
+
+        // Load still succeeds via the JSON — corruption is a miss, never an error.
+        let d = from_path(&model).unwrap();
+        assert_eq!(d.nodes().len(), 2);
+    }
+
+    #[test]
+    fn stale_source_forces_rebuild() {
+        let dir = scratch("stale");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        let d1 = from_path(&model).unwrap();
+        assert_eq!(d1.nodes().len(), 2);
+
+        // Rewrite the JSON with a different design of a different byte length; the
+        // src_len mismatch invalidates the cache, so the reload reflects the new
+        // content instead of the archived one.
+        let three = r#"{
+            "schema_version": 1,
+            "design": "t",
+            "files": [{"id": 0, "path": "t.sv"}],
+            "nodes": [
+                {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+                 "children":[1,2],"symbol_key":"t"},
+                {"id":1,"kind":"Var","name":"a","path":"t.a","parent":0,
+                 "children":[],"symbol_key":"t.a","type":"logic"},
+                {"id":2,"kind":"Var","name":"b","path":"t.b","parent":0,
+                 "children":[],"symbol_key":"t.b","type":"logic"}
+            ]
+        }"#;
+        assert_ne!(three.len(), DOC.len(), "new content differs in length");
+        std::fs::write(&model, three).unwrap();
+        let d2 = from_path(&model).unwrap();
+        assert_eq!(d2.nodes().len(), 3, "stale cache rebuilt from new JSON");
+        assert_eq!(d2.nodes_at_path("t.b"), &[2]);
     }
 }

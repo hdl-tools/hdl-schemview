@@ -55,13 +55,13 @@ SystemVerilog RTL
 | Crate | Package | Purpose |
 | --- | --- | --- |
 | `model` | `svxprobe-model` | Elaborated node model + indices (`path_index`, `src_index` interval tree, `wave_index`). The spine. |
-| `ingest` | `svxprobe-ingest` | JSON → `Design` deserialization + referential-integrity validation (ref ranges + within-scope name uniqueness, whitelisting the port/backing-net dual-node pattern). |
+| `ingest` | `svxprobe-ingest` | JSON → `Design` deserialization + referential-integrity validation (ref ranges + within-scope name uniqueness, whitelisting the port/backing-net dual-node pattern). **rkyv load cache (#21):** `from_path` gates on a `<model dir>/.schemview_data/<file>.rkyv` archive (header = `RKYV_FORMAT_VERSION` + `schema_version` + source `len`/`mtime_ns`); a fresh hit mmaps + bytecheck-validates + deserializes an owned `Document` (Option A, not zero-copy), skipping the JSON parse; any miss/stale/corrupt falls back to JSON + rewrites. `build_cache`/`svxprobe cache` pre-warm it. |
 | `wave` | `svxprobe-wave` | VCD/FST/GHW trace loader via `wellen` (lazy per-signal). |
 | `matcher` | `svxprobe-matcher` | Phase-1 canonical-path matcher. **≥95% hit-rate is a hard PR gate.** |
 | `xprobe` | `svxprobe-xprobe` | Cross-probe engine: source ↔ waveform ↔ schematic. |
 | `schematic` | `svxprobe-schematic` | Layout-agnostic graph extractor: `scope_graph()`, `expand()`, `cone()`. |
 | `gui` | `svxprobe-gui` | `Session` logic + serializable DTOs. No UI toolkit — CI-testable. |
-| `cli` | `svxprobe` | Dev/test binary. Subcommands: `ingest`, `wave`, `match`, `graph`, `probe`. |
+| `cli` | `svxprobe` | Dev/test binary. Subcommands: `ingest`, `cache` (pre-build the #21 rkyv load cache), `wave`, `match`, `graph`, `probe`. |
 | `scale-bench` | `scale-bench` | **Dev-only (#24, Phase 4).** Deterministic synthetic-model generator (`generate`/`build_design`/`synth_signals`, seeded SplitMix64) + criterion benches (`load`/`query`/`matcher`) + a `report` bin. Measures the eager load path, scoped queries, high-fanout `cone()`, and matcher at 665/100K/1M nodes. `publish = false`; 1M gated behind `SCALE_BENCH_FULL`. A **real-design basis** loads any elaborated model via `SCALE_BENCH_MODEL=<hierarchy.json>` (handles auto-derived by `derive_handles`) — e.g. `claude_verilog_test` (`soc_top`, ~5.7K nodes) as a realism anchor. |
 
 Tauri shell (`app/src-tauri/`, package `hdl-schemview-app`) is a thin `cdylib`/`lib`
@@ -210,7 +210,9 @@ Nightly — Verilator trace regeneration.
   area — benchmark → lazy/LoD audit → rkyv cache → redb/SQLite). The benchmark step
   landed first: the `scale-bench` crate (#24) measures the eager path at 665/100K/1M
   and already shows `scope_graph`/`expand`'s full-edge scan blowing up ~300× by 100K.
-  See `docs/ROADMAP.md`.
+  The **rkyv load cache (#21)** then landed (ADR 0003 Phase A / Option A): `ingest`
+  caches the parsed `Document` in `.schemview_data/` and mmaps it on repeat launches,
+  ~2.9× faster load at 100K (`load` bench `cache_hit` vs `from_slice`). See `docs/ROADMAP.md`.
 
 ## Commit messages
 
