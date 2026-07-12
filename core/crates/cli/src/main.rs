@@ -34,6 +34,8 @@ struct Cli {
 enum Cmd {
     /// Ingest a pyslang Node-model JSON file and summarize it.
     Ingest { model: String },
+    /// Pre-build the rkyv load cache (#21) beside a model JSON, without loading it.
+    Cache { model: String },
     /// Open a waveform (VCD/FST/GHW) and summarize its hierarchy.
     Wave { trace: String },
     /// Match a trace's signals to the elaborated design and report the hit-rate.
@@ -101,6 +103,7 @@ enum Cmd {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Ingest { model } => ingest(&model),
+        Cmd::Cache { model } => cache_cmd(&model),
         Cmd::Wave { trace } => wave(&trace),
         Cmd::Match {
             model,
@@ -140,6 +143,12 @@ fn main() -> Result<()> {
             src_root,
         }),
     }
+}
+
+fn cache_cmd(path: &str) -> Result<()> {
+    let cache = svxprobe_ingest::build_cache(path)?;
+    pln!("wrote cache: {}", cache.display());
+    Ok(())
 }
 
 fn ingest(path: &str) -> Result<()> {

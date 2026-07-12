@@ -32,6 +32,9 @@ result-*
 # Reference
 ref/
 
+# Derived rkyv load cache (#21, ADR 0003) — regenerated from hierarchy.json.
+.schemview_data/
+
 # AI cached
 .claude
 .gemini

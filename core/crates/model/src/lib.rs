@@ -20,7 +20,19 @@ use serde::{Deserialize, Serialize};
 pub type NodeId = u32;
 
 /// Kinds of spine node. Mirrors the schema enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum NodeKind {
     Instance,
     Net,
@@ -50,7 +62,18 @@ pub enum NodeKind {
 }
 
 /// A point in a source file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Location {
     pub line: u32,
     pub col: u32,
@@ -58,7 +81,18 @@ pub struct Location {
 }
 
 /// A half-open source range, with `file` indexing [`Document::files`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Range {
     pub file: u32,
     pub start: Location,
@@ -66,14 +100,26 @@ pub struct Range {
 }
 
 /// One source file referenced by ranges.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct FileEntry {
     pub id: u32,
     pub path: String,
 }
 
 /// A node in the elaborated hierarchy.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct Node {
     pub id: NodeId,
     pub kind: NodeKind,
@@ -125,14 +171,26 @@ pub struct Node {
 
 /// One member of a modport view: the member signal's name and its direction
 /// through that view.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ModportMember {
     pub name: String,
     pub dir: Dir,
 }
 
 /// Provenance of a serialization.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Default, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct Generator {
     #[serde(default)]
     pub tool: String,
@@ -141,7 +199,18 @@ pub struct Generator {
 }
 
 /// Connection direction, from the module port's perspective.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Dir {
     In,
@@ -151,7 +220,17 @@ pub enum Dir {
 
 /// A port-connection edge: a module `port` wired to an external `endpoint`
 /// (net / var / port / interface instance).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Edge {
     pub id: u32,
     pub port: NodeId,
@@ -165,7 +244,9 @@ pub struct Edge {
 }
 
 /// The deserialized Node-model document (matches `model.schema.json`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct Document {
     pub schema_version: u32,
     pub design: String,
@@ -183,14 +264,18 @@ pub struct Document {
 }
 
 /// An enum type's bit width and its value→name members.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct EnumDef {
     pub width: u32,
     pub members: Vec<EnumMember>,
 }
 
 /// One enum member: its declared name and encoded integer value.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct EnumMember {
     pub name: String,
     pub value: u64,

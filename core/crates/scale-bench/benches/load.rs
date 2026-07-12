@@ -48,6 +48,19 @@ fn bench_load(c: &mut Criterion) {
                 BatchSize::SmallInput,
             );
         });
+
+        // cache_hit: write the JSON to a temp file, pre-build the rkyv archive,
+        // then measure the warm load path (mmap → deserialize → index build) that
+        // replaces `from_slice`'s JSON parse on repeat launches (#21).
+        let tmp = std::env::temp_dir().join(format!("scale_bench_cache_{name}"));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let model_path = tmp.join("hierarchy.json");
+        std::fs::write(&model_path, &json).unwrap();
+        svxprobe_ingest::build_cache(&model_path).unwrap();
+        g.bench_with_input(BenchmarkId::new("cache_hit", name), &model_path, |b, p| {
+            b.iter(|| svxprobe_ingest::from_path(black_box(p)).unwrap());
+        });
     }
 
     if let Ok(bytes) = std::fs::read(golden_path()) {

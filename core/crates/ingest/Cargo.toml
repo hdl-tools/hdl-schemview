@@ -9,3 +9,5 @@ repository.workspace = true
 svxprobe-model = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+rkyv = { workspace = true }
+memmap2 = { workspace = true }
