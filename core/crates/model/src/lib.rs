@@ -59,6 +59,12 @@ pub enum NodeKind {
     Interface,
     /// A named view (`modport`) of an interface bundle.
     Modport,
+    /// A memory array (`logic [W-1:0] ram [0:N-1]`) — one modelled construct
+    /// (the unpacked-dimension `Var`) rendered as a MEMORY glyph rather than a
+    /// wire. Distinct from `Var` so the drilled logic view can draw an array
+    /// with addr/din/dout/read/write pins. Process-granularity per ADR 0004 —
+    /// the box maps to the array's `def_range`, so cross-probe stays a lookup.
+    Memory,
 }
 
 /// A point in a source file.
@@ -163,6 +169,18 @@ pub struct Node {
     /// gating condition) — a model fact from the harness (#59).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable: Option<String>,
+    /// Word count of a `Memory` array (the unpacked dimension size, e.g. `512`
+    /// for `ram [0:511]`) — a structural fact from slang, used to label the
+    /// MEMORY glyph. `None` on non-memory nodes (#112).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_depth: Option<u32>,
+    /// `$readmemh`/`$readmemb` initializer argument for a `Memory` array (the
+    /// source-file expression text, e.g. `INIT_FILE`) — presence drives the
+    /// INIT marker on the glyph. A model fact from the harness's `initial`-block
+    /// scan, not a logic node (ADR 0004 keeps `initial` non-logic). `None` when
+    /// the memory has no `$readmem*` initializer (#112).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_source: Option<String>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -218,6 +236,32 @@ pub enum Dir {
     Inout,
 }
 
+/// Role of a memory-access edge (#112): which port of a `Memory` glyph the edge
+/// feeds. Set by the harness's bounded array-access classification (`ram[idx]`),
+/// so the schematic can draw addr/din/dout pins wired to the real signals rather
+/// than string-guessing. `None` on ordinary (non-memory-access) edges.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MemPort {
+    /// The array-index expression driving the memory address.
+    Addr,
+    /// The value written into the memory (`ram[idx] <= din`).
+    Din,
+    /// The value read out of the memory (`x <= ram[idx]`).
+    Dout,
+}
+
 /// A port-connection edge: a module `port` wired to an external `endpoint`
 /// (net / var / port / interface instance).
 #[derive(
@@ -241,6 +285,11 @@ pub struct Edge {
     /// connection. Emitted by the elaboration harness; never inferred.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub select: Option<String>,
+    /// Memory-access role of this edge (#112): set when the edge wires a signal
+    /// to a `Memory` node's address/data port, so the schematic renders the
+    /// pin's role (addr/din/dout). `None` for ordinary connectivity edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_port: Option<MemPort>,
 }
 
 /// The deserialized Node-model document (matches `model.schema.json`).
@@ -473,6 +522,8 @@ mod tests {
             members: None,
             reset: None,
             enable: None,
+            mem_depth: None,
+            init_source: None,
             drivers: vec![],
             loads: vec![],
         }
@@ -542,6 +593,7 @@ mod tests {
                 endpoint: 2,
                 dir: Dir::Out,
                 select: None,
+                mem_port: None,
             }],
             enums: HashMap::new(),
         };

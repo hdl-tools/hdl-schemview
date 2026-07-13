@@ -153,6 +153,8 @@ impl Builder {
             members: None,
             reset: None,
             enable: None,
+            mem_depth: None,
+            init_source: None,
             drivers: Vec::new(),
             loads: Vec::new(),
         });
@@ -170,6 +172,7 @@ impl Builder {
             endpoint,
             dir,
             select: None,
+            mem_port: None,
         });
     }
 }

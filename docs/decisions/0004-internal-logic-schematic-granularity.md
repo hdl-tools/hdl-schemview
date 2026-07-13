@@ -66,3 +66,26 @@ Gate/operator-level decomposition is **out of scope**.
   graphs); multiply-driven signals show full fan-in.
 - A future gate-level mode, if ever wanted, would be an *additional* projection
   over the same model spine, not a replacement.
+
+## Amendment — 2026-07-12 (#112, memory glyph)
+
+Word-level **memory** rendering (#112) is added *within* this ADR's
+process-level granularity, not against it:
+
+- **`NodeKind::Memory`** is an additive kind (like `Comb`/`FF`; `schema_version`
+  stays `1`) for a memory array (`logic [W-1:0] ram [0:N-1]`). The glyph maps to
+  the **array `Var`'s own `def_range`**, so it is one modelled construct with a
+  `file:line` — the single-source-of-truth invariant is preserved, exactly as for
+  a process box. This is *not* the gate/operator decomposition rejected above.
+- The **INIT marker** for `initial $readmemh` is carried as **metadata on the
+  memory node** (`Node.init_source`), *not* as a logic node — `initial` stays
+  non-logic per the Decision. The harness scans the `initial` block only to
+  attribute the initializer to the array it targets.
+- Memory pins (addr/din/dout/read/write) are derived from the **model edges**
+  between the memory and the process(es) that access it (bounded array-access
+  classification), not from expression-operator extraction.
+
+**Still out of scope (deferred to #157 + a future ADR):** gate/mux/adder
+primitives extracted from process expressions — the "AND/OR/MUX/adder"
+decomposition this ADR rejects. That remains a separate *optional* gate-level
+projection over the same spine, never the default drilled view.
