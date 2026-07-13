@@ -30,6 +30,7 @@ import type {
 } from "./types";
 import { scopeFrames } from "./tree";
 import { formatLogEntry, type LogLevel } from "./log";
+import { lineRangeForSpan } from "./source";
 import {
   defaultDisplayUnit,
   displayScale,
@@ -1448,7 +1449,12 @@ async function showInSource(resp: ProbeResponse) {
   // its own catch, so an unhandled `source_text` rejection otherwise vanishes.
   if (resp.source) {
     try {
-      await renderSource(resp.source.file, resp.source.line);
+      await renderSource(
+        resp.source.file,
+        resp.source.line,
+        resp.source.offset,
+        resp.source.end_offset,
+      );
     } catch (e) {
       log("warn", `source unavailable: ${e}`);
     }
@@ -1456,7 +1462,12 @@ async function showInSource(resp: ProbeResponse) {
   renderPicker(resp);
 }
 
-async function renderSource(file: number, line: number) {
+async function renderSource(
+  file: number,
+  line: number,
+  startOffset?: number,
+  endOffset?: number,
+) {
   let lines = state.source.get(file);
   if (!lines) {
     const text = await api.sourceText(file);
@@ -1476,11 +1487,20 @@ async function renderSource(file: number, line: number) {
   }
   sourceCtx = { file, lineStarts };
 
+  // Highlight the construct's whole span (#158): the probe carries the full
+  // byte range (offset..end_offset) of the def, so light every line it covers,
+  // not just its header. Falls back to the single start line when no span is
+  // given. lineRangeForSpan yields inclusive 0-based [startLine, endLine].
+  const [hlStart, hlEnd] =
+    startOffset !== undefined && endOffset !== undefined
+      ? lineRangeForSpan(lineStarts, startOffset, endOffset)
+      : [line - 1, line - 1];
+
   const host = $("source");
   host.innerHTML = "";
   lines.forEach((text, i) => {
     const div = document.createElement("div");
-    div.className = "line" + (i + 1 === line ? " hl" : "");
+    div.className = "line" + (i >= hlStart && i <= hlEnd ? " hl" : "");
     div.dataset.lineIndex = String(i);
     div.innerHTML = `<span class="ln">${i + 1}</span>`;
     div.appendChild(document.createTextNode(text));
