@@ -170,6 +170,10 @@ class Elaborator:
         # (logic node id, symbol, role) for process-level logic-edge extraction —
         # inferred registers (`ff`) and combinational blocks (`comb`).
         self.logic_blocks: list[tuple[int, Any, str]] = []
+        # `initial` blocks collected for the $readmemh INIT-marker pass (#112).
+        # `initial` stays non-logic (ADR 0004); we only scan it to attribute a
+        # `$readmem*` initializer to the memory array it targets.
+        self.init_blocks: list[Any] = []
         # Source locations slang's analysis flags as inferring a latch (set in build).
         self._inferred_latch_locs: set[tuple[Any, int]] = set()
 
@@ -259,7 +263,7 @@ class Elaborator:
             node["inst_range"] = self._range_from_syntax(sym)
         else:
             node["def_range"] = self._range_from_syntax(sym)
-            if kind in ("Net", "Port", "Var"):
+            if kind in ("Net", "Port", "Var", "Memory"):
                 t = getattr(sym, "type", None)
                 if t is not None:
                     node["type"] = str(t)
@@ -427,6 +431,26 @@ class Elaborator:
             )
         except Exception:
             return False
+
+    @staticmethod
+    def _memory_depth(sym: Any) -> Optional[int]:
+        """Word count of a memory array (`logic [W-1:0] ram [0:N-1]` -> N), or
+        None if `sym` is not an unpacked array. Structural, from slang's type
+        (`type.isUnpackedArray` + the unpacked `range.width`) — never parsed from
+        the type string (#112)."""
+        t = getattr(sym, "type", None)
+        if t is None or not getattr(t, "isUnpackedArray", False):
+            return None
+        rng = getattr(t, "range", None)
+        w = getattr(rng, "width", None) if rng is not None else None
+        return int(w) if isinstance(w, int) else None
+
+    @staticmethod
+    def _is_initial(sym: Any) -> bool:
+        return (
+            _kind_name(sym) == "ProceduralBlock"
+            and str(getattr(sym, "procedureKind", "")).split(".")[-1] == "Initial"
+        )
 
     def _logic_role(self, sym: Any) -> Optional[str]:
         """Classify a process / continuous assign as a logic spine node:
@@ -605,6 +629,79 @@ class Elaborator:
             sel.pop(b, None)
         return sel
 
+    def _mem_accesses(self, node: Any) -> list[tuple[int, set[str]]]:
+        """Every memory-array access in a subtree: for each
+        ElementSelect/RangeSelect whose base resolves to a ``Memory`` node, that
+        memory's id paired with the value refs of its index expression (the
+        address). Bounded to array indexing — not general operator walking (#112)."""
+        out: list[tuple[int, set[str]]] = []
+
+        def cb(n: Any) -> None:
+            k = _kind_name(n)
+            is_elem = "ElementSelect" in k
+            is_range = "RangeSelect" in k
+            if not (is_elem or is_range):
+                return
+            base = self._base_path(n)
+            if not base:
+                return
+            mid = self._pick_node(base, ("Memory",))
+            if mid is None or self.nodes[mid]["kind"] != "Memory":
+                return
+            if is_elem:
+                addr = self._value_refs(getattr(n, "selector", None))
+            else:
+                addr = self._value_refs(getattr(n, "left", None)) | self._value_refs(
+                    getattr(n, "right", None)
+                )
+            out.append((mid, addr))
+
+        try:
+            node.visit(cb)
+        except Exception:
+            pass
+        return out
+
+    def _memory_edges(self, root: Any, seen: set) -> None:
+        """Wire each memory accessed in ``root`` to its real addr/din/dout signals
+        with typed pins (``mem_port``), so the MEMORY glyph connects to the actual
+        scope signals (e.g. ``word_idx`` / ``wdata`` / ``rdata``) rather than the
+        process. ``addr``/``din`` are memory inputs (``in``), ``dout`` a memory
+        output (``out``). Write/read *enable* pins are deferred (#157) (#112)."""
+        assigns: list[Any] = []
+
+        def cb(n: Any) -> None:
+            if "Assignment" in _kind_name(n):
+                assigns.append(n)
+
+        try:
+            root.visit(cb)
+        except Exception:
+            pass
+
+        def emit(mem_id: int, paths: set[str], direction: str, mem_port: str) -> None:
+            for p in sorted(paths):
+                nid = self._pick_node(p, ("Net", "Var", "Port"))
+                # Only real scalar/bus signals — never another memory (no mem↔mem).
+                if (
+                    nid is not None
+                    and nid != mem_id
+                    and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
+                ):
+                    seen.add((mem_id, nid, direction, None, mem_port))
+
+        for a in assigns:
+            left = getattr(a, "left", None)
+            right = getattr(a, "right", None)
+            # Write `ram[idx] <= rhs`: index -> addr, RHS -> din (both memory ins).
+            for mem_id, addr in self._mem_accesses(left):
+                emit(mem_id, addr, "in", "addr")
+                emit(mem_id, self._value_refs(right), "in", "din")
+            # Read `lhs <= ram[idx]`: index -> addr, LHS target -> dout (memory out).
+            for mem_id, addr in self._mem_accesses(right):
+                emit(mem_id, addr, "in", "addr")
+                emit(mem_id, self._lvalue_bases(left), "out", "dout")
+
     def _logic_edges(self, logic_id: int, sym: Any, role: str, seen: set) -> None:
         """Wire a logic block: data (and, for an FF, clock) signals in, assigned
         signals out. ``data = reads − assigned − clock`` ⇒ a block never reads its
@@ -641,19 +738,25 @@ class Elaborator:
             ids = []
             for p in sorted(paths):
                 nid = self._pick_node(p, ("Net", "Var", "Port"))
-                # Only wire real signals — drop genvars/params/enum constants.
+                # Only wire real signals — drop genvars/params/enum constants, and
+                # memories: those are wired to their addr/din/dout signals with
+                # typed pins instead (#112, `_memory_edges`), not to the process.
                 if (
                     nid is not None
                     and nid != logic_id
                     and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
                 ):
-                    seen.add((logic_id, nid, direction, selects.get(p)))
+                    seen.add((logic_id, nid, direction, selects.get(p), None))
                     ids.append(nid)
             return ids
 
         clk_ids = wire(clock, "in")
         wire(data, "in")
         wire(assigned, "out")
+        # Wire any memory this block accesses to its real addr/din/dout signals
+        # (word_idx / wdata / rdata), with typed pins — replaces the plain
+        # process↔memory edge (#112). Read/write *enable* pins stay deferred (#157).
+        self._memory_edges(root, seen)
         # Tell the renderer which pin is the clock (draws the FF clock notch).
         # With several timing signals (async reset) the reset is the event whose
         # signal the body *also reads* (#59) — a structural fact, never a name
@@ -704,10 +807,25 @@ class Elaborator:
             self.logic_blocks.append((logic_id, sym, role))
             return
 
+        # `initial` stays non-logic (ADR 0004); collect it for the $readmemh
+        # INIT-marker pass, then keep descending as before (#112).
+        if self._is_initial(sym):
+            self.init_blocks.append(sym)
+
         # Skip the auto-generated internal variable backing a port (the Port node
         # already represents that signal), to avoid duplicate same-path nodes.
         if kind == "Var" and getattr(sym, "isCompilerGenerated", False):
             return
+
+        # A variable with an unpacked dimension (`logic [W-1:0] ram [0:N-1]`) is a
+        # memory array — retag so the drilled logic view draws a MEMORY glyph
+        # instead of a wire. Process-granularity per ADR 0004: the box maps to the
+        # array's own `def_range`, so cross-probe stays a lookup (#112).
+        mem_depth: Optional[int] = None
+        if kind == "Var":
+            mem_depth = self._memory_depth(sym)
+            if mem_depth is not None:
+                kind = "Memory"
 
         my_id = parent
         if kind is not None:
@@ -716,6 +834,8 @@ class Elaborator:
             if kind == "Instance" and _is_interface_instance(sym):
                 kind = "Interface"
             my_id = self._add(sym, kind, parent)
+            if kind == "Memory" and mem_depth is not None:
+                self.nodes[my_id]["mem_depth"] = mem_depth
             # Both module and interface instances carry port connections (an
             # interface has its own ports, e.g. `.clk`), so collect both for edge
             # extraction. The slang symbol kind is `Instance` for each.
@@ -811,11 +931,12 @@ class Elaborator:
             self._by_path.setdefault(n["path"], []).append((n["id"], n["kind"]))
 
         dir_map = {"In": "in", "Out": "out", "InOut": "inout"}
-        # Collect as a set keyed by (port, endpoint, dir, select), then sort, so
-        # the output is canonical regardless of pyslang container iteration order.
-        # `select` is the resolved bit-select (e.g. `[0]`) or None for the whole
-        # signal.
-        seen_edges: set[tuple[int, int, str, Optional[str]]] = set()
+        # Collect as a set keyed by (port, endpoint, dir, select, mem_port), then
+        # sort, so the output is canonical regardless of pyslang container
+        # iteration order. `select` is the resolved bit-select (e.g. `[0]`) or None
+        # for the whole signal; `mem_port` tags a memory-array pin ("addr"/"din"/
+        # "dout", #112) or None for an ordinary edge.
+        seen_edges: set[tuple[int, int, str, Optional[str], Optional[str]]] = set()
         for inst_id, sym in self.instances:
             conns = getattr(sym, "portConnections", None)
             if conns is None:
@@ -838,7 +959,7 @@ class Elaborator:
                 for rp in refs:
                     end_id = self._pick_node(rp, ("Net", "Var", "Port", "Instance"))
                     if end_id is not None and end_id != port_id:
-                        seen_edges.add((port_id, end_id, direction, selects.get(rp)))
+                        seen_edges.add((port_id, end_id, direction, selects.get(rp), None))
                 # Input tied to a literal (no net): record the constant on the
                 # port so the schematic can show its driver (e.g. 32'd0).
                 if not refs and port_id != inst_id:
@@ -852,19 +973,59 @@ class Elaborator:
         for pid, mpath, d in self.modport_pins:
             end_id = self._pick_node(mpath, ("Net", "Var", "Port"))
             if end_id is not None and end_id != pid:
-                seen_edges.add((pid, end_id, d, None))
+                seen_edges.add((pid, end_id, d, None, None))
 
         for logic_id, logic_sym, role in self.logic_blocks:
             self._logic_edges(logic_id, logic_sym, role, seen_edges)
 
         edges: list[dict[str, Any]] = []
-        ordered = sorted(seen_edges, key=lambda t: (t[0], t[1], t[2], t[3] or ""))
-        for i, (p, e, d, s) in enumerate(ordered):
+        ordered = sorted(
+            seen_edges, key=lambda t: (t[0], t[1], t[2], t[3] or "", t[4] or "")
+        )
+        for i, (p, e, d, s, mp) in enumerate(ordered):
             edge: dict[str, Any] = {"id": i, "port": p, "endpoint": e, "dir": d}
             if s is not None:
                 edge["select"] = s
+            if mp is not None:
+                edge["mem_port"] = mp
             edges.append(edge)
         return edges
+
+    def _apply_inits(self) -> None:
+        """Attribute each `initial $readmemh/$readmemb(FILE, ram)` to its target
+        memory as `init_source` metadata (the INIT marker). Runs after `_edges`
+        so `_by_path` resolves the memory node. `initial` is never a logic node
+        (ADR 0004) — this only annotates the array (#112)."""
+        for ib in self.init_blocks:
+            calls: list[Any] = []
+
+            def collect(n: Any) -> None:
+                if "Call" in _kind_name(n) and getattr(n, "isSystemCall", False):
+                    if getattr(n, "subroutineName", "") in ("$readmemh", "$readmemb"):
+                        calls.append(n)
+
+            try:
+                ib.visit(collect)
+            except Exception:
+                continue
+            for call in calls:
+                args = list(getattr(call, "arguments", None) or [])
+                if len(args) < 2:
+                    continue
+                # slang models the memory (output) arg as an Assignment to it.
+                mem_arg = args[1]
+                left = getattr(mem_arg, "left", mem_arg)
+                targets = self._lvalue_bases(left)
+                # The source-file arg: a parameter/net name, else a string literal.
+                src_sym = getattr(args[0], "symbol", None)
+                source = getattr(src_sym, "name", None)
+                if not source:
+                    c = getattr(args[0], "constant", None)
+                    source = str(c) if c is not None and not getattr(c, "bad", False) else "$readmem"
+                for tp in targets:
+                    nid = self._pick_node(tp, ("Memory", "Var"))
+                    if nid is not None and self.nodes[nid]["kind"] == "Memory":
+                        self.nodes[nid]["init_source"] = source
 
     def build(self) -> dict[str, Any]:
         root = self.comp.getRoot()
@@ -874,6 +1035,7 @@ class Elaborator:
         for top in root.topInstances:
             self._walk(top, None)
         edges = self._edges()
+        self._apply_inits()
         return {
             "schema_version": SCHEMA_VERSION,
             "design": root.topInstances[0].name if root.topInstances else "",

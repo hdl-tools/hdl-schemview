@@ -165,11 +165,14 @@ pub fn run_match(design: &mut Design, signals: &[WaveVar], opts: &MatchOptions) 
     report
 }
 
-/// Pick the best *signal* node at a path: prefer Var > Net > Port. Returns
-/// `None` if the path has no signal node (e.g. only a Param/Instance/GenBlock).
+/// Pick the best *signal* node at a path: prefer Var/Memory > Net > Port. Returns
+/// `None` if the path has no signal node (e.g. only a Param/Instance/GenBlock). A
+/// `Memory` (#112) is a signal-bearing array whose per-element trace signals
+/// (`ram.[N]`) match to the array node exactly as they did when it was a `Var`,
+/// so it ranks alongside `Var` — the re-kind must not drop it from the matcher.
 fn pick_node(design: &Design, path: &str) -> Option<NodeId> {
     let rank = |id: NodeId| match design.node(id).map(|n| n.kind) {
-        Some(NodeKind::Var) => 0,
+        Some(NodeKind::Var) | Some(NodeKind::Memory) => 0,
         Some(NodeKind::Net) => 1,
         Some(NodeKind::Port) => 2,
         _ => 99,
