@@ -10,6 +10,8 @@ import {
   FF_H,
   FF_TOP,
   FF_CLK_ZONE,
+  MEM_W,
+  MEM_H,
   trunkGroups,
   gatherBar,
   wireLabelPlacement,
@@ -209,6 +211,65 @@ describe("toElk", () => {
     expect(eastPorts[0].x).toBe(16);
     // Width is unaffected by the (unrendered) signal-name length.
     expect(toElk(make("cached_insn_opcode_wstrb")).children[0].width).toBe(16);
+  });
+});
+
+describe("memory child (#112)", () => {
+  const memOf = (ports: SchPort[], extra: Partial<SchematicGraph["nodes"][0]> = {}) =>
+    toElk({
+      root: "s",
+      nodes: [
+        {
+          id: 1,
+          kind: "Memory",
+          label: "ram",
+          path: "s.ram",
+          expandable: false,
+          memDepth: 512,
+          ports,
+          ...extra,
+        },
+      ],
+      edges: [],
+    }).children[0];
+
+  const addr: SchPort = { id: 10, name: "word_idx", side: "west", role: "addr" };
+  const din: SchPort = { id: 11, name: "wdata", side: "west", role: "din", width: "[31:0]" };
+  const dout: SchPort = { id: 12, name: "rdata", side: "east", role: "dout", width: "[31:0]" };
+
+  it("puts addr/din on the west wall and dout on the east", () => {
+    const c = memOf([addr, din, dout]);
+    expect(c.id).toBe(nodeId(1));
+    expect(c.labels[0].text).toBe("ram");
+    expect(c.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    const west = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "WEST");
+    const east = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "EAST");
+    expect(west.map((p) => p.id)).toEqual([portId(10), portId(11)]);
+    expect(east.map((p) => p.id)).toEqual([portId(12)]);
+    for (const p of west) expect(p.x).toBe(0);
+    expect(east[0].x).toBe(c.width);
+  });
+
+  it("never shrinks below the memory floor size", () => {
+    // A single short-labelled pin each side stays at the floor; real role/width
+    // labels only grow it.
+    const tiny = memOf([{ id: 10, name: "a", side: "west", role: "addr" }], {});
+    expect(tiny.width).toBeGreaterThanOrEqual(MEM_W);
+    expect(tiny.height).toBeGreaterThanOrEqual(MEM_H);
+    const c = memOf([addr, din, dout]);
+    expect(c.width).toBeGreaterThanOrEqual(MEM_W);
+    // Two west rows grow the box past the single-row floor.
+    expect(c.height).toBeGreaterThan(MEM_H);
+  });
+
+  it("grows height with more pin rows", () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      id: 20 + i,
+      name: `a${i}`,
+      side: "west" as const,
+      role: "addr" as const,
+    }));
+    expect(memOf([...many, dout]).height).toBeGreaterThan(MEM_H);
   });
 });
 

@@ -218,6 +218,68 @@ function assignChild(n: SchNode): ElkChild {
   };
 }
 
+// --- memory array (#112) ---------------------------------------------------
+export const MEM_W = 84; // default memory-array box width
+export const MEM_H = 56; // default memory-array box height
+export const MEM_LABEL_PAD = 11; // gap from the wall to a pin (role) label
+const MEM_TOP = 16; // top band reserved for the name + depth sublabel
+const MEM_ROW = 18; // vertical pitch between pin rows
+const MEM_BOT = 10; // bottom inset below the last pin row
+
+// A memory array: addr/din inputs down the west wall, dout output(s) on the east
+// wall, sized to fit the pin (role) labels and the title/depth band. The array
+// motif (stacked back-cards, word-row dividers, INIT badge) is decoration drawn
+// by the renderer; layout only needs the sized box + walled ports. FIXED_POS so
+// the renderer's glyphs line up with the ports.
+function memoryChild(n: SchNode): ElkChild {
+  const west = n.ports.filter((p) => p.side !== "east");
+  const east = n.ports.filter((p) => p.side === "east");
+  // A memory pin is labelled by its role (addr/din/dout), not the signal name —
+  // the wire label already names the net, and the role reads as a RAM port.
+  const roleLen = (p: SchPort) => (p.role ?? p.name).length + (p.width ? p.width.length + 1 : 0);
+  const wMax = west.reduce((m, p) => Math.max(m, roleLen(p)), 0);
+  const eMax = east.reduce((m, p) => Math.max(m, roleLen(p)), 0);
+  const rows = Math.max(west.length, east.length, 1);
+  const titleLen = Math.max(n.label.length, n.memDepth ? String(n.memDepth).length + 4 : 0);
+  const W = Math.max(
+    MEM_W,
+    titleLen * TITLE_CH + 20,
+    MEM_LABEL_PAD * 2 + (wMax + eMax) * PIN_CH + 20,
+  );
+  const H = Math.max(MEM_H, MEM_TOP + rows * MEM_ROW + MEM_BOT);
+  const span = H - MEM_TOP - MEM_BOT;
+  const sideY = (i: number, len: number) => (len > 1 ? MEM_TOP + (span * i) / (len - 1) : H / 2);
+  const ports: ElkPort[] = [];
+  west.forEach((p, i) =>
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: 0,
+      y: sideY(i, west.length),
+      layoutOptions: { "elk.port.side": "WEST" },
+    }),
+  );
+  east.forEach((p, i) =>
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: W,
+      y: sideY(i, east.length),
+      layoutOptions: { "elk.port.side": "EAST" },
+    }),
+  );
+  return {
+    id: nodeId(n.id),
+    width: W,
+    height: H,
+    labels: [{ text: n.label }],
+    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    ports,
+  };
+}
+
 /// Pure mapping: SchematicGraph -> ELK graph (no geometry yet).
 ///
 /// Ports are given zero width/height on purpose: with a sized port ELK anchors
@@ -243,6 +305,8 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     if (n.kind === "FF" || n.kind === "Latch") return storageChild(n);
     // Continuous assign: a stadium capsule (inputs west, output east).
     if (n.kind === "Assign") return assignChild(n);
+    // Memory array (#112): an array box, addr/din west, dout east.
+    if (n.kind === "Memory") return memoryChild(n);
     // Boundary I/O pin: a small node sized to its label, with its single port
     // already sided toward the design.
     if (n.kind === "Port") {

@@ -10,6 +10,7 @@ import {
   IFACE_CAP,
   isLogicKind,
   layout,
+  MEM_LABEL_PAD,
   nodeId,
   portId,
   trunkGroups,
@@ -511,6 +512,11 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     // Continuous assign: a small anonymous square function node (#135).
     if (node?.kind === "Assign") {
       renderAssign(root, c, id);
+      continue;
+    }
+    // Memory array (#112): an array-stack glyph with addr/din/dout pins.
+    if (node?.kind === "Memory") {
+      renderMemory(root, c, node, id);
       continue;
     }
     // SystemVerilog interface: a modport-qualified port draws as a square
@@ -1062,6 +1068,152 @@ function renderAssign(parent: SVGElement, c: any, id: number) {
   tip.textContent = "assign";
   rect.appendChild(tip);
   g.appendChild(rect);
+  parent.appendChild(g);
+}
+
+// Element bit-width of a memory from any of its data pins (`[31:0]` -> 32), for
+// the "depth×width" sublabel. `null` if no pin carries a width.
+function memWidth(node: SchNode): number | null {
+  for (const p of node.ports) {
+    const m = p.width?.match(/\[(\d+):(\d+)\]/);
+    if (m) return Math.abs(Number(m[1]) - Number(m[2])) + 1;
+  }
+  return null;
+}
+
+// A memory array (#112): an array-stack box — offset back-cards and word-row
+// dividers so it reads as a RAM, not a plain box or an FF — with addr/din inputs
+// labelled down the west wall, dout output(s) on the east, a depth×width
+// sublabel, and an INIT badge (tooltip = the $readmemh source) when the array is
+// initialized. Each pin cross-probes its own signal path; the box its node.
+function renderMemory(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+  const selCls = state.selected === id ? " sel" : "";
+
+  // Stacked back-cards (offset up-right) behind the body, so the box reads as a
+  // stack of words — the array motif. Decorative: no pointer events.
+  for (const off of [6, 3]) {
+    const back = document.createElementNS(SVGNS, "rect");
+    back.setAttribute("class", "box memory mem-stack" + selCls);
+    back.setAttribute("x", String(off));
+    back.setAttribute("y", String(-off));
+    back.setAttribute("width", String(W));
+    back.setAttribute("height", String(H));
+    back.setAttribute("rx", "3");
+    back.style.pointerEvents = "none";
+    g.appendChild(back);
+  }
+
+  const rect = document.createElementNS(SVGNS, "rect");
+  rect.setAttribute("class", "box memory" + selCls);
+  rect.setAttribute("width", String(W));
+  rect.setAttribute("height", String(H));
+  rect.setAttribute("rx", "3");
+  rect.dataset.nodeId = String(id);
+  rect.onclick = () => selectNode(id);
+  rect.oncontextmenu = (e) => {
+    e.preventDefault();
+    crossProbe(id, e);
+  };
+  g.appendChild(rect);
+
+  // Word-row dividers in the lower band, reinforcing the array look.
+  for (const fy of [0.62, 0.79]) {
+    const line = document.createElementNS(SVGNS, "line");
+    line.setAttribute("class", "mem-row");
+    line.setAttribute("x1", "0");
+    line.setAttribute("x2", String(W));
+    line.setAttribute("y1", String(Math.round(H * fy)));
+    line.setAttribute("y2", String(Math.round(H * fy)));
+    line.style.pointerEvents = "none";
+    g.appendChild(line);
+  }
+
+  // Title: array name, then a depth×width (or [0:N]) sublabel.
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "box-label" + selCls);
+  t.setAttribute("x", String(W / 2));
+  t.setAttribute("y", "12");
+  t.setAttribute("text-anchor", "middle");
+  t.style.pointerEvents = "none";
+  t.textContent = node.label;
+  g.appendChild(t);
+
+  if (node.memDepth != null) {
+    const bits = memWidth(node);
+    const s = document.createElementNS(SVGNS, "text");
+    s.setAttribute("class", "box-sublabel" + selCls);
+    s.setAttribute("x", String(W / 2));
+    s.setAttribute("y", "24");
+    s.setAttribute("text-anchor", "middle");
+    s.style.pointerEvents = "none";
+    s.textContent = bits ? `${node.memDepth}×${bits}` : `[0:${node.memDepth - 1}]`;
+    g.appendChild(s);
+  }
+
+  // INIT badge (top-right) when the array is $readmemh-initialized.
+  if (node.initSource) {
+    const badge = document.createElementNS(SVGNS, "g");
+    badge.style.pointerEvents = "none";
+    const br = document.createElementNS(SVGNS, "rect");
+    br.setAttribute("class", "mem-init");
+    br.setAttribute("x", String(W - 30));
+    br.setAttribute("y", "-8");
+    br.setAttribute("width", "28");
+    br.setAttribute("height", "12");
+    br.setAttribute("rx", "2");
+    badge.appendChild(br);
+    const bt = document.createElementNS(SVGNS, "text");
+    bt.setAttribute("class", "mem-init-label");
+    bt.setAttribute("x", String(W - 16));
+    bt.setAttribute("y", "1");
+    bt.setAttribute("text-anchor", "middle");
+    bt.textContent = "INIT";
+    badge.appendChild(bt);
+    const tip = document.createElementNS(SVGNS, "title");
+    tip.textContent = `$readmemh(${node.initSource})`;
+    badge.appendChild(tip);
+    g.appendChild(badge);
+  }
+
+  // Pins: addr/din inputs (west) and dout output(s) (east), labelled by role.
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const pid = Number(String(p.id).slice(1));
+    const sp = portById.get(pid);
+    if (!sp) continue;
+    const py = p.y ?? 0;
+    const east = sp.side === "east";
+    const probePin = (e: MouseEvent) => {
+      e.preventDefault();
+      if (sp.path) crossProbePath(sp.path, e);
+      else crossProbe(id, e);
+    };
+    const wirePin = (el: SVGElement) => {
+      el.dataset.nodeId = String(pid);
+      el.onclick = () => selectNode(pid);
+      el.oncontextmenu = probePin;
+      g.appendChild(el);
+    };
+    const tri = document.createElementNS(SVGNS, "path");
+    tri.setAttribute("class", "pin " + (east ? "pin-out" : "pin-in"));
+    tri.setAttribute(
+      "d",
+      east ? `M${W},${py - 4} L${W},${py + 4} L${W - 8},${py} Z` : `M0,${py - 4} L0,${py + 4} L8,${py} Z`,
+    );
+    wirePin(tri);
+    const lab = document.createElementNS(SVGNS, "text");
+    lab.setAttribute("class", "pin-label");
+    lab.setAttribute("x", String(east ? W - MEM_LABEL_PAD : MEM_LABEL_PAD));
+    lab.setAttribute("y", String(py + 3));
+    lab.setAttribute("text-anchor", east ? "end" : "start");
+    lab.textContent = sp.role ?? sp.name;
+    wirePin(lab);
+  }
   parent.appendChild(g);
 }
 
