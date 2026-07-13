@@ -476,8 +476,10 @@ def _logic_dirs(m: dict, kind: str, endpoint_path: str) -> set[str]:
 
 def test_lhs_index_read_wires_in_not_out(tmp_path) -> None:
     """#110: in `ram[idx] <= d` the index is a read, not an assignment target —
-    it must wire into the FF as data (`in`), never `out`. The indexed base
-    (`ram`) stays the block's output."""
+    it must wire into the FF as data (`in`), never `out`. `ram` is an unpacked
+    array, so it is a Memory (#112): it no longer wires to the process at all —
+    its data path goes through typed addr/din/dout pins (see the memory-edge
+    tests), so the FF has no direct `ram` edge."""
     m = _model_for(
         "module m(input clk, input [1:0] idx, input [7:0] d, output logic [7:0] q);\n"
         "  logic [7:0] ram [4];\n"
@@ -489,13 +491,14 @@ def test_lhs_index_read_wires_in_not_out(tmp_path) -> None:
         tmp_path,
     )
     assert _logic_dirs(m, "FF", "m.idx") == {"in"}
-    assert _logic_dirs(m, "FF", "m.ram") == {"out"}
+    assert _logic_dirs(m, "FF", "m.ram") == set()
 
 
 def test_lhs_nested_select_base_wires_out(tmp_path) -> None:
     """#110: a bit-slice of an indexed store (`ram[idx][3:0] <= d`) still
     resolves the l-value base through the nested selects; the index stays a
-    read."""
+    read. `ram` is a Memory (#112), so its store surfaces as a typed din/addr
+    edge on the memory (not a process output), while the FF sees only the reads."""
     m = _model_for(
         "module m(input clk, input [1:0] idx, input [3:0] d);\n"
         "  logic [7:0] ram [4];\n"
@@ -503,8 +506,17 @@ def test_lhs_nested_select_base_wires_out(tmp_path) -> None:
         "endmodule\n",
         tmp_path,
     )
-    assert _logic_dirs(m, "FF", "m.ram") == {"out"}
+    assert _logic_dirs(m, "FF", "m.ram") == set()
     assert _logic_dirs(m, "FF", "m.idx") == {"in"}
+    by = {n["id"]: n for n in m["nodes"]}
+    ram = next(n for n in m["nodes"] if n["kind"] == "Memory")
+    typed = {
+        (e["mem_port"], by[e["endpoint"]]["name"])
+        for e in m["edges"]
+        if e["port"] == ram["id"] and "mem_port" in e
+    }
+    assert ("addr", "idx") in typed, typed
+    assert ("din", "d") in typed, typed
 
 
 def test_lhs_concat_targets_wire_out(tmp_path) -> None:
@@ -693,3 +705,87 @@ def test_multiple_include_dirs(tmp_path: Path) -> None:
     model = build_model([str(src)], top="m", include_dirs=[str(inc_a), str(inc_b)])
     ports = {n["name"] for n in model["nodes"] if n["kind"] == "Port"}
     assert {"a", "b"} <= ports, ports
+
+
+# -- memory arrays (#112) ----------------------------------------------------
+
+
+def _ram(model: dict) -> dict:
+    """The soc_mem RAM array node (first `g_lane` instance)."""
+    rams = [
+        n
+        for n in model["nodes"]
+        if n["name"] == "ram" and n["path"].endswith("memory.ram")
+    ]
+    assert rams, "no ram node found"
+    return sorted(rams, key=lambda n: n["path"])[0]
+
+
+def test_memory_array_is_distinct_kind(model: dict) -> None:
+    """`logic [31:0] ram [0:511]` becomes a Memory node (not Var) carrying its
+    word count, so the drilled logic view can draw a MEMORY glyph (#112)."""
+    ram = _ram(model)
+    assert ram["kind"] == "Memory", ram["kind"]
+    assert ram["mem_depth"] == 512, ram.get("mem_depth")
+    # The element type string is retained (width rides on it / the din-dout pin).
+    assert ram["type"] == "logic[31:0]$[0:511]", ram["type"]
+
+
+def test_plain_var_is_not_a_memory(model: dict) -> None:
+    """A scalar/packed Variable stays `Var` — only unpacked arrays are Memory."""
+    non_mem = [
+        n
+        for n in model["nodes"]
+        if n["kind"] == "Var" and n["path"].endswith("word_idx") is False
+    ]
+    assert non_mem, "expected some plain Var nodes"
+    assert all("mem_depth" not in n for n in non_mem)
+
+
+def test_memory_records_readmemh_init_source(model: dict) -> None:
+    """`initial $readmemh(INIT_FILE, ram)` is attributed to the memory as
+    `init_source` metadata — the INIT marker — without making `initial` a
+    logic node (ADR 0004)."""
+    ram = _ram(model)
+    assert ram.get("init_source") == "INIT_FILE", ram.get("init_source")
+    # `initial` itself is not a logic node.
+    assert not any(
+        n["kind"] in ("FF", "Comb", "Latch", "Assign")
+        and n["path"].endswith("memory")
+        and "initial" in n.get("name", "").lower()
+        for n in model["nodes"]
+    )
+
+
+def test_memory_addr_din_dout_edges(model: dict) -> None:
+    """The soc_mem RAM wires to its real scope signals via typed pins (#112):
+    addr (word_idx), din (bus.wdata), dout (bus.rdata) — anchored at the memory
+    node (`port == ram id`), addr/din as inputs and dout as an output."""
+    by = {n["id"]: n for n in model["nodes"]}
+    ram = _ram(model)
+    mem_edges = [
+        e for e in model["edges"] if e["port"] == ram["id"] and "mem_port" in e
+    ]
+    ports: dict[str, set[str]] = {}
+    dirs: dict[str, set[str]] = {}
+    for e in mem_edges:
+        ports.setdefault(e["mem_port"], set()).add(by[e["endpoint"]]["name"])
+        dirs.setdefault(e["mem_port"], set()).add(e["dir"])
+    assert "word_idx" in ports.get("addr", set()), ports
+    assert "wdata" in ports.get("din", set()), ports
+    assert "rdata" in ports.get("dout", set()), ports
+    # addr/din flow into the memory; dout flows out of it.
+    assert dirs.get("addr") == {"in"}, dirs
+    assert dirs.get("din") == {"in"}, dirs
+    assert dirs.get("dout") == {"out"}, dirs
+    # The memory has no self-loop and no untyped process edge.
+    assert all(e["endpoint"] != ram["id"] for e in mem_edges)
+
+
+def test_memory_no_untyped_process_edge(model: dict) -> None:
+    """Every edge anchored at the memory carries a `mem_port` tag — the plain
+    process↔memory edge is fully replaced by the typed addr/din/dout pins."""
+    ram = _ram(model)
+    anchored = [e for e in model["edges"] if e["port"] == ram["id"]]
+    assert anchored, "memory has no outgoing typed edges"
+    assert all("mem_port" in e for e in anchored), [e for e in anchored if "mem_port" not in e]

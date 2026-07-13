@@ -3098,6 +3098,7 @@ dependencies = [
 name = "svxprobe-xprobe"
 version = "0.0.0"
 dependencies = [
+ "svxprobe-ingest",
  "svxprobe-matcher",
  "svxprobe-model",
  "svxprobe-wave",

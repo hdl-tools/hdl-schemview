@@ -15,7 +15,7 @@ export interface SchPort {
    * the harness (clock name / async-reset path / latch gating path), absent
    * for plain data pins and all module-instance ports.
    */
-  role?: "clk" | "reset" | "enable";
+  role?: "clk" | "reset" | "enable" | "addr" | "din" | "dout" | "write" | "read";
   /**
    * Marks a bundle pin — a whole-interface connection (#106 consumer bundle
    * pin, #96 aggregate access ports). Drawn square instead of the directional
@@ -37,7 +37,9 @@ export interface SchNode {
    * `Comb` → combinational rectangle, `Assign` → stadium (function) node,
    * `Latch` → tinted storage box with an "LE" caption, `Interface` → hexagon
    * "bundle" box for an instance, or a square frame pin when `modport` is set
-   * (#125).
+   * (#125). `Memory` → a MEMORY array glyph (#112) with addr/din/dout/read/write
+   * pins (`SchPort.role`), labelled with `memDepth` and an INIT tab from
+   * `initSource`.
    */
   kind: string;
   label: string;
@@ -46,6 +48,10 @@ export interface SchNode {
   ports: SchPort[];
   /** Module/definition type of an instance (e.g. "picorv32"). */
   module?: string;
+  /** Memory only (#112): word count of the array (e.g. 512 for `ram [0:511]`). */
+  memDepth?: number;
+  /** Memory only (#112): `$readmemh` source-file arg text; presence shows the INIT tab. */
+  initSource?: string;
   /** Literal of a constant-source node (e.g. "32'd0"); drives one tied input. */
   constant?: string;
   /**

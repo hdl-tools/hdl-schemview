@@ -11,7 +11,7 @@
 //! * [`cone`] — the fan-in/out of a net (its driving/loading boxes).
 
 use serde::Serialize;
-use svxprobe_model::{Design, Dir, Edge, NodeId, NodeKind};
+use svxprobe_model::{Design, Dir, Edge, MemPort, NodeId, NodeKind};
 
 /// Which border a port sits on (drives ELK port placement).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -32,6 +32,16 @@ pub enum PinRole {
     Clk,
     Reset,
     Enable,
+    /// Address input of a `Memory` glyph (the array-index expression) (#112).
+    Addr,
+    /// Data input of a `Memory` glyph (the written value) (#112).
+    Din,
+    /// Data output of a `Memory` glyph (the read value) (#112).
+    Dout,
+    /// Write-enable of a `Memory` glyph — the process that stores into it (#112).
+    Write,
+    /// Read-enable of a `Memory` glyph — the process that reads from it (#112).
+    Read,
 }
 
 /// A pin on a box.
@@ -90,6 +100,15 @@ pub struct SchNode {
     /// sublabels it with the view (`mem_if.mem`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modport: Option<String>,
+    /// Word count of a `Memory` box (#112) — labels the array (e.g. `512`).
+    /// `None` for every non-memory node.
+    #[serde(rename = "memDepth", skip_serializing_if = "Option::is_none")]
+    pub mem_depth: Option<u32>,
+    /// `$readmemh` source-file text for a `Memory` box (#112) — presence drives
+    /// the INIT marker. `None` for a memory with no initializer and every other
+    /// node kind.
+    #[serde(rename = "initSource", skip_serializing_if = "Option::is_none")]
+    pub init_source: Option<String>,
 }
 
 /// Synthetic id base for constant-source nodes (keyed by the driven port id), so
@@ -200,7 +219,8 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
                 | Some(NodeKind::Ff)
                 | Some(NodeKind::Comb)
                 | Some(NodeKind::Latch)
-                | Some(NodeKind::Assign) => out.push(c),
+                | Some(NodeKind::Assign)
+                | Some(NodeKind::Memory) => out.push(c),
                 Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
                 _ => {}
             }
@@ -245,11 +265,18 @@ fn is_kind(design: &Design, id: NodeId, kind: NodeKind) -> bool {
 }
 
 /// A process-level logic node (inferred register / combinational process /
-/// continuous assign) — the boxes the signal-join pass wires through shared nets.
+/// continuous assign) or a `Memory` array (#112) — the boxes the signal-join pass
+/// wires through shared nets (not the structural instance-port pass), and whose
+/// unread outputs are kept as dangling pins. A memory's synthesized addr/din/dout
+/// pins fold in exactly like an FF's, so it belongs to this set.
 fn is_logic_box(design: &Design, id: NodeId) -> bool {
     matches!(
         design.node(id).map(|n| n.kind),
-        Some(NodeKind::Ff) | Some(NodeKind::Comb) | Some(NodeKind::Latch) | Some(NodeKind::Assign)
+        Some(NodeKind::Ff)
+            | Some(NodeKind::Comb)
+            | Some(NodeKind::Latch)
+            | Some(NodeKind::Assign)
+            | Some(NodeKind::Memory)
     )
 }
 
@@ -536,6 +563,8 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         module: module_of(design, n),
         constant: None,
         modport: n.modport.clone(),
+        mem_depth: None,
+        init_source: None,
     })
 }
 
@@ -564,6 +593,8 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
         module: None,
         constant: Some(lit.to_string()),
         modport: None,
+        mem_depth: None,
+        init_source: None,
     }
 }
 
@@ -615,6 +646,8 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
         module: None,
         constant: None,
         modport: None,
+        mem_depth: None,
+        init_source: None,
     })
 }
 
@@ -665,6 +698,64 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
         module: None,
         constant: None,
         modport: None,
+        mem_depth: None,
+        init_source: None,
+    })
+}
+
+/// A memory-array box (#112). Like an FF, a `Memory` node has no model `Port`
+/// children, so synthesize a pin per memory-access edge (`edges_of(mem)` carrying
+/// a `mem_port` role): the address and write-data enter on the west, the read-data
+/// leaves on the east. Pin ids come from `pins` keyed by `(mem, signal)` so the
+/// signal-join pass wires them to the real scope signals (`word_idx`/`wdata`/
+/// `rdata`). Carries `mem_depth` + `init_source` so the frontend labels the array
+/// and shows the INIT marker.
+fn make_memory_box(
+    design: &Design,
+    mem: NodeId,
+    scope: &str,
+    pins: &mut PinAlloc,
+) -> Option<SchNode> {
+    let n = design.node(mem)?;
+    // One pin per accessed signal; the harness already dedups byte-lane writes,
+    // but guard against a repeat endpoint collapsing onto a duplicate pin id.
+    let mut seen: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    let ports: Vec<SchPort> = design
+        .edges_of(mem)
+        .iter()
+        .filter(|e| e.port == mem && e.mem_port.is_some() && seen.insert(e.endpoint))
+        .map(|e| {
+            let sig = design.node(e.endpoint);
+            let role = match e.mem_port {
+                Some(MemPort::Addr) => Some(PinRole::Addr),
+                Some(MemPort::Din) => Some(PinRole::Din),
+                Some(MemPort::Dout) => Some(PinRole::Dout),
+                None => None,
+            };
+            SchPort {
+                id: pins.pin(mem, e.endpoint),
+                name: sig.map(|s| s.name.clone()).unwrap_or_default(),
+                side: side_of(e.dir),
+                path: sig.map(|s| s.path.clone()).unwrap_or_default(),
+                width: sig.and_then(|s| pin_width(design, &s.type_)),
+                role,
+                bundle: false,
+                dangling: false,
+            }
+        })
+        .collect();
+    Some(SchNode {
+        id: mem,
+        kind: NodeKind::Memory,
+        label: relative_to(&n.path, scope),
+        path: n.path.clone(),
+        expandable: false,
+        ports,
+        module: None,
+        constant: None,
+        modport: None,
+        mem_depth: n.mem_depth,
+        init_source: n.init_source.clone(),
     })
 }
 
@@ -694,6 +785,8 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
         module: None,
         constant: None,
         modport: None,
+        mem_depth: None,
+        init_source: None,
     })
 }
 
@@ -793,6 +886,8 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
             module: None,
             constant: None,
             modport: None,
+            mem_depth: None,
+            init_source: None,
         });
     }
 
@@ -879,6 +974,8 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
             module: None,
             constant: None,
             modport: None,
+            mem_depth: None,
+            init_source: None,
         });
         for &(pin, sig) in view_pins.get(&mp).map(Vec::as_slice).unwrap_or_default() {
             if own_keys.contains(&key_of(sig)) {
@@ -932,6 +1029,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             Some(NodeKind::Comb) | Some(NodeKind::Latch) | Some(NodeKind::Assign) => {
                 make_logic_box(design, b, &mut pins)
             }
+            Some(NodeKind::Memory) => make_memory_box(design, b, scope_path, &mut pins),
             _ => make_box(design, b, scope_path),
         };
         nodes.extend(node);

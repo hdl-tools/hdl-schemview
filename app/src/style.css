@@ -11,6 +11,7 @@
   --assign:#23425a; --assign-stroke:#3f86c0;
   --latch:#3a2c4a; --latch-stroke:#9b80c0;
   --iface:#15433f; --iface-stroke:#2fa39a;
+  --memory:#3d3730; --memory-stroke:#b08a5a;
   --label:#eaeefb; --sublabel:#9fb4d8;
   --pin:#9cc4ff; --pin-out:#ffd479; --pin-en:#9fe0a8;
   --wire:#7f93b5; --wire-label:#c7d3ea;
@@ -26,6 +27,7 @@
   --assign:#e3eefb; --assign-stroke:#3f86c0;
   --latch:#efe6f5; --latch-stroke:#9b80c0;
   --iface:#e0f3f0; --iface-stroke:#2a8f86;
+  --memory:#f0e9dd; --memory-stroke:#8a6f4a;
   --label:#1a2233; --sublabel:#55617a;
   --pin:#2f5fb0; --pin-out:#b56a00; --pin-en:#2f7d32;
   --wire:#5a6a86; --wire-label:#33415c;
@@ -199,6 +201,11 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .box.latch { fill:var(--latch); stroke:var(--latch-stroke); }
 /* Interface bundle: a pointed hexagon in a distinct teal. */
 .box.iface { fill:var(--iface); stroke:var(--iface-stroke); }
+.box.memory { fill:var(--memory); stroke:var(--memory-stroke); }
+.mem-stack { fill:var(--memory); stroke:var(--memory-stroke); opacity:0.45; }
+.mem-row { stroke:var(--memory-stroke); stroke-width:0.75; opacity:0.55; }
+.mem-init { fill:var(--sel); stroke:none; }
+.mem-init-label { fill:var(--canvas); font-size:8px; font-weight:700; }
 /* Selection stroke wins over every per-kind stroke above (declared last). */
 .box.sel { stroke:var(--sel); stroke-width:2.5; }
 .ff-clk { fill:none; stroke:var(--label); stroke-width:1.3; }

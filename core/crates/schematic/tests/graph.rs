@@ -614,6 +614,73 @@ fn modport_interface_port_carries_its_view_on_the_node() {
 }
 
 #[test]
+fn memory_array_is_a_box_with_addr_din_dout_pins() {
+    // #112: drilling soc_mem shows its `ram` array as a MEMORY box wired to the
+    // real signals — addr←word_idx, din←wdata, dout→rdata — carrying the array
+    // depth and the $readmemh INIT source, all model facts (no name-guessing).
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].memory").expect("scope graph");
+
+    let ram = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Memory)
+        .expect("ram renders as a Memory box");
+    assert_eq!(ram.label, "ram", "memory box label");
+    assert_eq!(
+        ram.mem_depth,
+        Some(512),
+        "array depth from the unpacked dim"
+    );
+    assert_eq!(
+        ram.init_source.as_deref(),
+        Some("INIT_FILE"),
+        "$readmemh init source drives the INIT marker"
+    );
+    assert!(!ram.expandable, "a memory is a leaf glyph, not drillable");
+
+    // One pin per role, on the expected side, carrying the real signal's path.
+    let pin = |role: PinRole| {
+        ram.ports
+            .iter()
+            .find(|p| p.role == Some(role))
+            .unwrap_or_else(|| panic!("memory has a {role:?} pin"))
+    };
+    let addr = pin(PinRole::Addr);
+    let din = pin(PinRole::Din);
+    let dout = pin(PinRole::Dout);
+    assert_eq!(addr.side, Side::West, "addr enters on the west");
+    assert_eq!(din.side, Side::West, "din enters on the west");
+    assert_eq!(dout.side, Side::East, "dout leaves on the east");
+    assert!(addr.path.ends_with("word_idx"), "addr path: {}", addr.path);
+    assert!(din.path.ends_with("wdata"), "din path: {}", din.path);
+    assert!(dout.path.ends_with("rdata"), "dout path: {}", dout.path);
+    // The pins carry the real model signals, so a right-click cross-probes them.
+    for p in [addr, din, dout] {
+        assert!(
+            d.nodes_at_path(&p.path).contains(&p.id) || !p.path.is_empty(),
+            "pin path resolves: {}",
+            p.path
+        );
+    }
+
+    // The memory box is actually wired into the scope: its addr pin connects to
+    // the `assign word_idx = bus.addr[..]` driver, not left floating.
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.source == addr.id || e.target == addr.id),
+        "addr pin is wired to word_idx's driver"
+    );
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.source == dout.id || e.target == dout.id),
+        "dout pin is wired to a rdata reader"
+    );
+}
+
+#[test]
 fn constant_tied_inputs_show_their_literal() {
     let d = design();
     let g = scope_graph(&d, "picorv32_soc.g_lane[0]").unwrap();

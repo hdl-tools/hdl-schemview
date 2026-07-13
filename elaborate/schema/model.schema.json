@@ -47,7 +47,8 @@
           "port": { "type": "integer", "minimum": 0, "description": "NodeId of the module port." },
           "endpoint": { "type": "integer", "minimum": 0, "description": "NodeId of the connected endpoint." },
           "dir": { "type": "string", "enum": ["in", "out", "inout"] },
-          "select": { "type": ["string", "null"], "description": "Resolved bit-select on the connected expression, e.g. \"[0]\" or \"[7:4]\"; absent/null when the whole signal is connected." }
+          "select": { "type": ["string", "null"], "description": "Resolved bit-select on the connected expression, e.g. \"[0]\" or \"[7:4]\"; absent/null when the whole signal is connected." },
+          "mem_port": { "type": ["string", "null"], "enum": ["addr", "din", "dout", null], "description": "Memory-access role (#112): set when the edge wires a signal to a Memory node's address/data port (addr/din/dout), so the schematic draws the pin's role. Absent/null on ordinary edges." }
         }
       }
     },
@@ -115,7 +116,7 @@
         "id": { "type": "integer", "minimum": 0 },
         "kind": {
           "type": "string",
-          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport"]
+          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport", "Memory"]
         },
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },
@@ -150,6 +151,15 @@
           "type": ["array", "null"],
           "description": "Membership of a Modport node: each bundle member visible through the view, with its direction (slang ModportPort.direction). Descriptive metadata -- the modport stays a view; the member's own node lives in the parent interface instance at `<parent path>.<name>`. Absent/null on non-modport nodes.",
           "items": { "$ref": "#/$defs/modportMember" }
+        },
+        "mem_depth": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Memory only: word count of the array (unpacked dimension size, e.g. 512 for `ram [0:511]`), a structural fact from slang used to label the MEMORY glyph. Absent/null on non-memory nodes (#112)."
+        },
+        "init_source": {
+          "type": ["string", "null"],
+          "description": "Memory only: the $readmemh/$readmemb initializer's source-file argument text (e.g. \"INIT_FILE\"); presence drives the INIT marker. From the harness's initial-block scan -- initial stays non-logic (ADR 0004). Absent/null when the memory has no $readmem* initializer (#112)."
         },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
