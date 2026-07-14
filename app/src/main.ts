@@ -29,6 +29,13 @@ import type {
   WaveLink,
 } from "./types";
 import { scopeFrames } from "./tree";
+import {
+  crossProbeSelection,
+  publish,
+  scopeSelection,
+  subscribe,
+  type Selection,
+} from "./bus";
 import { formatLogEntry, type LogLevel } from "./log";
 import { lineRangeForSpan } from "./source";
 import {
@@ -317,10 +324,17 @@ function treeItem(node: TreeNode): HTMLLIElement {
   return li;
 }
 
-// Navigate to an arbitrary scope from the tree: the breadcrumb becomes the
-// scope's ancestor chain (not the drill-down history), then the schematic
-// loads it like any other navigation.
+// Navigate to an arbitrary scope from the tree. Routed through the selection bus
+// (#18) so it drives the schematic wherever it lives — the same window or a
+// detached one; the schematic-hosting window runs `navToScope`.
 function jumpToScope(path: string) {
+  void publish(scopeSelection(path));
+}
+
+// Drill the schematic into `path`: the breadcrumb becomes the scope's ancestor
+// chain (not the drill-down history), then the schematic loads it like any other
+// navigation. Runs in whichever window hosts the schematic (bus handler).
+function navToScope(path: string) {
   rememberCurrentView();
   const frames = scopeFrames(path);
   state.stack = frames.slice(0, -1);
@@ -1415,12 +1429,12 @@ async function schematicMenu(ev: MouseEvent, path: string) {
         ? "Append to waveform"
         : "Append to waveform (not in trace)",
       enabled: resp.wave.in_trace,
-      onClick: () => addToWaveform(resp.wave),
+      onClick: () => void publish(crossProbeSelection(resp, ["waveform"])),
     },
     {
       label: resp.source ? "Show in source" : "Show in source (no location)",
       enabled: !!resp.source,
-      onClick: () => showInSource(resp),
+      onClick: () => void publish(crossProbeSelection(resp, ["source"])),
     },
   ]);
 }
@@ -1447,6 +1461,22 @@ function selectWire(netPath: string, trunk?: string) {
 }
 
 // -- apply a cross-probe result to source + waveform -----------------------
+
+// The one bus subscriber (#18): every cross-pane selection — from this window or,
+// once panes detach, another — lands here and drives the panes this window hosts.
+// A `scope` selection drills the schematic (tree jump); a `resp` selection reveals
+// the resolved cross-probe in whichever panes it targets. This is the single
+// coordination path that the right-click/tree handlers publish into.
+async function handleSelection(sel: Selection) {
+  if (sel.scope !== null && sel.targets.includes("schematic")) {
+    navToScope(sel.scope);
+  }
+  if (sel.resp) {
+    if (sel.targets.includes("source")) await showInSource(sel.resp);
+    if (sel.targets.includes("schematic")) await showInSchematic(sel.resp.anchor);
+    if (sel.targets.includes("waveform")) await addToWaveform(sel.resp.wave);
+  }
+}
 
 // Show a cross-probe result in the source pane (jump to its location, if any) and
 // list any ambiguous alternatives. Waveform display is now an explicit, additive
@@ -1964,7 +1994,10 @@ function renderPicker(resp: ProbeResponse) {
     const d = document.createElement("div");
     d.className = "alt";
     d.textContent = alt.path;
-    d.onclick = () => api.probeNode(alt.path, context()).then((r) => r && showInSource(r));
+    d.onclick = () =>
+      api
+        .probeNode(alt.path, context())
+        .then((r) => r && publish(crossProbeSelection(r, ["source"])));
     pick.appendChild(d);
   }
   pick.style.display = "block";
@@ -2085,14 +2118,14 @@ async function onSourceContextMenu(ev: MouseEvent) {
     {
       label: "Show in schematic",
       enabled: true,
-      onClick: () => showInSchematic(resp.anchor),
+      onClick: () => void publish(crossProbeSelection(resp, ["schematic"])),
     },
     {
       label: resp.wave.in_trace
         ? "Append to waveform"
         : "Append to waveform (not in trace)",
       enabled: resp.wave.in_trace,
-      onClick: () => addToWaveform(resp.wave),
+      onClick: () => void publish(crossProbeSelection(resp, ["waveform"])),
     },
   ]);
 }
@@ -2348,6 +2381,10 @@ async function init() {
   $("load").addEventListener("click", load);
   $("load-mode").addEventListener("change", syncLoadMode);
   syncLoadMode();
+  // The single cross-pane coordination path (#18): right-click/tree handlers
+  // publish a Selection, this subscriber drives the panes. Registered before the
+  // startup auto-load so no early selection is missed.
+  await subscribe(handleSelection);
   initSettings();
   setupZoom();
   setupWaveInteraction();
