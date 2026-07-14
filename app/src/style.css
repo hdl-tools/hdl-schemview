@@ -40,7 +40,6 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #toolbar #top { flex:0.45; }
 #toolbar .hidden { display:none; }
 #toolbar button { background:var(--accent); border:0; color:#fff; padding:4px 12px; cursor:pointer; }
-#toolbar #theme-toggle { background:transparent; color:var(--fg); border:1px solid var(--border); padding:4px 8px; flex:0 0 auto; }
 /* Tab groups (#99): the top-right (source ↔ schematic) and bottom (status ↔
    waveform) columns each host a .tabbar header over stacked .tab-panels; only the
    .active panel is shown. Each tab's own controls (zoom bar, marker readout) ride
@@ -50,12 +49,20 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .tab { background:transparent; color:var(--muted); border:0; border-bottom:2px solid transparent; padding:4px 10px; margin-bottom:-1px; cursor:pointer; font-size:12px; font-weight:600; }
 .tab:hover { color:var(--fg); }
 .tab.active { color:var(--fg); border-bottom-color:var(--accent); }
+.tab[hidden] { display:none; } /* on-demand schematic / waveform tabs (#17) start hidden */
 .tab-aux { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .tab-aux[hidden] { display:none; }
 /* Inactive panels are laid out (display) only when active; the active one fills the
    group's spare height and scrolls internally (min-height:0 via .pane). */
 .tab-panel { flex:1; }
 .tab-panel:not(.active) { display:none; }
+/* Settings pane (#17): a simple stacked form of label + control rows. Uses the same
+   --field / --border / --muted tokens as the toolbar, so it themes for free. */
+#settings { padding:12px 14px; overflow:auto; max-width:520px; }
+#settings .setting-row { display:flex; align-items:center; gap:10px; margin:0 0 10px; border:0; padding:0; }
+#settings .setting-label { flex:0 0 120px; color:var(--muted); font-weight:600; }
+#settings select, #settings input[type="text"] { background:var(--field); color:var(--fg); border:1px solid var(--border); padding:3px 6px; }
+#settings input[type="text"] { flex:1; min-width:0; }
 #zoombar { display:flex; gap:2px; }
 #zoombar button { background:transparent; color:var(--fg); border:1px solid var(--border); padding:1px 6px; cursor:pointer; min-width:26px; font-size:12px; line-height:1.4; }
 #zoombar #zoom-reset { min-width:46px; font-variant-numeric:tabular-nums; }

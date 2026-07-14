@@ -24,7 +24,6 @@
            source + status; these bring the schematic / waveform tab forward. -->
       <button id="show-schematic" title="Show the schematic view">Show schematic</button>
       <button id="show-waveform" title="Show the waveform view">Show waveform</button>
-      <button id="theme-toggle" title="Toggle light / dark theme" aria-label="Toggle theme">◐</button>
     </header>
     <div id="breadcrumb"></div>
     <main id="panes">
@@ -39,7 +38,8 @@
       <section id="content" class="tab-group">
         <div class="tabbar" role="tablist">
           <button class="tab active" data-panel="source-pane" role="tab" aria-selected="true">Source</button>
-          <button class="tab" data-panel="schematic-pane" role="tab" aria-selected="false">Schematic</button>
+          <button class="tab" data-panel="schematic-pane" role="tab" aria-selected="false" hidden>Schematic</button>
+          <button class="tab" data-panel="settings-pane" role="tab" aria-selected="false">Settings</button>
           <span class="tab-aux" data-panel="source-pane"><span id="source-path"></span></span>
           <span class="tab-aux" data-panel="schematic-pane" hidden>
             <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
@@ -55,6 +55,28 @@
         <section id="schematic-pane" class="pane tab-panel">
           <div id="schematic"></div>
         </section>
+        <!-- Preferences (#17): the first surface of the Phase 6 config system.
+             Folds in the theme toggle and makes the excluded-scopes list editable. -->
+        <section id="settings-pane" class="pane tab-panel">
+          <div id="settings">
+            <label class="setting-row">
+              <span class="setting-label">Theme</span>
+              <select id="set-theme" title="Schematic / UI colour theme">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </label>
+            <label class="setting-row">
+              <span class="setting-label">Excluded scopes</span>
+              <input
+                id="set-excluded"
+                type="text"
+                placeholder="TOP, tb, soc_pkg"
+                title="Scopes skipped when a design is loaded (comma / space separated); applied on the next load"
+              />
+            </label>
+          </div>
+        </section>
       </section>
       <div id="row-splitter" title="Drag to resize the bottom pane"></div>
       <!-- Bottom tab group (#99): status/log ↔ waveform, status active by default.
@@ -63,7 +85,7 @@
       <section id="bottom-group" class="tab-group">
         <div class="tabbar" role="tablist">
           <button class="tab active" data-panel="status-pane" role="tab" aria-selected="true">Status</button>
-          <button class="tab" data-panel="wave-pane" role="tab" aria-selected="false">Waveform</button>
+          <button class="tab" data-panel="wave-pane" role="tab" aria-selected="false" hidden>Waveform</button>
           <span class="tab-aux" data-panel="wave-pane" hidden>
             <span id="wave-readout"></span>
             <select id="wave-unit" title="Time display unit">
