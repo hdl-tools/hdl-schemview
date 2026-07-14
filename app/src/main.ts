@@ -31,9 +31,13 @@ import type {
 import { scopeFrames } from "./tree";
 import {
   crossProbeSelection,
+  ownsTarget,
+  paneModeOf,
   publish,
   scopeSelection,
   subscribe,
+  type PaneMode,
+  type RevealTarget,
   type Selection,
 } from "./bus";
 import { formatLogEntry, type LogLevel } from "./log";
@@ -143,6 +147,133 @@ let labelItems: { el: SVGTextElement; segs: [Pt, Pt][] }[] = [];
 let sourceCtx: { file: number; lineStarts: number[] } | null = null;
 
 const context = () => (state.stack.length ? state.stack[state.stack.length - 1].path : null);
+
+// -- detached windows (#18 PR2) --------------------------------------------
+
+// This window's role: the full app ("main") or a single popped-out pane, read
+// from the launch URL (`index.html?pane=schematic`).
+const windowMode: PaneMode = paneModeOf(location.search);
+
+// Panes currently detached into their own window — main-window bookkeeping so the
+// bus handler doesn't also drive the now-empty main tab (see `ownsTarget`). Always
+// empty in a detached window, which only ever drives its own pane.
+const detached = new Set<RevealTarget>();
+
+// localStorage keys under which the main window seeds a detached window's initial
+// state. Shared-origin localStorage is written before the window is created and
+// read synchronously on its boot, so there is no event race to coordinate.
+const DETACH_SCOPE_KEY = "detach:schematic:scope";
+const DETACH_WAVE_KEY = "detach:waveform";
+
+// A WaveTrace carries an enumMap Map that JSON.stringify drops; (de)serialize it
+// as pairs so a detached waveform window rebuilds the exact lanes main has.
+interface StoredTrace {
+  ref: number;
+  name: string;
+  values: WaveTrace["values"];
+  radix?: Radix;
+  enumPairs?: [number, string][];
+  showName?: boolean;
+}
+function storeTrace(tr: WaveTrace): StoredTrace {
+  return {
+    ref: tr.ref,
+    name: tr.name,
+    values: tr.values,
+    radix: tr.radix,
+    enumPairs: tr.enumMap ? [...tr.enumMap] : undefined,
+    showName: tr.showName,
+  };
+}
+function loadTrace(s: StoredTrace): WaveTrace {
+  return {
+    ref: s.ref,
+    name: s.name,
+    values: s.values,
+    radix: s.radix,
+    enumMap: s.enumPairs ? new Map(s.enumPairs) : undefined,
+    showName: s.showName,
+  };
+}
+
+type DetachablePane = "schematic" | "waveform";
+
+// Open (or focus, if already open) a pane in its own window. Seeds the window's
+// initial state via localStorage, then creates a WebviewWindow that reloads
+// index.html in `?pane=` mode; live cross-probing thereafter rides the bus.
+async function popOut(pane: DetachablePane) {
+  if (pane === "schematic" && !state.graph) {
+    log("warn", "load a design before detaching the schematic");
+    return;
+  }
+  if (pane === "schematic") {
+    localStorage.setItem(DETACH_SCOPE_KEY, context() ?? "");
+  } else {
+    const snap = {
+      waves: state.waves.map(storeTrace),
+      waveView: state.waveView,
+      markers: state.markers,
+      waveUnit: state.waveUnit,
+    };
+    localStorage.setItem(DETACH_WAVE_KEY, JSON.stringify(snap));
+  }
+  try {
+    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const existing = await WebviewWindow.getByLabel(pane);
+    if (existing) {
+      await existing.setFocus();
+      return;
+    }
+    const w = new WebviewWindow(pane, {
+      url: `index.html?pane=${pane}`,
+      title: `hdl-schemview — ${pane}`,
+      width: pane === "schematic" ? 1000 : 1200,
+      height: pane === "schematic" ? 800 : 500,
+    });
+    w.once("tauri://error", (e) =>
+      log("error", `detach failed: ${JSON.stringify(e.payload)}`),
+    );
+    // Once the window is up the main window hands this pane over; the tab + its
+    // pop-out fold away, and closing the window reattaches it.
+    markDetached(pane, true);
+    void w.once("tauri://destroyed", () => markDetached(pane, false));
+  } catch (e) {
+    log("error", `detach failed: ${e}`);
+  }
+}
+
+// Bring an already-detached pane's window to the front (from the toolbar Show
+// button, which otherwise reveals the empty main tab).
+async function focusPane(pane: DetachablePane) {
+  try {
+    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const w = await WebviewWindow.getByLabel(pane);
+    await w?.setFocus();
+  } catch (e) {
+    log("warn", `could not focus ${pane} window: ${e}`);
+  }
+}
+
+// Flip a pane's detached state in the main window: track it (so `handleSelection`
+// yields the pane to its window), hide/show the pop-out button, and fold away the
+// tab of a pane that just left (switching off it if it was showing).
+function markDetached(pane: DetachablePane, on: boolean) {
+  if (on) detached.add(pane);
+  else detached.delete(pane);
+  const panelId = pane === "schematic" ? "schematic-pane" : "wave-pane";
+  const fallback = pane === "schematic" ? "source-pane" : "status-pane";
+  const tab = document.querySelector<HTMLButtonElement>(
+    `.tab[data-panel="${panelId}"]`,
+  );
+  const pop = document.getElementById(pane === "schematic" ? "pop-schematic" : "pop-waveform");
+  if (pop) pop.hidden = on;
+  if (on && tab) {
+    if (tab.classList.contains("active")) activateTab(fallback);
+    tab.hidden = true;
+  }
+  // On reattach the tab stays hidden (its on-demand default); the toolbar Show
+  // button reveals main's own copy again.
+}
 
 // -- load ------------------------------------------------------------------
 
@@ -1468,13 +1599,16 @@ function selectWire(netPath: string, trunk?: string) {
 // the resolved cross-probe in whichever panes it targets. This is the single
 // coordination path that the right-click/tree handlers publish into.
 async function handleSelection(sel: Selection) {
-  if (sel.scope !== null && sel.targets.includes("schematic")) {
-    navToScope(sel.scope);
-  }
+  // Drive only the panes this window owns: a detached window owns its one pane;
+  // the main window owns the rest (source always; schematic/waveform until they
+  // detach). This is what keeps a selection from being applied in both windows.
+  const owns = (t: RevealTarget) =>
+    sel.targets.includes(t) && ownsTarget(windowMode, t, [...detached]);
+  if (sel.scope !== null && owns("schematic")) navToScope(sel.scope);
   if (sel.resp) {
-    if (sel.targets.includes("source")) await showInSource(sel.resp);
-    if (sel.targets.includes("schematic")) await showInSchematic(sel.resp.anchor);
-    if (sel.targets.includes("waveform")) await addToWaveform(sel.resp.wave);
+    if (owns("source")) await showInSource(sel.resp);
+    if (owns("schematic")) await showInSchematic(sel.resp.anchor);
+    if (owns("waveform")) await addToWaveform(sel.resp.wave);
   }
 }
 
@@ -2370,7 +2504,58 @@ function setupWaveInteraction() {
   });
 }
 
+// Boot a detached pane window (#18 PR2): reuse this same page in `?pane=` mode,
+// showing only the one pane full-window (body.detached* CSS), seeded from the
+// localStorage snapshot the main window wrote, and driven live by the bus. The
+// backend Session is shared, so api.* calls resolve against the loaded design.
+async function initDetached(pane: DetachablePane) {
+  applyStoredTheme();
+  document.body.classList.add("detached", `detached-${pane}`);
+  await subscribe(handleSelection);
+  if (pane === "schematic") {
+    setupZoom();
+    activateTab("schematic-pane");
+    const scope = localStorage.getItem(DETACH_SCOPE_KEY);
+    if (scope) navToScope(scope);
+    return;
+  }
+  setupWaveInteraction();
+  setupResizeRedraw();
+  activateTab("wave-pane");
+  try {
+    state.timescale = await api.traceTimescale();
+  } catch {
+    state.timescale = null;
+  }
+  state.waveUnit = defaultDisplayUnit(state.timescale);
+  const raw = localStorage.getItem(DETACH_WAVE_KEY);
+  if (raw) {
+    try {
+      const snap = JSON.parse(raw) as {
+        waves?: StoredTrace[];
+        waveView?: TimeWindow | null;
+        markers?: Markers;
+        waveUnit?: DisplayUnit;
+      };
+      state.waves = (snap.waves ?? []).map(loadTrace);
+      state.waveView = snap.waveView ?? null;
+      state.markers = snap.markers ?? { a: null, b: null };
+      if (snap.waveUnit) state.waveUnit = snap.waveUnit;
+    } catch {
+      /* ignore a malformed snapshot; start with an empty pane */
+    }
+  }
+  syncUnitSelect();
+  loadColWidths();
+  renderWaves();
+}
+
 async function init() {
+  // A detached pane window reuses this page in a single-pane mode (#18 PR2).
+  if (windowMode !== "main") {
+    await initDetached(windowMode);
+    return;
+  }
   ($("model") as HTMLInputElement).value =
     "../../fixtures/picorv32_soc/golden/hierarchy.json";
   ($("filelist") as HTMLInputElement).value = "../../fixtures/picorv32_soc/picorv32_soc.f";
@@ -2399,8 +2584,16 @@ async function init() {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) =>
     b.addEventListener("click", () => activateTab(b.dataset.panel!)),
   );
-  $("show-schematic").addEventListener("click", () => activateTab("schematic-pane"));
-  $("show-waveform").addEventListener("click", () => activateTab("wave-pane"));
+  // Reveal the pane, or focus its window if it is detached (#18 PR2).
+  $("show-schematic").addEventListener("click", () =>
+    detached.has("schematic") ? void focusPane("schematic") : activateTab("schematic-pane"),
+  );
+  $("show-waveform").addEventListener("click", () =>
+    detached.has("waveform") ? void focusPane("waveform") : activateTab("wave-pane"),
+  );
+  // Pop-out buttons in the schematic / waveform tab-aux (#18 PR2).
+  $("pop-schematic").addEventListener("click", () => void popOut("schematic"));
+  $("pop-waveform").addEventListener("click", () => void popOut("waveform"));
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source right-click menu (#19), and dismissals.
   $("source").addEventListener("contextmenu", onSourceContextMenu);

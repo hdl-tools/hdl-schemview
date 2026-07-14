@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { crossProbeSelection, scopeSelection, SELF } from "./bus";
+import {
+  crossProbeSelection,
+  ownsTarget,
+  paneModeOf,
+  scopeSelection,
+  SELF,
+} from "./bus";
 import type { ProbeResponse } from "./types";
 
 const resp: ProbeResponse = {
@@ -31,5 +37,34 @@ describe("scopeSelection", () => {
     expect(sel.targets).toEqual(["schematic"]);
     expect(sel.resp).toBeNull();
     expect(sel.origin).toBe(SELF);
+  });
+});
+
+describe("paneModeOf", () => {
+  it("reads a detached pane from the query", () => {
+    expect(paneModeOf("?pane=schematic")).toBe("schematic");
+    expect(paneModeOf("?pane=waveform")).toBe("waveform");
+  });
+  it("defaults to main for no/unknown pane", () => {
+    expect(paneModeOf("")).toBe("main");
+    expect(paneModeOf("?pane=bogus")).toBe("main");
+    expect(paneModeOf("?other=1")).toBe("main");
+  });
+});
+
+describe("ownsTarget", () => {
+  it("main owns source always, and other panes unless detached", () => {
+    expect(ownsTarget("main", "source", ["schematic", "waveform"])).toBe(true);
+    expect(ownsTarget("main", "schematic", [])).toBe(true);
+    expect(ownsTarget("main", "schematic", ["schematic"])).toBe(false);
+    expect(ownsTarget("main", "waveform", ["schematic"])).toBe(true);
+    expect(ownsTarget("main", "waveform", ["waveform"])).toBe(false);
+  });
+  it("a detached window owns only its own pane", () => {
+    expect(ownsTarget("schematic", "schematic", [])).toBe(true);
+    expect(ownsTarget("schematic", "source", [])).toBe(false);
+    expect(ownsTarget("schematic", "waveform", [])).toBe(false);
+    expect(ownsTarget("waveform", "waveform", [])).toBe(true);
+    expect(ownsTarget("waveform", "schematic", [])).toBe(false);
   });
 });

@@ -48,6 +48,32 @@ export function scopeSelection(scope: string, origin: string = SELF): Selection 
   return { origin, targets: ["schematic"], resp: null, scope };
 }
 
+// -- window modes (#18 PR2) -------------------------------------------------
+
+// What a webview hosts: the full app ("main"), or a single detached pane.
+export type PaneMode = "main" | "schematic" | "waveform";
+
+// Read the pane mode from a window's URL query (`?pane=schematic`). A detached
+// window is launched with this param; everything else is the main window.
+export function paneModeOf(search: string): PaneMode {
+  const p = new URLSearchParams(search).get("pane");
+  return p === "schematic" || p === "waveform" ? p : "main";
+}
+
+// Whether a window in `mode` should drive `target` for an incoming selection.
+// The main window always hosts source, and hosts schematic/waveform unless that
+// pane is currently detached into its own window; a detached window drives only
+// its own pane. This is what keeps a selection from being applied twice (once in
+// the detached window, once in the now-empty main tab) once panes pop out.
+export function ownsTarget(
+  mode: PaneMode,
+  target: RevealTarget,
+  detached: readonly RevealTarget[],
+): boolean {
+  if (mode === "main") return target === "source" || !detached.includes(target);
+  return mode === target;
+}
+
 // -- transport --------------------------------------------------------------
 
 export type Unsubscribe = () => void;
