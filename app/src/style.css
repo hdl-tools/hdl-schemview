@@ -52,6 +52,10 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .tab[hidden] { display:none; } /* on-demand schematic / waveform tabs (#17) start hidden */
 .tab-aux { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .tab-aux[hidden] { display:none; }
+/* Pop-out control (#18): detach a pane into its own window. Rides in the pane's
+   tab-aux next to the zoom bar; hidden inside a detached window (already popped). */
+.pop-btn { background:transparent; color:var(--muted); border:0; cursor:pointer; font-size:13px; padding:2px 4px; line-height:1; }
+.pop-btn:hover { color:var(--fg); }
 /* Inactive panels are laid out (display) only when active; the active one fills the
    group's spare height and scrolls internally (min-height:0 via .pane). */
 .tab-panel { flex:1; }
@@ -140,6 +144,29 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #col-splitter { grid-area:tsplit; cursor:col-resize; box-shadow:inset -1px 0 0 rgba(255,255,255,0.45); }
 :root[data-theme="light"] #col-splitter { box-shadow:inset -1px 0 0 rgba(0,0,0,0.4); }
 #col-splitter:hover, :root[data-theme="light"] #col-splitter:hover { box-shadow:inset -2px 0 0 var(--accent); }
+/* Detached pane window (#18 PR2): one pane fills the whole window. The window
+   reuses index.html but boots in a `?pane=` mode that adds body.detached +
+   body.detached-<pane>; here we hide the chrome and the other panes and collapse
+   the grid to a single content cell. Tab switching and pop-out are gone (there is
+   one pane and it is already popped out). */
+body.detached #toolbar,
+body.detached #hier-pane,
+body.detached #col-splitter,
+body.detached #row-splitter,
+body.detached .tab,
+body.detached .pop-btn { display:none; }
+body.detached #panes {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "content";
+}
+/* Schematic-only: keep the breadcrumb + zoom bar; drop the bottom (status/wave). */
+body.detached-schematic #bottom-group { display:none; }
+body.detached-schematic #content { grid-area:content; }
+/* Waveform-only: the bottom group fills the window; breadcrumb + content go. */
+body.detached-waveform #breadcrumb,
+body.detached-waveform #content { display:none; }
+body.detached-waveform #bottom-group { grid-area:content; }
 /* Marker readout + zoom controls ride in the waveform tab's .tab-aux (#99). */
 #wave-readout { color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }
 #wave-unit { background:var(--field); color:var(--fg); border:1px solid var(--border); font-size:11px; padding:1px 2px; cursor:pointer; }
