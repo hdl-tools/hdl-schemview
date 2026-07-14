@@ -80,6 +80,7 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 | `app/src/wave.ts` (+ `wave.test.ts`) | Waveform geometry (time-window mapping, zoom/pan, segments, value-at-time, ruler ticks) + per-trace/ruler canvas drawing. |
 | `app/src/log.ts` (+ `log.test.ts`) | Pure helpers for the status/log pane (#100): `formatTime` (`HH:MM:SS`) + `formatLogEntry` (level + message → renderable entry). |
 | `app/src/prefs.ts` (+ `prefs.test.ts`) | Settings preferences (#17): DOM-free `parseExcluded`/`formatExcluded`/`coerceExcluded` (excluded-scopes editor round-trip + default fallback) + thin localStorage wrappers (`loadExcluded`/`saveExcluded`; key `excludedScopes`). Theme stays under the existing `theme` key. |
+| `app/src/bus.ts` (+ `bus.test.ts`) | The single cross-pane coordination path (#18). Right-click/tree handlers `publish` a `Selection` (a resolved `ProbeResponse` + which panes to reveal, or a scope path to drill); one `subscribe(handleSelection)` in `main.ts` drives the panes. Transport is Tauri app-global `emit`/`listen` inside the webview (so it also reaches detached windows, #18 PR2), a module-local fan-out in browser/tests — one channel, two transports, chosen by `__TAURI_INTERNALS__` presence. Pure builders `crossProbeSelection`/`scopeSelection` are unit-tested; the payload carries model lookups, never geometry. |
 | `app/src/style.css` | Theme vars. Dark default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
 
 Deps: `@tauri-apps/api`, `elkjs`. Schematic = SVG; waveform = canvas 2D. Right-click
