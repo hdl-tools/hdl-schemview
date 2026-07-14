@@ -32,6 +32,12 @@ import { scopeFrames } from "./tree";
 import { formatLogEntry, type LogLevel } from "./log";
 import { lineRangeForSpan } from "./source";
 import {
+  formatExcluded,
+  loadExcluded,
+  parseExcluded,
+  saveExcluded,
+} from "./prefs";
+import {
   defaultDisplayUnit,
   displayScale,
   displayValue,
@@ -170,12 +176,12 @@ async function load() {
         topName,
         incdirs,
         trace,
-        ["TOP", "tb", "soc_pkg"],
+        loadExcluded(),
         srcRoot,
       );
     } else {
       log("info", `loading model ${model}…`);
-      top = await api.loadDesign(model, trace, ["TOP", "tb", "soc_pkg"], srcRoot);
+      top = await api.loadDesign(model, trace, loadExcluded(), srcRoot);
     }
     log("info", `loaded ${top}`);
     state.stack = [];
@@ -1278,6 +1284,9 @@ function activateTab(panelId: string) {
     const on = b.dataset.panel === panelId;
     b.classList.toggle("active", on);
     b.setAttribute("aria-selected", String(on));
+    // On-demand tabs (schematic / waveform, #17) start hidden; activating one —
+    // via the toolbar Show buttons or an append/show-in action — reveals it.
+    if (on) b.hidden = false;
   });
   group.querySelectorAll<HTMLElement>(".tab-aux").forEach((a) => {
     a.hidden = a.dataset.panel !== panelId;
@@ -2166,8 +2175,9 @@ async function addToWaveform(wave: WaveLink) {
 
 // -- bootstrap -------------------------------------------------------------
 
-// Dark is the default; the toggle flips to a light schematic theme and persists.
-function initTheme() {
+// Dark is the default; Settings flips to a light schematic theme and persists it
+// under the existing "theme" key (#17 folds the old toolbar toggle into the pane).
+function applyStoredTheme() {
   try {
     if (localStorage.getItem("theme") === "light") {
       document.documentElement.dataset.theme = "light";
@@ -2175,17 +2185,37 @@ function initTheme() {
   } catch {
     /* localStorage may be unavailable; default dark is fine */
   }
-  $("theme-toggle").addEventListener("click", () => {
-    const root = document.documentElement;
-    const toLight = root.dataset.theme !== "light";
-    if (toLight) root.dataset.theme = "light";
-    else delete root.dataset.theme;
-    try {
-      localStorage.setItem("theme", toLight ? "light" : "dark");
-    } catch {
-      /* ignore persistence failure */
-    }
-  });
+}
+
+function setTheme(theme: "light" | "dark") {
+  const root = document.documentElement;
+  if (theme === "light") root.dataset.theme = "light";
+  else delete root.dataset.theme;
+  try {
+    localStorage.setItem("theme", theme);
+  } catch {
+    /* ignore persistence failure */
+  }
+}
+
+// Populate the Settings pane (#17) from persisted prefs and wire each control back
+// to prefs.ts. Theme applies live; excluded scopes take effect on the next load
+// (read there via loadExcluded()).
+function initSettings() {
+  applyStoredTheme();
+
+  const theme = $("set-theme") as HTMLSelectElement;
+  theme.value =
+    document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  theme.addEventListener("change", () =>
+    setTheme(theme.value === "light" ? "light" : "dark"),
+  );
+
+  const excluded = $("set-excluded") as HTMLInputElement;
+  excluded.value = formatExcluded(loadExcluded());
+  excluded.addEventListener("change", () =>
+    saveExcluded(parseExcluded(excluded.value)),
+  );
 }
 
 // Waveform zoom / pan / marker interaction. Listeners are delegated on #wave-list so
@@ -2318,7 +2348,7 @@ async function init() {
   $("load").addEventListener("click", load);
   $("load-mode").addEventListener("change", syncLoadMode);
   syncLoadMode();
-  initTheme();
+  initSettings();
   setupZoom();
   setupWaveInteraction();
   syncUnitSelect();
