@@ -107,16 +107,21 @@ and the radix submenu adds a **State name** toggle.
 
 ## Tauri commands (`app/src-tauri/src/lib.rs` ↔ `app/src/api.ts`)
 
-Delegate to a global `AppState(Mutex<Session>)`. This single `Session` is **shared
-across all windows** (#18 PR2): detached pane windows are created from the frontend
-via `WebviewWindow` (no Rust command) and their `invoke`s resolve against the same
-loaded design — so `capabilities/default.json` grants window/webview-create +
-management perms and scopes to the `main`/`schematic`/`waveform` labels.
+Delegate to a global `AppState(Mutex<HashMap<SessionId, Session>>)` (#168) — sessions
+keyed by id. **Multi-session (#168):** every command (except `startup_args`) takes an
+optional `session_id`; omitting it (all existing `api.ts` calls) targets the `"main"`
+session, so single-session behavior is unchanged, while an independent window
+(#170/#171) passes its own id to load + query a separate design/trace. `load_design`
+/`elaborate_and_load` insert under the id; `unload_design` drops it (window close).
+Detached pane windows are still created from the frontend via `WebviewWindow` (no Rust
+command); `capabilities/default.json` grants window/webview-create + management perms
+and scopes to the `main`/`waveform`/`schematic`/`schematic-*` labels (#169).
 
-| Command | Args | Returns |
+| Command | Args (all also take optional `session_id`) | Returns |
 | --- | --- | --- |
-| `load_design` | `model, trace, excluded[], srcRoot` | `String` (top scope) |
+| `load_design` | `model, trace, excluded[], srcRoot` | `String` (top scope) — inserts under `session_id` (default `main`) |
 | `elaborate_and_load` | `filelist, top, incdirs[], trace, excluded[], srcRoot` | `String` (top scope) — runs `svxprobe-elaborate` (on PATH) on a `.f` designlist, then loads |
+| `unload_design` | — | `()` — drops the session (#168); idempotent |
 | `scope_graph` | `scope` | `SchematicGraph` |
 | `expand_node` | `node` (id) | `SchematicGraph` |
 | `hierarchy_tree` | `scope, depth` | `TreeNode` (lazy: children to `depth`, `expandable` beyond) |
@@ -127,7 +132,7 @@ management perms and scopes to the `main`/`schematic`/`waveform` labels.
 | `signal_values` | `signalRef` | `ValueChange[]` |
 | `source_text` | `file` (id) | `String` |
 | `trace_timescale` | — | `TraceTimescale \| null` (factor + normalized unit) |
-| `startup_args` | — | `StartupArgs \| null` (#136) — CLI launch args (`-f/-top/-I/-trace/-src-root`) parsed by the shell before the window opened; the frontend prefills the load form + auto-loads |
+| `startup_args` | — (no `session_id`) | `StartupArgs \| null` (#136) — CLI launch args (`-f/-top/-I/-trace/-src-root`) parsed by the shell before the window opened; the frontend prefills the load form + auto-loads |
 
 The shell parses `std::env::args()` in `run()` **before** any window (see
 `svxprobe-gui::startup`): `-h`/`--help` → usage + exit 0; a usage error → stderr + exit 2;

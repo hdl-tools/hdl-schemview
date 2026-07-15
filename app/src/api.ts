@@ -1,4 +1,10 @@
 // Typed wrappers over the Tauri commands exposed by app/src-tauri.
+//
+// Multi-session (#168): every command accepts an optional trailing `sessionId`.
+// Omitting it (all existing callers) targets the backend's "main" session, so
+// single-session behavior is unchanged; an independent window passes its own id
+// to load/query a separate design + trace. `undefined` is dropped from the invoke
+// payload, so the Rust `Option<String>` resolves to the default.
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ProbeResponse,
@@ -10,8 +16,13 @@ import type {
 } from "./types";
 
 export const api = {
-  loadDesign: (model: string, trace: string, excluded: string[], srcRoot: string) =>
-    invoke<string>("load_design", { model, trace, excluded, srcRoot }),
+  loadDesign: (
+    model: string,
+    trace: string,
+    excluded: string[],
+    srcRoot: string,
+    sessionId?: string,
+  ) => invoke<string>("load_design", { sessionId, model, trace, excluded, srcRoot }),
   elaborateAndLoad: (
     filelist: string,
     top: string,
@@ -19,25 +30,40 @@ export const api = {
     trace: string,
     excluded: string[],
     srcRoot: string,
-  ) => invoke<string>("elaborate_and_load", { filelist, top, incdirs, trace, excluded, srcRoot }),
+    sessionId?: string,
+  ) =>
+    invoke<string>("elaborate_and_load", {
+      sessionId,
+      filelist,
+      top,
+      incdirs,
+      trace,
+      excluded,
+      srcRoot,
+    }),
+  unloadDesign: (sessionId?: string) => invoke<void>("unload_design", { sessionId }),
 
-  scopeGraph: (scope: string) => invoke<SchematicGraph>("scope_graph", { scope }),
-  expandNode: (node: number) => invoke<SchematicGraph>("expand_node", { node }),
-  hierarchyTree: (scope: string, depth: number) =>
-    invoke<TreeNode>("hierarchy_tree", { scope, depth }),
-  cone: (net: number, dir: string, depth: number) =>
-    invoke<SchematicGraph>("cone", { net, dir, depth }),
+  scopeGraph: (scope: string, sessionId?: string) =>
+    invoke<SchematicGraph>("scope_graph", { sessionId, scope }),
+  expandNode: (node: number, sessionId?: string) =>
+    invoke<SchematicGraph>("expand_node", { sessionId, node }),
+  hierarchyTree: (scope: string, depth: number, sessionId?: string) =>
+    invoke<TreeNode>("hierarchy_tree", { sessionId, scope, depth }),
+  cone: (net: number, dir: string, depth: number, sessionId?: string) =>
+    invoke<SchematicGraph>("cone", { sessionId, net, dir, depth }),
 
-  probeNode: (path: string, context: string | null) =>
-    invoke<ProbeResponse | null>("probe_node", { path, context }),
-  probeSignal: (fullName: string, context: string | null) =>
-    invoke<ProbeResponse | null>("probe_signal", { fullName, context }),
-  probeSource: (file: number, offset: number, context: string | null) =>
-    invoke<ProbeResponse | null>("probe_source", { file, offset, context }),
+  probeNode: (path: string, context: string | null, sessionId?: string) =>
+    invoke<ProbeResponse | null>("probe_node", { sessionId, path, context }),
+  probeSignal: (fullName: string, context: string | null, sessionId?: string) =>
+    invoke<ProbeResponse | null>("probe_signal", { sessionId, fullName, context }),
+  probeSource: (file: number, offset: number, context: string | null, sessionId?: string) =>
+    invoke<ProbeResponse | null>("probe_source", { sessionId, file, offset, context }),
 
-  signalValues: (signalRef: number) =>
-    invoke<ValueChange[]>("signal_values", { signalRef }),
-  sourceText: (file: number) => invoke<string>("source_text", { file }),
-  traceTimescale: () => invoke<TraceTimescale | null>("trace_timescale", {}),
+  signalValues: (signalRef: number, sessionId?: string) =>
+    invoke<ValueChange[]>("signal_values", { sessionId, signalRef }),
+  sourceText: (file: number, sessionId?: string) =>
+    invoke<string>("source_text", { sessionId, file }),
+  traceTimescale: (sessionId?: string) =>
+    invoke<TraceTimescale | null>("trace_timescale", { sessionId }),
   startupArgs: () => invoke<StartupArgs | null>("startup_args", {}),
 };
