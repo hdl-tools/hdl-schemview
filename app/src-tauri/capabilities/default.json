@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core capability for the main window and detached pane windows (#18).",
-  "windows": ["main", "schematic", "waveform"],
+  "description": "Core capability for the main window and detached pane windows (#18, #169).",
+  "windows": ["main", "waveform", "schematic", "schematic-*"],
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",

@@ -21,17 +21,21 @@ export type RevealTarget = "source" | "schematic" | "waveform";
 // One cross-pane selection. Exactly one of `resp` (a resolved cross-probe: source
 // location, wave link, schematic anchor + ambiguity alternatives) or `scope` (a
 // scope path to drill the schematic into, from a tree click) is set; `targets`
-// says which panes act on it. `origin` tags the publishing window — unused while
-// everything shares one window, but the detached-window work (#18 PR2) reads it to
-// skip a window re-driving a pane it no longer hosts.
+// says which panes act on it. `origin` tags the publishing window. `dest`
+// optionally addresses one specific window by label (#169) — `null` broadcasts to
+// the default owner (main's own panes). With independent schematic panes, a
+// broadcast schematic selection drives only main's schematic; pop-outs are
+// self-driven and ignore it unless a selection is addressed to them by label.
 export interface Selection {
   origin: string;
   targets: RevealTarget[];
   resp: ProbeResponse | null;
   scope: string | null;
+  dest: string | null;
 }
 
-// Default origin until the detached-window work stamps a per-window label.
+// Default origin/label of the main window. Detached windows stamp their own
+// unique label (#169) as `origin`.
 export const SELF = "main";
 
 // Build a selection that reveals a resolved cross-probe in the named panes.
@@ -39,13 +43,18 @@ export function crossProbeSelection(
   resp: ProbeResponse,
   targets: RevealTarget[],
   origin: string = SELF,
+  dest: string | null = null,
 ): Selection {
-  return { origin, targets, resp, scope: null };
+  return { origin, targets, resp, scope: null, dest };
 }
 
 // Build a selection that drills the schematic into a scope path (a tree jump).
-export function scopeSelection(scope: string, origin: string = SELF): Selection {
-  return { origin, targets: ["schematic"], resp: null, scope };
+export function scopeSelection(
+  scope: string,
+  origin: string = SELF,
+  dest: string | null = null,
+): Selection {
+  return { origin, targets: ["schematic"], resp: null, scope, dest };
 }
 
 // -- window modes (#18 PR2) -------------------------------------------------
@@ -60,18 +69,40 @@ export function paneModeOf(search: string): PaneMode {
   return p === "schematic" || p === "waveform" ? p : "main";
 }
 
-// Whether a window in `mode` should drive `target` for an incoming selection.
-// The main window always hosts source, and hosts schematic/waveform unless that
-// pane is currently detached into its own window; a detached window drives only
-// its own pane. This is what keeps a selection from being applied twice (once in
-// the detached window, once in the now-empty main tab) once panes pop out.
-export function ownsTarget(
-  mode: PaneMode,
+// A window's identity for ownership decisions: its pane `mode` (main / schematic /
+// waveform) and its unique `self` label (main = "main", pop-outs = "schematic-2"…).
+export interface WindowId {
+  mode: PaneMode;
+  self: string;
+}
+
+// Whether `win` should drive `target` for an incoming selection addressed to
+// `dest` (null = broadcast), given which panes are detached from main.
+//
+// - `source`: only the main window hosts it.
+// - `waveform`: mirror model (unchanged, #18) — main drives it unless the pane is
+//   detached, and the detached waveform window drives it. (Independent waveform
+//   panes are #170; not here.)
+// - `schematic`: independent model (#169) — an addressed selection drives exactly
+//   the window whose label matches `dest`; a broadcast selection drives only
+//   main's own schematic. Pop-out schematic windows are self-driven (local drill)
+//   and never follow a broadcast, so selecting in one pane can't move another.
+export function ownsSelection(
+  win: WindowId,
   target: RevealTarget,
+  dest: string | null,
   detached: readonly RevealTarget[],
 ): boolean {
-  if (mode === "main") return target === "source" || !detached.includes(target);
-  return mode === target;
+  switch (target) {
+    case "source":
+      return win.mode === "main";
+    case "waveform":
+      return win.mode === "main"
+        ? !detached.includes("waveform")
+        : win.mode === "waveform";
+    case "schematic":
+      return dest !== null ? win.self === dest : win.mode === "main";
+  }
 }
 
 // -- transport --------------------------------------------------------------

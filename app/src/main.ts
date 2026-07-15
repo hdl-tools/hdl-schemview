@@ -31,10 +31,11 @@ import type {
 import { scopeFrames } from "./tree";
 import {
   crossProbeSelection,
-  ownsTarget,
+  ownsSelection,
   paneModeOf,
   publish,
   scopeSelection,
+  SELF,
   subscribe,
   type PaneMode,
   type RevealTarget,
@@ -154,16 +155,31 @@ const context = () => (state.stack.length ? state.stack[state.stack.length - 1].
 // from the launch URL (`index.html?pane=schematic`).
 const windowMode: PaneMode = paneModeOf(location.search);
 
+// This window's unique label (#169): "main" for the main window; a detached pane
+// window is launched with `?win=<label>` (e.g. `schematic-2`) so that multiple
+// independent schematic windows coexist. Falls back to the pane mode for a legacy
+// single-pane window with no `win` param.
+const selfLabel: string =
+  new URLSearchParams(location.search).get("win") ||
+  (windowMode === "main" ? SELF : windowMode);
+
+// Monotonic counter for unique schematic pop-out labels (main window only — only
+// the main window creates pop-outs, so a local counter guarantees uniqueness).
+let schematicPops = 0;
+
 // Panes currently detached into their own window — main-window bookkeeping so the
-// bus handler doesn't also drive the now-empty main tab (see `ownsTarget`). Always
-// empty in a detached window, which only ever drives its own pane.
+// bus handler doesn't also drive the now-empty main tab (see `ownsSelection`).
+// Only the waveform pane still uses this mirror/handover model; schematic pop-outs
+// are independent (#169) and never registered here. Always empty in a detached
+// window, which only ever drives its own pane.
 const detached = new Set<RevealTarget>();
 
-// localStorage keys under which the main window seeds a detached window's initial
-// state. Shared-origin localStorage is written before the window is created and
-// read synchronously on its boot, so there is no event race to coordinate.
-const DETACH_SCOPE_KEY = "detach:schematic:scope";
+// localStorage key under which the main window seeds a detached waveform window's
+// initial state. Shared-origin localStorage is written before the window is created
+// and read synchronously on its boot, so there is no event race to coordinate.
+// Schematic pop-outs seed per-label under `detach:<label>:scope` (#169).
 const DETACH_WAVE_KEY = "detach:waveform";
+const detachScopeKey = (label: string) => `detach:${label}:scope`;
 
 // A WaveTrace carries an enumMap Map that JSON.stringify drops; (de)serialize it
 // as pairs so a detached waveform window rebuilds the exact lanes main has.
@@ -206,8 +222,12 @@ async function popOut(pane: DetachablePane) {
     log("warn", "load a design before detaching the schematic");
     return;
   }
+  // schematic (#169): each pop-out is an *independent* window with a unique label,
+  // seeded once with main's current scope; main keeps its own schematic (no
+  // handover). waveform stays a single mirror window here — #170 generalizes it.
+  const label = pane === "schematic" ? `schematic-${++schematicPops}` : pane;
   if (pane === "schematic") {
-    localStorage.setItem(DETACH_SCOPE_KEY, context() ?? "");
+    localStorage.setItem(detachScopeKey(label), context() ?? "");
   } else {
     const snap = {
       waves: state.waves.map(storeTrace),
@@ -219,13 +239,17 @@ async function popOut(pane: DetachablePane) {
   }
   try {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const existing = await WebviewWindow.getByLabel(pane);
-    if (existing) {
-      await existing.setFocus();
-      return;
+    // Waveform is single-instance (mirror): focus the existing window instead of
+    // spawning a duplicate. Schematic pop-outs are always new independent windows.
+    if (pane === "waveform") {
+      const existing = await WebviewWindow.getByLabel(label);
+      if (existing) {
+        await existing.setFocus();
+        return;
+      }
     }
-    const w = new WebviewWindow(pane, {
-      url: `index.html?pane=${pane}`,
+    const w = new WebviewWindow(label, {
+      url: `index.html?pane=${pane}&win=${label}`,
       title: `hdl-schemview — ${pane}`,
       width: pane === "schematic" ? 1000 : 1200,
       height: pane === "schematic" ? 800 : 500,
@@ -233,10 +257,13 @@ async function popOut(pane: DetachablePane) {
     w.once("tauri://error", (e) =>
       log("error", `detach failed: ${JSON.stringify(e.payload)}`),
     );
-    // Once the window is up the main window hands this pane over; the tab + its
-    // pop-out fold away, and closing the window reattaches it.
-    markDetached(pane, true);
-    void w.once("tauri://destroyed", () => markDetached(pane, false));
+    // Waveform hands its pane over (tab + pop-out fold away, closing reattaches);
+    // schematic does not — main keeps driving its own schematic while pop-outs
+    // navigate independently.
+    if (pane === "waveform") {
+      markDetached(pane, true);
+      void w.once("tauri://destroyed", () => markDetached(pane, false));
+    }
   } catch (e) {
     log("error", `detach failed: ${e}`);
   }
@@ -1569,12 +1596,14 @@ async function schematicMenu(ev: MouseEvent, path: string) {
         ? "Append to waveform"
         : "Append to waveform (not in trace)",
       enabled: resp.wave.in_trace,
-      onClick: () => void publish(crossProbeSelection(resp, ["waveform"])),
+      onClick: () =>
+        void publish(crossProbeSelection(resp, ["waveform"], selfLabel)),
     },
     {
       label: resp.source ? "Show in source" : "Show in source (no location)",
       enabled: !!resp.source,
-      onClick: () => void publish(crossProbeSelection(resp, ["source"])),
+      onClick: () =>
+        void publish(crossProbeSelection(resp, ["source"], selfLabel)),
     },
   ]);
 }
@@ -1612,7 +1641,10 @@ async function handleSelection(sel: Selection) {
   // the main window owns the rest (source always; schematic/waveform until they
   // detach). This is what keeps a selection from being applied in both windows.
   const owns = (t: RevealTarget) =>
-    sel.targets.includes(t) && ownsTarget(windowMode, t, [...detached]);
+    sel.targets.includes(t) &&
+    ownsSelection({ mode: windowMode, self: selfLabel }, t, sel.dest, [
+      ...detached,
+    ]);
   if (sel.scope !== null && owns("schematic")) navToScope(sel.scope);
   if (sel.resp) {
     if (owns("source")) await showInSource(sel.resp);
@@ -2540,7 +2572,9 @@ async function initDetached(pane: DetachablePane) {
   if (pane === "schematic") {
     setupZoom();
     activateTab("schematic-pane");
-    const scope = localStorage.getItem(DETACH_SCOPE_KEY);
+    // Seed this independent pane on the scope main was viewing when it popped out
+    // (#169); thereafter it navigates only via its own local drill.
+    const scope = localStorage.getItem(detachScopeKey(selfLabel));
     if (scope) navToScope(scope);
     return;
   }
@@ -2609,10 +2643,10 @@ async function init() {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) =>
     b.addEventListener("click", () => activateTab(b.dataset.panel!)),
   );
-  // Reveal the pane, or focus its window if it is detached (#18 PR2).
-  $("show-schematic").addEventListener("click", () =>
-    detached.has("schematic") ? void focusPane("schematic") : activateTab("schematic-pane"),
-  );
+  // Reveal main's own schematic tab (#169: schematic pop-outs are independent, so
+  // main always keeps its own schematic — the button never chases a pop-out).
+  $("show-schematic").addEventListener("click", () => activateTab("schematic-pane"));
+  // Waveform stays a mirror: reveal the tab, or focus its window if detached (#18).
   $("show-waveform").addEventListener("click", () =>
     detached.has("waveform") ? void focusPane("waveform") : activateTab("wave-pane"),
   );
