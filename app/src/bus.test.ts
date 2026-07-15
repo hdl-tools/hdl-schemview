@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   crossProbeSelection,
-  ownsTarget,
+  ownsSelection,
   paneModeOf,
   scopeSelection,
   SELF,
@@ -22,11 +22,16 @@ describe("crossProbeSelection", () => {
     expect(sel.targets).toEqual(["source"]);
     expect(sel.scope).toBeNull();
     expect(sel.origin).toBe(SELF);
+    expect(sel.dest).toBeNull();
   });
   it("supports multiple targets and a custom origin", () => {
     const sel = crossProbeSelection(resp, ["source", "waveform"], "schematic");
     expect(sel.targets).toEqual(["source", "waveform"]);
     expect(sel.origin).toBe("schematic");
+  });
+  it("can address a specific destination window", () => {
+    const sel = crossProbeSelection(resp, ["schematic"], "main", "schematic-2");
+    expect(sel.dest).toBe("schematic-2");
   });
 });
 
@@ -37,6 +42,11 @@ describe("scopeSelection", () => {
     expect(sel.targets).toEqual(["schematic"]);
     expect(sel.resp).toBeNull();
     expect(sel.origin).toBe(SELF);
+    expect(sel.dest).toBeNull();
+  });
+  it("can address a specific destination window", () => {
+    const sel = scopeSelection("top.u", "main", "schematic-2");
+    expect(sel.dest).toBe("schematic-2");
   });
 });
 
@@ -52,19 +62,36 @@ describe("paneModeOf", () => {
   });
 });
 
-describe("ownsTarget", () => {
-  it("main owns source always, and other panes unless detached", () => {
-    expect(ownsTarget("main", "source", ["schematic", "waveform"])).toBe(true);
-    expect(ownsTarget("main", "schematic", [])).toBe(true);
-    expect(ownsTarget("main", "schematic", ["schematic"])).toBe(false);
-    expect(ownsTarget("main", "waveform", ["schematic"])).toBe(true);
-    expect(ownsTarget("main", "waveform", ["waveform"])).toBe(false);
+describe("ownsSelection", () => {
+  const main = { mode: "main" as const, self: "main" };
+  const wave = { mode: "waveform" as const, self: "waveform" };
+  const schem1 = { mode: "schematic" as const, self: "schematic-1" };
+  const schem2 = { mode: "schematic" as const, self: "schematic-2" };
+
+  it("source is owned only by the main window", () => {
+    expect(ownsSelection(main, "source", null, [])).toBe(true);
+    expect(ownsSelection(schem1, "source", null, [])).toBe(false);
+    expect(ownsSelection(wave, "source", null, [])).toBe(false);
   });
-  it("a detached window owns only its own pane", () => {
-    expect(ownsTarget("schematic", "schematic", [])).toBe(true);
-    expect(ownsTarget("schematic", "source", [])).toBe(false);
-    expect(ownsTarget("schematic", "waveform", [])).toBe(false);
-    expect(ownsTarget("waveform", "waveform", [])).toBe(true);
-    expect(ownsTarget("waveform", "schematic", [])).toBe(false);
+
+  it("waveform keeps the mirror model (main yields when detached)", () => {
+    expect(ownsSelection(main, "waveform", null, [])).toBe(true);
+    expect(ownsSelection(main, "waveform", null, ["waveform"])).toBe(false);
+    expect(ownsSelection(wave, "waveform", null, [])).toBe(true);
+    expect(ownsSelection(schem1, "waveform", null, [])).toBe(false);
+  });
+
+  it("a broadcast schematic selection drives only the main window", () => {
+    // #169: schematic detach is independent, not a mirror — main keeps its own
+    // schematic even while pop-outs exist, and pop-outs never follow a broadcast.
+    expect(ownsSelection(main, "schematic", null, ["schematic"])).toBe(true);
+    expect(ownsSelection(schem1, "schematic", null, [])).toBe(false);
+    expect(ownsSelection(schem2, "schematic", null, [])).toBe(false);
+  });
+
+  it("an addressed schematic selection goes to exactly that window", () => {
+    expect(ownsSelection(schem2, "schematic", "schematic-2", [])).toBe(true);
+    expect(ownsSelection(schem1, "schematic", "schematic-2", [])).toBe(false);
+    expect(ownsSelection(main, "schematic", "schematic-2", [])).toBe(false);
   });
 });
