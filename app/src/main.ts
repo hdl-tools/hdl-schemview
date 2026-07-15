@@ -452,6 +452,15 @@ function treeItem(node: TreeNode): HTMLLIElement {
   };
   // Clicking the row navigates the schematic to this scope.
   row.onclick = () => jumpToScope(node.path);
+  // Double-clicking reveals the node's module/instance in the source pane (#164):
+  // probe its canonical path → source def → block-span highlight, complementing the
+  // single-click schematic nav so the tree drives both views.
+  row.ondblclick = (e) => {
+    e.stopPropagation();
+    void api
+      .probeNode(node.path, context())
+      .then((r) => r && publish(crossProbeSelection(r, ["source"])));
+  };
   return li;
 }
 
