@@ -2248,6 +2248,22 @@ function openContextMenu(x: number, y: number, items: MenuItem[]) {
   placeMenu(menu, x, y);
 }
 
+// Left-click a source line to move the highlight to just that line (#163). A
+// lightweight cursor affordance: shift the `.hl` marker to the clicked line — no
+// probe, no re-render, no scroll jump, so it doesn't re-anchor to (or highlight) the
+// whole construct block the way "Show in source" (#158) does. Right-click still owns
+// the model cross-probe menu (Show in schematic / Append to waveform).
+function onSourceClick(ev: MouseEvent) {
+  // Ignore a click that ends a text drag-selection (user is selecting to copy),
+  // so re-highlighting doesn't fight the selection.
+  if (!window.getSelection()?.isCollapsed) return;
+  const host = $("source");
+  const line = (ev.target as Element | null)?.closest(".line");
+  if (!line || !host.contains(line)) return;
+  host.querySelectorAll(".line.hl").forEach((el) => el.classList.remove("hl"));
+  line.classList.add("hl");
+}
+
 // Right-click in the source pane: resolve the signal/object under the cursor and
 // offer "Show in schematic" / "Append to waveform" (the latter disabled when the
 // object has no trace signal).
@@ -2604,7 +2620,8 @@ async function init() {
   $("pop-schematic").addEventListener("click", () => void popOut("schematic"));
   $("pop-waveform").addEventListener("click", () => void popOut("waveform"));
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
-  // Source right-click menu (#19), and dismissals.
+  // Source left-click re-highlight (#163) + right-click menu (#19), and dismissals.
+  $("source").addEventListener("click", onSourceClick);
   $("source").addEventListener("contextmenu", onSourceContextMenu);
   document.addEventListener("click", closeContextMenu);
   document.addEventListener("keydown", (e) => {
