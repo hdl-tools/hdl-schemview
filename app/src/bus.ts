@@ -70,19 +70,22 @@ export function paneModeOf(search: string): PaneMode {
 }
 
 // A window's identity for ownership decisions: its pane `mode` (main / schematic /
-// waveform) and its unique `self` label (main = "main", pop-outs = "schematic-2"…).
+// waveform) and its unique `self` label (main = "main", pop-outs = "schematic-2",
+// "waveform-1"…).
 export interface WindowId {
   mode: PaneMode;
   self: string;
 }
 
 // Whether `win` should drive `target` for an incoming selection addressed to
-// `dest` (null = broadcast), given which panes are detached from main.
+// `dest` (null = broadcast). `detached` is retained for API compatibility but only
+// consulted by callers; ownership is now purely id/dest keyed for the pane views.
 //
 // - `source`: only the main window hosts it.
-// - `waveform`: mirror model (unchanged, #18) — main drives it unless the pane is
-//   detached, and the detached waveform window drives it. (Independent waveform
-//   panes are #170; not here.)
+// - `waveform`: independent model (#170) — an addressed selection drives exactly the
+//   window whose label matches `dest` (main = "main", pop-outs = "waveform-1"…); a
+//   broadcast drives only main's own waveform. Pop-out waveform windows are
+//   self-driven and never follow a broadcast.
 // - `schematic`: independent model (#169) — an addressed selection drives exactly
 //   the window whose label matches `dest`; a broadcast selection drives only
 //   main's own schematic. Pop-out schematic windows are self-driven (local drill)
@@ -91,15 +94,12 @@ export function ownsSelection(
   win: WindowId,
   target: RevealTarget,
   dest: string | null,
-  detached: readonly RevealTarget[],
+  _detached: readonly RevealTarget[],
 ): boolean {
   switch (target) {
     case "source":
       return win.mode === "main";
     case "waveform":
-      return win.mode === "main"
-        ? !detached.includes("waveform")
-        : win.mode === "waveform";
     case "schematic":
       return dest !== null ? win.self === dest : win.mode === "main";
   }

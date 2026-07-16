@@ -167,6 +167,9 @@ body.detached-schematic #content { grid-area:content; }
 body.detached-waveform #breadcrumb,
 body.detached-waveform #content { display:none; }
 body.detached-waveform #bottom-group { grid-area:content; }
+/* The waveform pane's own "Load trace…" affordance (#170) stays available inside a
+   detached waveform window (unlike the ⇱ detach button, hidden by the .pop-btn rule). */
+body.detached-waveform #load-trace { display:inline-block; }
 /* Marker readout + zoom controls ride in the waveform tab's .tab-aux (#99). */
 #wave-readout { color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }
 #wave-unit { background:var(--field); color:var(--fg); border:1px solid var(--border); font-size:11px; padding:1px 2px; cursor:pointer; }

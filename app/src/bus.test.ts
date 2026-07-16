@@ -64,21 +64,32 @@ describe("paneModeOf", () => {
 
 describe("ownsSelection", () => {
   const main = { mode: "main" as const, self: "main" };
-  const wave = { mode: "waveform" as const, self: "waveform" };
+  const wave1 = { mode: "waveform" as const, self: "waveform-1" };
+  const wave2 = { mode: "waveform" as const, self: "waveform-2" };
   const schem1 = { mode: "schematic" as const, self: "schematic-1" };
   const schem2 = { mode: "schematic" as const, self: "schematic-2" };
 
   it("source is owned only by the main window", () => {
     expect(ownsSelection(main, "source", null, [])).toBe(true);
     expect(ownsSelection(schem1, "source", null, [])).toBe(false);
-    expect(ownsSelection(wave, "source", null, [])).toBe(false);
+    expect(ownsSelection(wave1, "source", null, [])).toBe(false);
   });
 
-  it("waveform keeps the mirror model (main yields when detached)", () => {
+  it("a broadcast waveform selection drives only the main window", () => {
+    // #170: waveform detach is independent, not a mirror — main keeps its own
+    // waveform even while pop-outs exist, and pop-outs never follow a broadcast.
     expect(ownsSelection(main, "waveform", null, [])).toBe(true);
-    expect(ownsSelection(main, "waveform", null, ["waveform"])).toBe(false);
-    expect(ownsSelection(wave, "waveform", null, [])).toBe(true);
-    expect(ownsSelection(schem1, "waveform", null, [])).toBe(false);
+    expect(ownsSelection(wave1, "waveform", null, [])).toBe(false);
+    expect(ownsSelection(wave2, "waveform", null, [])).toBe(false);
+  });
+
+  it("an addressed waveform selection goes to exactly that window", () => {
+    expect(ownsSelection(wave2, "waveform", "waveform-2", [])).toBe(true);
+    expect(ownsSelection(wave1, "waveform", "waveform-2", [])).toBe(false);
+    expect(ownsSelection(main, "waveform", "waveform-2", [])).toBe(false);
+    // main is addressable by its own label.
+    expect(ownsSelection(main, "waveform", "main", [])).toBe(true);
+    expect(ownsSelection(wave1, "waveform", "main", [])).toBe(false);
   });
 
   it("a broadcast schematic selection drives only the main window", () => {
