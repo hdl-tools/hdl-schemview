@@ -128,6 +128,9 @@ const state = {
   // User-set widths (px) for the resizable name/value columns; undefined → the CSS
   // default (minmax). Persisted in localStorage (#84).
   waveCol: {} as { name?: number; value?: number },
+  // The design main last loaded (#170), so a waveform pop-out can boot its own
+  // session on the same model. Null until the first successful load.
+  loaded: null as LoadSpec | null,
 };
 
 // Saved viewport per scope path, surviving stack pops so revisiting a scope
@@ -163,29 +166,57 @@ const selfLabel: string =
   new URLSearchParams(location.search).get("win") ||
   (windowMode === "main" ? SELF : windowMode);
 
-// Monotonic counter for unique schematic pop-out labels (main window only — only
-// the main window creates pop-outs, so a local counter guarantees uniqueness).
+// Monotonic counters for unique pop-out labels (main window only — only the main
+// window creates pop-outs, so a local counter guarantees uniqueness). Schematic
+// (#169) and waveform (#170) pop-outs are each independent windows.
 let schematicPops = 0;
+let wavePops = 0;
 
-// Panes currently detached into their own window — main-window bookkeeping so the
-// bus handler doesn't also drive the now-empty main tab (see `ownsSelection`).
-// Only the waveform pane still uses this mirror/handover model; schematic pop-outs
-// are independent (#169) and never registered here. Always empty in a detached
-// window, which only ever drives its own pane.
-const detached = new Set<RevealTarget>();
+// A waveform pop-out owns its own backend session (#170), keyed by its window label,
+// so it can load and query its own trace of the same design. The main window and
+// schematic panes use the default "main" session (an undefined session id).
+const sid: string | undefined = windowMode === "waveform" ? selfLabel : undefined;
 
-// localStorage key under which the main window seeds a detached waveform window's
-// initial state. Shared-origin localStorage is written before the window is created
-// and read synchronously on its boot, so there is no event race to coordinate.
-// Schematic pop-outs seed per-label under `detach:<label>:scope` (#169).
-const DETACH_WAVE_KEY = "detach:waveform";
+// What the main window last loaded, captured so a waveform pop-out can boot its own
+// session on the same design (#170): a pre-elaborated model, or a designlist to
+// re-elaborate. Presence gates waveform detach.
+type LoadSpec =
+  | { mode: "model"; model: string; trace: string; excluded: string[]; srcRoot: string }
+  | {
+      mode: "filelist";
+      filelist: string;
+      top: string;
+      incdirs: string[];
+      trace: string;
+      excluded: string[];
+      srcRoot: string;
+    };
+
+// Per-label localStorage seed keys. The main window writes a pop-out's initial state
+// before creating the window; the pop-out reads it synchronously on boot, so there is
+// no event race. Schematic seeds its scope (#169); waveform seeds its load spec + lanes
+// (#170).
 const detachScopeKey = (label: string) => `detach:${label}:scope`;
+const detachWaveKey = (label: string) => `detach:${label}:wave`;
+
+// One seeded waveform pop-out: the design to (re)load under its own session, plus the
+// lanes/view/markers main was showing at pop-out time.
+interface WaveSnapshot {
+  load?: LoadSpec;
+  waves?: StoredTrace[];
+  waveView?: TimeWindow | null;
+  markers?: Markers;
+  waveUnit?: DisplayUnit;
+}
 
 // A WaveTrace carries an enumMap Map that JSON.stringify drops; (de)serialize it
 // as pairs so a detached waveform window rebuilds the exact lanes main has.
 interface StoredTrace {
   ref: number;
   name: string;
+  // Canonical model path of the signal (#170), so a lane survives a trace switch and
+  // an addressed append can re-resolve it against a different session's trace.
+  path?: string;
   values: WaveTrace["values"];
   radix?: Radix;
   enumPairs?: [number, string][];
@@ -195,6 +226,7 @@ function storeTrace(tr: WaveTrace): StoredTrace {
   return {
     ref: tr.ref,
     name: tr.name,
+    path: tr.path,
     values: tr.values,
     radix: tr.radix,
     enumPairs: tr.enumMap ? [...tr.enumMap] : undefined,
@@ -205,6 +237,7 @@ function loadTrace(s: StoredTrace): WaveTrace {
   return {
     ref: s.ref,
     name: s.name,
+    path: s.path,
     values: s.values,
     radix: s.radix,
     enumMap: s.enumPairs ? new Map(s.enumPairs) : undefined,
@@ -222,32 +255,28 @@ async function popOut(pane: DetachablePane) {
     log("warn", "load a design before detaching the schematic");
     return;
   }
-  // schematic (#169): each pop-out is an *independent* window with a unique label,
-  // seeded once with main's current scope; main keeps its own schematic (no
-  // handover). waveform stays a single mirror window here — #170 generalizes it.
-  const label = pane === "schematic" ? `schematic-${++schematicPops}` : pane;
+  if (pane === "waveform" && !state.loaded) {
+    log("warn", "load a design before detaching the waveform");
+    return;
+  }
+  // Each pop-out is an *independent* window with a unique label (#169 schematic,
+  // #170 waveform), seeded once from main's current state; main keeps its own pane.
+  const label =
+    pane === "schematic" ? `schematic-${++schematicPops}` : `waveform-${++wavePops}`;
   if (pane === "schematic") {
     localStorage.setItem(detachScopeKey(label), context() ?? "");
   } else {
-    const snap = {
+    const snap: WaveSnapshot = {
+      load: state.loaded ?? undefined,
       waves: state.waves.map(storeTrace),
       waveView: state.waveView,
       markers: state.markers,
       waveUnit: state.waveUnit,
     };
-    localStorage.setItem(DETACH_WAVE_KEY, JSON.stringify(snap));
+    localStorage.setItem(detachWaveKey(label), JSON.stringify(snap));
   }
   try {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    // Waveform is single-instance (mirror): focus the existing window instead of
-    // spawning a duplicate. Schematic pop-outs are always new independent windows.
-    if (pane === "waveform") {
-      const existing = await WebviewWindow.getByLabel(label);
-      if (existing) {
-        await existing.setFocus();
-        return;
-      }
-    }
     const w = new WebviewWindow(label, {
       url: `index.html?pane=${pane}&win=${label}`,
       title: `hdl-schemview — ${pane}`,
@@ -257,49 +286,14 @@ async function popOut(pane: DetachablePane) {
     w.once("tauri://error", (e) =>
       log("error", `detach failed: ${JSON.stringify(e.payload)}`),
     );
-    // Waveform hands its pane over (tab + pop-out fold away, closing reattaches);
-    // schematic does not — main keeps driving its own schematic while pop-outs
-    // navigate independently.
+    // A waveform pop-out owns its own backend session (#170); drop it when the window
+    // closes so the design/trace it loaded is freed.
     if (pane === "waveform") {
-      markDetached(pane, true);
-      void w.once("tauri://destroyed", () => markDetached(pane, false));
+      void w.once("tauri://destroyed", () => void api.unloadDesign(label));
     }
   } catch (e) {
     log("error", `detach failed: ${e}`);
   }
-}
-
-// Bring an already-detached pane's window to the front (from the toolbar Show
-// button, which otherwise reveals the empty main tab).
-async function focusPane(pane: DetachablePane) {
-  try {
-    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const w = await WebviewWindow.getByLabel(pane);
-    await w?.setFocus();
-  } catch (e) {
-    log("warn", `could not focus ${pane} window: ${e}`);
-  }
-}
-
-// Flip a pane's detached state in the main window: track it (so `handleSelection`
-// yields the pane to its window), hide/show the pop-out button, and fold away the
-// tab of a pane that just left (switching off it if it was showing).
-function markDetached(pane: DetachablePane, on: boolean) {
-  if (on) detached.add(pane);
-  else detached.delete(pane);
-  const panelId = pane === "schematic" ? "schematic-pane" : "wave-pane";
-  const fallback = pane === "schematic" ? "source-pane" : "status-pane";
-  const tab = document.querySelector<HTMLButtonElement>(
-    `.tab[data-panel="${panelId}"]`,
-  );
-  const pop = document.getElementById(pane === "schematic" ? "pop-schematic" : "pop-waveform");
-  if (pop) pop.hidden = on;
-  if (on && tab) {
-    if (tab.classList.contains("active")) activateTab(fallback);
-    tab.hidden = true;
-  }
-  // On reattach the tab stays hidden (its on-demand default); the toolbar Show
-  // button reveals main's own copy again.
 }
 
 // -- load ------------------------------------------------------------------
@@ -321,6 +315,7 @@ async function load() {
   const model = (($("model") as HTMLInputElement).value || "").trim();
   const trace = (($("trace") as HTMLInputElement).value || "").trim();
   const srcRoot = (($("srcroot") as HTMLInputElement).value || ".").trim();
+  const excluded = loadExcluded();
   // Elaboration can take seconds; block re-entry until this load settles — the
   // disabled flag also guards against the auto-load (#136) racing a manual click.
   const button = $("load") as HTMLButtonElement;
@@ -336,17 +331,14 @@ async function load() {
         .map((s) => s.trim())
         .filter(Boolean);
       log("info", `elaborating ${filelist || "designlist"}…`);
-      top = await api.elaborateAndLoad(
-        filelist,
-        topName,
-        incdirs,
-        trace,
-        loadExcluded(),
-        srcRoot,
-      );
+      top = await api.elaborateAndLoad(filelist, topName, incdirs, trace, excluded, srcRoot);
+      // Capture the load so a waveform pop-out can re-elaborate its own session (#170).
+      state.loaded = { mode: "filelist", filelist, top: topName, incdirs, trace, excluded, srcRoot };
     } else {
       log("info", `loading model ${model}…`);
-      top = await api.loadDesign(model, trace, loadExcluded(), srcRoot);
+      top = await api.loadDesign(model, trace, excluded, srcRoot);
+      // Capture the load so a waveform pop-out can load its own session (#170).
+      state.loaded = { mode: "model", model, trace, excluded, srcRoot };
     }
     log("info", `loaded ${top}`);
     state.stack = [];
@@ -1578,6 +1570,42 @@ async function crossProbePath(path: string, ev: MouseEvent) {
   await schematicMenu(ev, path);
 }
 
+// Live "Append to ▸ <pane>" destinations (#170): the main window plus every open
+// waveform pop-out, read from the window list so it works from any window.
+async function waveformDestinations(): Promise<string[]> {
+  try {
+    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const labels = (await WebviewWindow.getAll())
+      .map((w) => w.label)
+      .filter((l) => l.startsWith("waveform-"))
+      .sort();
+    return ["main", ...labels];
+  } catch {
+    return ["main"];
+  }
+}
+
+// The "Append to waveform" menu item for a resolved cross-probe (#170). With no
+// pop-outs it appends to main's own waveform; with live panes it becomes a flyout,
+// one entry per window, each addressing that window by label. Disabled when the
+// origin has no trace signal (the destination re-resolves by model path on append).
+async function appendWaveItem(resp: ProbeResponse): Promise<MenuItem> {
+  const enabled = resp.wave.in_trace;
+  const suffix = enabled ? "" : " (not in trace)";
+  const to = (dest: string) =>
+    void publish(crossProbeSelection(resp, ["waveform"], selfLabel, dest));
+  const dests = await waveformDestinations();
+  if (dests.length === 1) {
+    return { label: `Append to waveform${suffix}`, enabled, onClick: () => to("main") };
+  }
+  const name = (d: string) => (d === "main" ? "main window" : d);
+  return {
+    label: `Append to waveform${suffix}`,
+    enabled,
+    submenu: dests.map((d) => ({ label: name(d), enabled, onClick: () => to(d) })),
+  };
+}
+
 // Right-click action menu for a schematic object: resolve it once, then offer
 // "Append to waveform" (when the object has a trace signal) and "Show in source"
 // (when it has a source location). Disabled items annotate why.
@@ -1591,14 +1619,7 @@ async function schematicMenu(ev: MouseEvent, path: string) {
   }
   if (!resp) return;
   openContextMenu(ev.clientX, ev.clientY, [
-    {
-      label: resp.wave.in_trace
-        ? "Append to waveform"
-        : "Append to waveform (not in trace)",
-      enabled: resp.wave.in_trace,
-      onClick: () =>
-        void publish(crossProbeSelection(resp, ["waveform"], selfLabel)),
-    },
+    await appendWaveItem(resp),
     {
       label: resp.source ? "Show in source" : "Show in source (no location)",
       enabled: !!resp.source,
@@ -1637,19 +1658,35 @@ function selectWire(netPath: string, trunk?: string) {
 // the resolved cross-probe in whichever panes it targets. This is the single
 // coordination path that the right-click/tree handlers publish into.
 async function handleSelection(sel: Selection) {
-  // Drive only the panes this window owns: a detached window owns its one pane;
-  // the main window owns the rest (source always; schematic/waveform until they
-  // detach). This is what keeps a selection from being applied in both windows.
+  // Drive only the panes this window owns (source → main; schematic/waveform → the
+  // window whose label matches the selection's `dest`, or main's own on a broadcast).
+  // This is what keeps a selection from being applied in more than one window.
   const owns = (t: RevealTarget) =>
     sel.targets.includes(t) &&
-    ownsSelection({ mode: windowMode, self: selfLabel }, t, sel.dest, [
-      ...detached,
-    ]);
+    ownsSelection({ mode: windowMode, self: selfLabel }, t, sel.dest, []);
   if (sel.scope !== null && owns("schematic")) navToScope(sel.scope);
   if (sel.resp) {
     if (owns("source")) await showInSource(sel.resp);
     if (owns("schematic")) await showInSchematic(sel.resp.anchor);
-    if (owns("waveform")) await addToWaveform(sel.resp.wave);
+    if (owns("waveform")) await appendResolved(sel.resp);
+  }
+}
+
+// Append a cross-probed signal to *this* window's waveform, resolved against its own
+// trace (#170). A waveform pop-out may hold a different trace than the origin window,
+// so the origin's `signal_ref` isn't portable — re-resolve by the model node path
+// (the single source of truth); a signal absent from this trace simply adds no lane.
+async function appendResolved(resp: ProbeResponse) {
+  if (sid === undefined) {
+    // main / default session already resolved this response against its own trace.
+    await addToWaveform(resp.wave, resp.anchor.path);
+    return;
+  }
+  try {
+    const local = await api.probeNode(resp.anchor.path, null, sid);
+    if (local?.wave) await addToWaveform(local.wave, resp.anchor.path);
+  } catch (e) {
+    log("error", `probe failed: ${e}`);
   }
 }
 
@@ -2311,13 +2348,7 @@ async function onSourceContextMenu(ev: MouseEvent) {
       enabled: true,
       onClick: () => void publish(crossProbeSelection(resp, ["schematic"])),
     },
-    {
-      label: resp.wave.in_trace
-        ? "Append to waveform"
-        : "Append to waveform (not in trace)",
-      enabled: resp.wave.in_trace,
-      onClick: () => void publish(crossProbeSelection(resp, ["waveform"])),
-    },
+    await appendWaveItem(resp),
   ]);
 }
 
@@ -2377,10 +2408,10 @@ async function showInSchematic(anchor: NodeRef) {
 
 // Append the signal as a new waveform lane (deduped by trace ref); a no-op when the
 // object has no trace signal. Lanes stack in append order (#15).
-async function addToWaveform(wave: WaveLink) {
+async function addToWaveform(wave: WaveLink, path?: string) {
   if (!wave.in_trace) return;
   if (state.waves.some((w) => w.ref === wave.signal_ref)) return;
-  const values = await api.signalValues(wave.signal_ref);
+  const values = await api.signalValues(wave.signal_ref, sid);
   // Enum-typed signals carry a value→name map; show the state name by default.
   const enumMap = wave.enum_map
     ? new Map(wave.enum_map.map((m) => [m.value, m.name]))
@@ -2388,6 +2419,7 @@ async function addToWaveform(wave: WaveLink) {
   state.waves.push({
     ref: wave.signal_ref,
     name: wave.full_name,
+    path,
     values,
     radix: "hex",
     enumMap,
@@ -2563,8 +2595,9 @@ function setupWaveInteraction() {
 
 // Boot a detached pane window (#18 PR2): reuse this same page in `?pane=` mode,
 // showing only the one pane full-window (body.detached* CSS), seeded from the
-// localStorage snapshot the main window wrote, and driven live by the bus. The
-// backend Session is shared, so api.* calls resolve against the loaded design.
+// localStorage snapshot the main window wrote, and driven live by the bus. A
+// schematic pop-out shares the main session (same design, #169); a waveform pop-out
+// owns its own session on its own trace (#170).
 async function initDetached(pane: DetachablePane) {
   applyStoredTheme();
   document.body.classList.add("detached", `detached-${pane}`);
@@ -2581,32 +2614,144 @@ async function initDetached(pane: DetachablePane) {
   setupWaveInteraction();
   setupResizeRedraw();
   activateTab("wave-pane");
+  const snap = readWaveSnapshot();
+  // Boot this pane's own backend session on the same design main loaded (#170), so
+  // its trace queries (signal_values / trace_timescale) resolve independently.
+  if (snap?.load) {
+    try {
+      await loadPaneSession(snap.load, selfLabel);
+    } catch (e) {
+      log("error", `pane load failed: ${e}`);
+    }
+  }
   try {
-    state.timescale = await api.traceTimescale();
+    state.timescale = await api.traceTimescale(sid);
   } catch {
     state.timescale = null;
   }
   state.waveUnit = defaultDisplayUnit(state.timescale);
-  const raw = localStorage.getItem(DETACH_WAVE_KEY);
-  if (raw) {
-    try {
-      const snap = JSON.parse(raw) as {
-        waves?: StoredTrace[];
-        waveView?: TimeWindow | null;
-        markers?: Markers;
-        waveUnit?: DisplayUnit;
-      };
-      state.waves = (snap.waves ?? []).map(loadTrace);
-      state.waveView = snap.waveView ?? null;
-      state.markers = snap.markers ?? { a: null, b: null };
-      if (snap.waveUnit) state.waveUnit = snap.waveUnit;
-    } catch {
-      /* ignore a malformed snapshot; start with an empty pane */
-    }
+  if (snap) {
+    // Seeded lanes are valid as-is: the pane booted on main's current trace, so their
+    // signal_refs still resolve. A later "Load trace…" re-resolves them by model path.
+    state.waves = (snap.waves ?? []).map(loadTrace);
+    state.waveView = snap.waveView ?? null;
+    state.markers = snap.markers ?? { a: null, b: null };
+    if (snap.waveUnit) state.waveUnit = snap.waveUnit;
   }
+  // This pane's own trace picker (#170) — swaps only this pane's trace.
+  $("load-trace").addEventListener("click", () => void loadTraceOnly());
   syncUnitSelect();
   loadColWidths();
   renderWaves();
+}
+
+// Read this waveform pane's seed snapshot (its design load spec + lanes), written by
+// the main window before it created the pop-out (#170).
+function readWaveSnapshot(): WaveSnapshot | null {
+  const raw = localStorage.getItem(detachWaveKey(selfLabel));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as WaveSnapshot;
+  } catch {
+    return null; // malformed snapshot; start with an empty pane
+  }
+}
+
+// (Re)load `id`'s backend session on a design (#170) — a pre-elaborated model, or a
+// designlist re-elaborated by the harness. `id` undefined targets the "main" session.
+// Returns the design top.
+function loadPaneSession(spec: LoadSpec, id?: string): Promise<string> {
+  return spec.mode === "filelist"
+    ? api.elaborateAndLoad(
+        spec.filelist,
+        spec.top,
+        spec.incdirs,
+        spec.trace,
+        spec.excluded,
+        spec.srcRoot,
+        id,
+      )
+    : api.loadDesign(spec.model, spec.trace, spec.excluded, spec.srcRoot, id);
+}
+
+// "Load trace…" in a waveform pane (#170): pick a VCD/FST/GHW and reload *this window's*
+// session on it, keeping the design as-is, then re-resolve every existing lane against
+// the new trace by model path (dropping any signal the new trace lacks). In the main
+// window this swaps main's own trace without touching the toolbar's design load; in a
+// waveform pop-out it swaps only that pane's trace, leaving main and every other pane
+// untouched. Which session it hits is just `sid`.
+async function loadTraceOnly() {
+  // main reloads the design it last loaded; a pop-out reloads the one it was seeded with.
+  const spec = sid === undefined ? (state.loaded ?? undefined) : readWaveSnapshot()?.load;
+  if (!spec) {
+    log("error", "load a design before loading a trace");
+    return;
+  }
+  let picked: string | null;
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    picked = (await open({
+      multiple: false,
+      filters: [{ name: "trace", extensions: ["vcd", "fst", "ghw"] }],
+    })) as string | null;
+  } catch (e) {
+    log("error", `file dialog failed: ${e}`);
+    return;
+  }
+  if (!picked) return; // cancelled
+  const next: LoadSpec = { ...spec, trace: picked };
+  log("info", `loading trace ${picked}…`);
+  try {
+    await loadPaneSession(next, sid);
+  } catch (e) {
+    log("error", `trace load failed: ${e}`);
+    return;
+  }
+  try {
+    state.timescale = await api.traceTimescale(sid);
+  } catch {
+    state.timescale = null;
+  }
+  state.waveUnit = defaultDisplayUnit(state.timescale);
+  // Re-resolve lanes against the new trace by model path; drop any it doesn't carry.
+  const resolved: WaveTrace[] = [];
+  for (const t of state.waves) {
+    if (!t.path) continue; // no model path → can't re-resolve across traces
+    try {
+      const local = await api.probeNode(t.path, null, sid);
+      if (local?.wave?.in_trace) {
+        const values = await api.signalValues(local.wave.signal_ref, sid);
+        resolved.push({ ...t, ref: local.wave.signal_ref, values });
+      }
+    } catch {
+      /* skip a lane that fails to re-resolve */
+    }
+  }
+  state.waves = resolved;
+  state.waveView = null;
+  state.markers = { a: null, b: null };
+  if (sid === undefined) {
+    // main: remember the swap so a later pop-out seeds on the trace now on screen, and
+    // keep the toolbar's trace field honest about what is actually loaded.
+    state.loaded = next;
+    const field = document.getElementById("trace") as HTMLInputElement | null;
+    if (field) field.value = picked;
+  } else {
+    // A pop-out persists the new trace *and* the re-resolved lanes together, so
+    // reopening it reseeds against the trace it is actually showing (pre-switch refs
+    // would mis-render).
+    const saved: WaveSnapshot = {
+      load: next,
+      waves: resolved.map(storeTrace),
+      waveView: state.waveView,
+      markers: state.markers,
+      waveUnit: state.waveUnit,
+    };
+    localStorage.setItem(detachWaveKey(selfLabel), JSON.stringify(saved));
+  }
+  syncUnitSelect();
+  renderWaves();
+  log("info", `loaded trace ${picked}`);
 }
 
 async function init() {
@@ -2646,13 +2791,15 @@ async function init() {
   // Reveal main's own schematic tab (#169: schematic pop-outs are independent, so
   // main always keeps its own schematic — the button never chases a pop-out).
   $("show-schematic").addEventListener("click", () => activateTab("schematic-pane"));
-  // Waveform stays a mirror: reveal the tab, or focus its window if detached (#18).
-  $("show-waveform").addEventListener("click", () =>
-    detached.has("waveform") ? void focusPane("waveform") : activateTab("wave-pane"),
-  );
+  // Reveal main's own waveform tab (#170: waveform pop-outs are independent too, so
+  // main always keeps its own waveform — the button never chases a pop-out).
+  $("show-waveform").addEventListener("click", () => activateTab("wave-pane"));
   // Pop-out buttons in the schematic / waveform tab-aux (#18 PR2).
   $("pop-schematic").addEventListener("click", () => void popOut("schematic"));
   $("pop-waveform").addEventListener("click", () => void popOut("waveform"));
+  // Swap main's own trace without re-entering the toolbar's design load (#170); the
+  // same button in a pop-out swaps only that pane's trace.
+  $("load-trace").addEventListener("click", () => void loadTraceOnly());
   renderWaves(); // show the empty-state "(no signals)" list until a trace is added
   // Source left-click re-highlight (#163) + right-click menu (#19), and dismissals.
   $("source").addEventListener("click", onSourceClick);

@@ -268,6 +268,8 @@ fn resolve_startup() -> StartupState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Native file picker for a waveform pane's "Load trace…" (#170).
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .manage(resolve_startup())
         .invoke_handler(tauri::generate_handler![

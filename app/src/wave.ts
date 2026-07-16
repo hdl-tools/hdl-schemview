@@ -12,6 +12,7 @@ import type { ValueChange } from "./types";
 export interface WaveTrace {
   ref: number;
   name: string;
+  path?: string; // canonical model node path, so a lane re-resolves across traces (#170)
   values: ValueChange[];
   radix?: Radix; // per-signal display radix; defaults to hex for multi-bit buses
   enumMap?: Map<number, string>; // value→name for enum/FSM signals (#81)
