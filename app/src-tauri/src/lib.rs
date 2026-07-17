@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use svxprobe_gui::{ProbeResponse, Session, StartupArgs, StartupError, TreeNode};
+use svxprobe_gui::{ProbeResponse, Session, SignalEntry, StartupArgs, StartupError, TreeNode};
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
 use tauri::State;
@@ -157,6 +157,21 @@ fn hierarchy_tree(
     })
 }
 
+/// The signals inside a scope, for a waveform pane's signal picker (#171). Paired
+/// with `hierarchy_tree`: that lists the scopes, this lists what is in one. Scoped
+/// to `session_id`, so each independent waveform pane answers from its own trace.
+#[tauri::command]
+fn scope_signals(
+    state: State<AppState>,
+    session_id: Option<String>,
+    scope: String,
+) -> CmdResult<Vec<SignalEntry>> {
+    with_session(&state, session_id, |s| {
+        s.scope_signals(&scope)
+            .ok_or_else(|| format!("scope not found: {scope}"))
+    })
+}
+
 #[tauri::command]
 fn cone(
     state: State<AppState>,
@@ -291,6 +306,7 @@ pub fn run() {
             scope_graph,
             expand_node,
             hierarchy_tree,
+            scope_signals,
             cone,
             probe_signal,
             probe_node,

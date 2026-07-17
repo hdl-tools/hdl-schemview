@@ -94,6 +94,27 @@ export interface SourceLoc {
   offset: number;
   end_offset: number;
 }
+/**
+ * One signal declared directly inside a scope (#171) — a row of a waveform pane's
+ * signal picker. Mirrors svxprobe-gui's `SignalEntry`. The tree lists the scopes
+ * (`hierarchyTree`); this lists what is inside one.
+ */
+export interface SignalEntry {
+  /** Canonical model path — the picker's key; feeds probeNode → addToWaveform. */
+  path: string;
+  name: string;
+  /**
+   * The cross-probe's representative node kind for this path. Note the backing
+   * `Var` outranks its `Port` in the port/backing-net dual node, so a module port
+   * reports "Var" — it names the object a click actually selects.
+   */
+  kind: "Port" | "Net" | "Var" | "Memory";
+  /** Bit-range like "[31:0]" (enum-width fallback included); absent for a scalar. */
+  width?: string;
+  /** Whether this pane's trace carries it; false → the row shows dimmed, not pruned. */
+  in_trace: boolean;
+}
+
 export interface WaveLink {
   in_trace: boolean;
   var_ref: number;

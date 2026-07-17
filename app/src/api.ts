@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ProbeResponse,
   SchematicGraph,
+  SignalEntry,
   StartupArgs,
   TraceTimescale,
   TreeNode,
@@ -53,6 +54,9 @@ export const api = {
     invoke<SchematicGraph>("expand_node", { sessionId, node }),
   hierarchyTree: (scope: string, depth: number, sessionId?: string) =>
     invoke<TreeNode>("hierarchy_tree", { sessionId, scope, depth }),
+  // The signals inside a scope, for a waveform pane's signal picker (#171).
+  scopeSignals: (scope: string, sessionId?: string) =>
+    invoke<SignalEntry[]>("scope_signals", { sessionId, scope }),
   cone: (net: number, dir: string, depth: number, sessionId?: string) =>
     invoke<SchematicGraph>("cone", { sessionId, net, dir, depth }),
 
