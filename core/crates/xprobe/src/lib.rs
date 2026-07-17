@@ -112,17 +112,69 @@ impl CrossProbe {
         Self::assemble(design, wave, Some(report))
     }
 
+    /// Re-match the (unchanged) design against a different trace, in place (#176).
+    /// The design is the invariant — only the trace and its matching change — so a
+    /// waveform pane's "Load trace…" (#170) can swap traces without re-ingesting the
+    /// model or re-running the elaboration harness.
+    ///
+    /// The previous trace's `wave_index` is dropped first: [`run_match`] only ever
+    /// *inserts*, so a leftover mapping would keep resolving nodes to signal refs of
+    /// the old trace — refs the new one may not have, or may have given to a
+    /// different signal.
+    pub fn rematch(&mut self, wave: &LoadedWave, opts: &MatchOptions) {
+        self.design.wave_index = svxprobe_model::WaveIndex::default();
+        let signals = wave.signals();
+        let report = run_match(&mut self.design, &signals, opts);
+        self.reindex(wave);
+        self.report = Some(report);
+        // `context` is a NodeId into the (unchanged) design, so it stays valid.
+    }
+
+    /// Like [`rematch`](Self::rematch), but reuses a persisted `wave_index` when a
+    /// fresh cache exists for `(model, trace, opts)`, and persists the result on a
+    /// miss (#153) — so swapping back and forth between traces pays the matcher only
+    /// once per trace. `model`/`trace` are the on-disk paths that key the cache.
+    pub fn rematch_cached(
+        &mut self,
+        wave: &LoadedWave,
+        opts: &MatchOptions,
+        model: &Path,
+        trace: &Path,
+    ) {
+        let opts_hash = match_opts_hash(opts);
+        if let Some(pairs) = svxprobe_ingest::try_load_wave_index(model, trace, opts_hash) {
+            self.design.wave_index = svxprobe_model::WaveIndex::from_pairs(
+                pairs.into_iter().map(|(n, s)| (n, WaveSignalRef(s))),
+            );
+            self.reindex(wave);
+            self.report = None; // restored from cache — no match report
+            return;
+        }
+        // Miss: match, then persist the resolved pairs (best-effort — a cache-write
+        // failure must not fail the swap).
+        self.rematch(wave, opts);
+        let pairs: Vec<(u32, u64)> = self
+            .design
+            .wave_index
+            .pairs()
+            .map(|(n, s)| (n, s.0))
+            .collect();
+        let _ = svxprobe_ingest::write_wave_index(model, trace, opts_hash, &pairs);
+    }
+
+    /// Point the trace-side lookups at `wave`'s var table, dropping the previous
+    /// trace's.
+    fn reindex(&mut self, wave: &LoadedWave) {
+        let (var_by_ref, ref_by_name) = Self::var_tables(wave);
+        self.var_by_ref = var_by_ref;
+        self.ref_by_name = ref_by_name;
+    }
+
     /// Capture the trace's var table (name/ref lookups) around an already-populated
     /// `wave_index`. Shared by [`build`](Self::build) and
     /// [`build_cached`](Self::build_cached).
     fn assemble(design: Design, wave: &LoadedWave, report: Option<MatchReport>) -> Self {
-        let signals = wave.signals();
-        let mut var_by_ref = HashMap::with_capacity(signals.len());
-        let mut ref_by_name = HashMap::with_capacity(signals.len());
-        for s in signals {
-            ref_by_name.insert(s.full_name.clone(), s.var_ref);
-            var_by_ref.insert(s.var_ref, s);
-        }
+        let (var_by_ref, ref_by_name) = Self::var_tables(wave);
         Self {
             design,
             var_by_ref,
@@ -130,6 +182,18 @@ impl CrossProbe {
             context: None,
             report,
         }
+    }
+
+    /// The trace's var lookup tables: var-ref → var, and full name → var-ref.
+    fn var_tables(wave: &LoadedWave) -> (HashMap<u32, WaveVar>, HashMap<String, u32>) {
+        let signals = wave.signals();
+        let mut var_by_ref = HashMap::with_capacity(signals.len());
+        let mut ref_by_name = HashMap::with_capacity(signals.len());
+        for s in signals {
+            ref_by_name.insert(s.full_name.clone(), s.var_ref);
+            var_by_ref.insert(s.var_ref, s);
+        }
+        (var_by_ref, ref_by_name)
     }
 
     pub fn design(&self) -> &Design {

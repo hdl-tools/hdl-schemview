@@ -1,6 +1,6 @@
 //! The GUI session logic, exercised end-to-end on the fixture (no UI toolkit).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use svxprobe_gui::Session;
 
@@ -69,6 +69,69 @@ fn not_in_trace_is_explicit() {
     let mut s = session();
     let r = s.probe_node("picorv32_soc.g_lane[0].core", None).unwrap();
     assert!(!r.wave.in_trace, "an instance has no waveform");
+}
+
+// #176: swap only the trace, reusing the already-ingested design — the waveform
+// panes' "Load trace…" path (#170), which otherwise re-ingests / re-elaborates a
+// design that did not change.
+#[test]
+fn load_trace_reuses_the_design_and_queries_the_new_trace() {
+    let mut s = session(); // FST
+    let top = s.design_top();
+
+    s.load_trace(&fixture("traces/picorv32_soc.vcd"))
+        .expect("swaps to the VCD");
+
+    // The design is reused, not reloaded: same top, scopes still queryable.
+    assert_eq!(s.design_top(), top);
+    assert!(s.scope_graph("picorv32_soc.g_lane[0]").is_some());
+    // The signal re-resolves against the VCD and carries that trace's values.
+    let r = s
+        .probe_signal("TOP.tb.dut.g_lane[0].bus.valid", None)
+        .expect("resolves in the VCD");
+    assert!(r.wave.in_trace);
+    assert!(
+        s.signal_values(r.wave.signal_ref).len() > 2,
+        "bus.valid toggles"
+    );
+}
+
+// Re-matching is the dominant cost of a trace change, so a swap must keep the #153
+// wave_index cache alive: the new trace's index is persisted for the next load of
+// that (model, trace) pair, exactly as a fresh `Session::load` would.
+#[test]
+fn load_trace_persists_the_wave_index_cache() {
+    let model = fixture("golden/hierarchy.json");
+    let vcd = fixture("traces/picorv32_soc.vcd");
+    let cache = svxprobe_ingest::wave_index_cache_path(Path::new(&model), Path::new(&vcd));
+    let _ = std::fs::remove_file(&cache); // start from a cold cache
+
+    let mut s = session(); // FST
+    s.load_trace(&vcd).expect("swaps to the VCD");
+
+    assert!(
+        cache.exists(),
+        "swapping to a trace should persist its wave_index for the next load (#153)"
+    );
+}
+
+// A bad pick in a waveform pane's "Load trace…" dialog must not cost the user their
+// loaded design: the trace is opened before any state changes, so a failed swap
+// leaves the session serving exactly what it had.
+#[test]
+fn load_trace_failure_leaves_the_session_intact() {
+    let mut s = session(); // FST
+    assert!(s.load_trace(&fixture("traces/no-such-trace.fst")).is_err());
+
+    assert_eq!(s.design_top(), "picorv32_soc");
+    let r = s
+        .probe_signal("TOP.tb.dut.g_lane[0].bus.valid", None)
+        .expect("still resolves against the original trace");
+    assert!(r.wave.in_trace);
+    assert!(
+        s.signal_values(r.wave.signal_ref).len() > 2,
+        "the original trace's values are still loadable"
+    );
 }
 
 #[test]

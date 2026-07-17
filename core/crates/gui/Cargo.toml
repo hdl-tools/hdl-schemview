@@ -17,3 +17,8 @@ svxprobe-matcher = { workspace = true }
 svxprobe-schematic = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+# The session tests assert the #153 wave_index cache survives a trace swap (#176),
+# which means resolving its on-disk path.
+svxprobe-ingest = { workspace = true }

@@ -41,6 +41,10 @@ export const api = {
       excluded,
       srcRoot,
     }),
+  // Swap a session's trace, keeping its design (#176) — far cheaper than a full
+  // loadDesign/elaborateAndLoad, which re-ingests (or re-elaborates) an unchanged design.
+  loadTrace: (trace: string, sessionId?: string) =>
+    invoke<void>("load_trace", { sessionId, trace }),
   unloadDesign: (sessionId?: string) => invoke<void>("unload_design", { sessionId }),
 
   scopeGraph: (scope: string, sessionId?: string) =>
