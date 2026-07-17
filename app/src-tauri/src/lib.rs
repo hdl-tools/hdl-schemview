@@ -101,6 +101,17 @@ async fn elaborate_and_load(
     store_session(&state, session_id, session)
 }
 
+/// Swap a session's trace, reusing its already-ingested design (#176). Backs a waveform
+/// pane's "Load trace…" (#170): the design is unchanged, so this skips the model
+/// re-ingest — and, for a designlist, the whole re-elaboration — that a full
+/// `load_design`/`elaborate_and_load` would pay.
+#[tauri::command]
+fn load_trace(state: State<AppState>, session_id: Option<String>, trace: String) -> CmdResult<()> {
+    with_session(&state, session_id, |s| {
+        s.load_trace(&trace).map_err(|e| e.to_string())
+    })
+}
+
 /// Drop a session (window closed, #168). Idempotent — unloading an unknown id is a
 /// no-op, so a double close or a never-loaded pane can't error.
 #[tauri::command]
@@ -275,6 +286,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_design,
             elaborate_and_load,
+            load_trace,
             unload_design,
             scope_graph,
             expand_node,

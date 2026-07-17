@@ -2702,7 +2702,9 @@ async function loadTraceOnly() {
   const next: LoadSpec = { ...spec, trace: picked };
   log("info", `loading trace ${picked}…`);
   try {
-    await loadPaneSession(next, sid);
+    // Swap only the trace (#176): the design is unchanged, so this skips the model
+    // re-ingest — and, for a designlist, the whole re-elaboration — a full load pays.
+    await api.loadTrace(picked, sid);
   } catch (e) {
     log("error", `trace load failed: ${e}`);
     return;

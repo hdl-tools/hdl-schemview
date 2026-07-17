@@ -135,6 +135,12 @@ pub struct Session {
     cross: CrossProbe,
     wave: LoadedWave,
     src_root: PathBuf,
+    /// The model file the design was ingested from — `None` when it was elaborated
+    /// in-memory (no on-disk path, so no wave_index cache key). Kept, with `opts`,
+    /// so [`load_trace`](Self::load_trace) can re-match a new trace against this
+    /// same design (#176).
+    model: Option<PathBuf>,
+    opts: MatchOptions,
 }
 
 impl Session {
@@ -227,7 +233,35 @@ impl Session {
             cross,
             wave,
             src_root: src_root.as_ref().to_path_buf(),
+            model: model.map(PathBuf::from),
+            opts,
         })
+    }
+
+    /// Swap this session's trace, reusing the already-ingested design (#176).
+    ///
+    /// The design is unchanged, so only the trace and its matching are rebuilt: a
+    /// waveform pane's "Load trace…" (#170) no longer re-ingests a model — or, worse,
+    /// re-runs the elaboration harness — for a design that did not change. Cross-probe
+    /// resolution stays a model lookup; the new trace is re-matched through the same
+    /// Phase-1 matcher.
+    ///
+    /// The trace is opened *before* any state changes, so a bad path leaves the
+    /// session intact and still serving its current trace.
+    pub fn load_trace(&mut self, trace: &str) -> Result<()> {
+        let probe = LoadedWave::open(trace)?;
+        // With the model on disk, the new trace's index is cached like a fresh load's
+        // (#153); an in-memory (elaborated) design has no cache key, so it matches.
+        match &self.model {
+            Some(m) => self
+                .cross
+                .rematch_cached(&probe, &self.opts, m, Path::new(trace)),
+            None => self.cross.rematch(&probe, &self.opts),
+        }
+        // Re-open: rematch borrowed `probe`; keep a fresh handle for lazy value
+        // loading, mirroring `from_design`.
+        self.wave = LoadedWave::open(trace)?;
+        Ok(())
     }
 
     pub fn design_top(&self) -> String {
