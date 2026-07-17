@@ -2,7 +2,18 @@
 
 use std::path::{Path, PathBuf};
 
-use svxprobe_gui::Session;
+use svxprobe_gui::{Session, SignalEntry};
+use svxprobe_model::NodeKind;
+
+fn names(sigs: &[SignalEntry]) -> Vec<&str> {
+    sigs.iter().map(|e| e.name.as_str()).collect()
+}
+
+fn entry<'a>(sigs: &'a [SignalEntry], name: &str) -> &'a SignalEntry {
+    sigs.iter()
+        .find(|e| e.name == name)
+        .unwrap_or_else(|| panic!("no `{name}` in {:?}", names(sigs)))
+}
 
 fn fixture(rel: &str) -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -132,6 +143,175 @@ fn load_trace_failure_leaves_the_session_intact() {
         s.signal_values(r.wave.signal_ref).len() > 2,
         "the original trace's values are still loadable"
     );
+}
+
+// --- scope_signals: the waveform pane's signal picker (#171) ---
+//
+// The tree lists a design's *scopes* (`hierarchy_tree`); `scope_signals` lists what is
+// *inside* one, so a waveform pane can pick lanes without borrowing another window's
+// tree. Every assertion below exists to keep the picker from becoming a second,
+// disagreeing source of truth alongside the cross-probe.
+
+// The picker lists a scope's own signal declarations and nothing else: not its
+// elaboration-time `Param`s (never traceable), not the `Interface` bundle or child
+// `Instance`s (those are the *tree's* rows), not a synthesized `FF` (no declaration).
+#[test]
+fn scope_signals_lists_only_the_scope_s_own_signals() {
+    let s = session();
+    let sigs = s.scope_signals("picorv32_soc.g_lane[0]").expect("a scope");
+    // The lane declares exactly one signal; `gi`/`bus`/`$ff27`/`core`/`memory` are all
+    // other kinds of thing.
+    assert_eq!(names(&sigs), ["lane_state"]);
+}
+
+// Every port in this design is *two* nodes at one canonical path — the `Port` and its
+// backing `Var` (the pattern `ingest`'s name-uniqueness check whitelists). One signal
+// must mean one row, and that row must name the node a click actually selects:
+// `CrossProbe::best_kind` ranks Var < Net < Port, so the representative is the `Var`.
+#[test]
+fn scope_signals_collapses_the_port_backing_net_dual_node() {
+    let s = session();
+    let sigs = s.scope_signals("picorv32_soc").expect("the top scope");
+    for port in ["clk", "resetn", "core_trap"] {
+        let hits: Vec<_> = sigs.iter().filter(|e| e.name == port).collect();
+        assert_eq!(hits.len(), 1, "`{port}` is one signal, not two rows");
+        assert_eq!(
+            hits[0].kind,
+            NodeKind::Var,
+            "`{port}` must report the kind `probe_node` anchors on"
+        );
+    }
+}
+
+// The anti-divergence gate: a row's `in_trace` and the click that follows it must be
+// the same answer. They can only disagree if the picker re-derives the trace link
+// instead of asking the cross-probe — e.g. testing `wave_index.signal_of(child_id)`
+// on a dual-node `Port` whose backing `Var` is the matched node.
+// This would pass trivially if `in_trace` were hardcoded `true`. It isn't testable
+// otherwise here: the fixture's Verilator trace dumps *every* design signal (all 477
+// resolve, matching `wave_index`'s linked count exactly), so no scope in it can produce
+// a dimmed row. `not_in_trace_is_explicit` pins the `false` arm on the shared
+// `to_wave` path this delegates to; the picker's dimmed rendering is a manual check.
+#[test]
+fn scope_signals_in_trace_agrees_with_probe_node() {
+    let mut s = session();
+    let mut checked = 0;
+    for scope in [
+        "picorv32_soc.g_lane[0].bus",
+        "picorv32_soc.g_lane[0].memory",
+    ] {
+        for e in s.scope_signals(scope).expect("a scope") {
+            let r = s
+                .probe_node(&e.path, None)
+                .unwrap_or_else(|| panic!("`{}` must resolve", e.path));
+            assert_eq!(
+                r.wave.in_trace, e.in_trace,
+                "`{}`: picker says in_trace={}, probe_node says {}",
+                e.path, e.in_trace, r.wave.in_trace
+            );
+            assert_eq!(r.anchor.path, e.path, "the row and the click name one node");
+            checked += 1;
+        }
+    }
+    // Anti-vacuity: an empty loop would assert nothing at all.
+    assert!(checked >= 10, "only checked {checked} rows");
+}
+
+// Widths come from the schematic's own `pin_width`, so a picker row and a schematic pin
+// annotate one signal identically — including the enum fallback, where the range comes
+// from the model's normalized enum table rather than the declared type.
+#[test]
+fn scope_signals_reports_widths_like_schematic_pins() {
+    let s = session();
+    let bus = s.scope_signals("picorv32_soc.g_lane[0].bus").unwrap();
+    assert_eq!(entry(&bus, "addr").width.as_deref(), Some("[31:0]"));
+    assert_eq!(entry(&bus, "valid").width, None, "a scalar has no range");
+
+    let lane = s.scope_signals("picorv32_soc.g_lane[0]").unwrap();
+    assert_eq!(
+        entry(&lane, "lane_state").width.as_deref(),
+        Some("[1:0]"),
+        "`lane_state_e` has no packed range; its width is an enum-table fact"
+    );
+
+    // A memory's row reports its *element* width, like the MEMORY glyph's pins (#112).
+    let mem = s.scope_signals("picorv32_soc.g_lane[0].memory").unwrap();
+    let ram = entry(&mem, "ram");
+    assert_eq!(ram.kind, NodeKind::Memory);
+    assert_eq!(ram.width.as_deref(), Some("[31:0]"));
+}
+
+// A bare interface bundle is a tree scope (#97), so the picker must answer for it: its
+// members are ordinary signals. Its `Modport` views are not — they are views, and the
+// tree drills into them.
+#[test]
+fn scope_signals_of_an_interface_bundle_lists_its_members() {
+    let s = session();
+    let sigs = s.scope_signals("picorv32_soc.g_lane[0].bus").unwrap();
+    // Declaration order, matching the source — `clk`'s dual node comes before `valid`.
+    assert_eq!(
+        names(&sigs),
+        ["clk", "valid", "instr", "ready", "addr", "wdata", "wstrb", "rdata"]
+    );
+}
+
+// The shell 404s a path that names no scope, exactly as `hierarchy_tree` does. A signal
+// is not a scope: the picker lists what is *in* a scope, and a signal contains nothing.
+#[test]
+fn scope_signals_rejects_non_scopes() {
+    let s = session();
+    assert!(s.scope_signals("nope").is_none(), "unknown path");
+    assert!(
+        s.scope_signals("picorv32_soc.clk").is_none(),
+        "a signal is not a scope"
+    );
+}
+
+// Every row the tree renders must open in the picker — the two are one UI, and a tree
+// row the picker can't answer for is a dead click. Mirrors `hierarchy_tree`'s own
+// "every node is a valid schematic root" contract.
+#[test]
+fn scope_signals_covers_every_tree_row() {
+    let s = session();
+    let lane = s.hierarchy_tree("picorv32_soc.g_lane[0]", 1).unwrap();
+    for c in &lane.children {
+        assert!(
+            s.scope_signals(&c.path).is_some(),
+            "tree row `{}` must open in the picker",
+            c.path
+        );
+    }
+    // `core.genblk1` is three separate GenBlock nodes at one path, and only one holds
+    // children. A tree row carries only a path, so the picker unions every structural
+    // node there rather than picking one — otherwise the answer would depend on which
+    // of three identical rows was clicked.
+    assert!(s
+        .scope_signals("picorv32_soc.g_lane[0].core.genblk1")
+        .is_some());
+}
+
+// A pane's "Load trace…" (#170/#176) swaps the trace under an unchanged design, so the
+// picker's tree stands but its `in_trace` flags move. They must keep agreeing with the
+// cross-probe against the *new* trace.
+#[test]
+fn scope_signals_reflects_a_trace_swap() {
+    let mut s = session(); // FST
+    let before = s.scope_signals("picorv32_soc.g_lane[0].bus").unwrap();
+
+    s.load_trace(&fixture("traces/picorv32_soc.vcd"))
+        .expect("swaps to the VCD");
+
+    let after = s.scope_signals("picorv32_soc.g_lane[0].bus").unwrap();
+    // The design didn't change, so the rows themselves don't.
+    assert_eq!(names(&before), names(&after), "same design, same signals");
+    for e in &after {
+        let r = s.probe_node(&e.path, None).expect("resolves");
+        assert_eq!(
+            r.wave.in_trace, e.in_trace,
+            "`{}` must agree with the VCD, not the FST",
+            e.path
+        );
+    }
 }
 
 #[test]

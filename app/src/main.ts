@@ -23,12 +23,12 @@ import type {
   SchematicGraph,
   SchNode,
   SchPort,
+  SignalEntry,
   StartupArgs,
   TraceTimescale,
-  TreeNode,
   WaveLink,
 } from "./types";
-import { scopeFrames } from "./tree";
+import { createTree, scopeFrames, type ScopeFrame, type TreeHandle } from "./tree";
 import {
   crossProbeSelection,
   ownsSelection,
@@ -103,11 +103,6 @@ interface ViewState {
   scrollTop: number;
 }
 
-interface ScopeFrame {
-  path: string;
-  label: string;
-}
-
 const state = {
   graph: null as SchematicGraph | null,
   stack: [] as ScopeFrame[],
@@ -131,6 +126,10 @@ const state = {
   // The design main last loaded (#170), so a waveform pop-out can boot its own
   // session on the same model. Null until the first successful load.
   loaded: null as LoadSpec | null,
+  // This window's loaded design top (#171), so the waveform pane's signal picker can
+  // seed its tree in a pop-out too — which has no #hierarchy and no nav stack to read
+  // it from. Null until loaded.
+  top: null as string | null,
 };
 
 // Saved viewport per scope path, surviving stack pops so revisiting a scope
@@ -351,7 +350,9 @@ async function load() {
     state.waveUnit = defaultDisplayUnit(state.timescale);
     syncUnitSelect();
     renderWaves();
+    state.top = top;
     await initHierarchy(top);
+    await initPicker();
     await setScope(top, top);
   } catch (e) {
     log("error", `load failed: ${e}`);
@@ -402,85 +403,30 @@ function renderBreadcrumb() {
 
 // -- hierarchy tree (#92) ----------------------------------------------------
 
-// Rendered tree rows keyed by scope path, for selection-highlight sync.
-const treeItems = new Map<string, HTMLElement>();
+// The window's hierarchy tree, in the main window only (a detached pane has no
+// #hier-pane). Rows are rendered by `createTree`, which the waveform pane's signal
+// picker also uses (#171).
+let hierTree: TreeHandle | null = null;
 
 // Build (or rebuild, on model reload) the tree pane: the design top plus its
 // direct children; deeper levels are fetched lazily on expand.
 async function initHierarchy(top: string) {
-  const host = $("hierarchy");
-  host.innerHTML = "";
-  treeItems.clear();
-  const root = await api.hierarchyTree(top, 1);
-  const ul = document.createElement("ul");
-  ul.appendChild(treeItem(root));
-  host.appendChild(ul);
-  highlightTree(top);
-}
-
-function treeItem(node: TreeNode): HTMLLIElement {
-  const li = document.createElement("li");
-  const row = document.createElement("div");
-  row.className = "tnode";
-  const twist = document.createElement("span");
-  twist.className = "twist";
-  const label = document.createElement("span");
-  label.className = "tlabel";
-  label.textContent = node.label;
-  row.appendChild(twist);
-  row.appendChild(label);
-  // Module sublabel, unless it repeats the label (e.g. the design top).
-  if (node.module && node.module !== node.label) {
-    const mod = document.createElement("span");
-    mod.className = "tmod";
-    mod.textContent = `(${node.module})`;
-    row.appendChild(mod);
-  }
-  li.appendChild(row);
-  treeItems.set(node.path, row);
-
-  let kids: HTMLUListElement | null = null;
-  const attachKids = (children: TreeNode[]) => {
-    const ul = document.createElement("ul");
-    for (const c of children) ul.appendChild(treeItem(c));
-    li.appendChild(ul);
-    kids = ul;
-    return ul;
-  };
-  if (node.children.length) attachKids(node.children);
-
-  let open = node.children.length > 0;
-  const setOpen = (o: boolean) => {
-    open = o;
-    twist.textContent = node.expandable ? (open ? "▾" : "▸") : "";
-    if (kids) kids.style.display = open ? "" : "none";
-  };
-  setOpen(open);
-  twist.onclick = async (e) => {
-    e.stopPropagation();
-    if (!node.expandable) return;
-    if (!kids) {
-      // Lazy: fetch this node's direct children on first expand. Reserve the
-      // list synchronously so a second click during the fetch can't attach a
-      // duplicate one.
-      const ul = attachKids([]);
-      const sub = await api.hierarchyTree(node.path, 1);
-      for (const c of sub.children) ul.appendChild(treeItem(c));
-    }
-    setOpen(!open);
-  };
-  // Clicking the row navigates the schematic to this scope.
-  row.onclick = () => jumpToScope(node.path);
-  // Double-clicking reveals the node's module/instance in the source pane (#164):
-  // probe its canonical path → source def → block-span highlight, complementing the
-  // single-click schematic nav so the tree drives both views.
-  row.ondblclick = (e) => {
-    e.stopPropagation();
-    void api
-      .probeNode(node.path, context())
-      .then((r) => r && publish(crossProbeSelection(r, ["source"])));
-  };
-  return li;
+  hierTree ??= createTree({
+    host: $("hierarchy"),
+    // `sid` is undefined in the only window that has this tree, so this is the main
+    // session — passing it just makes that explicit rather than implicit.
+    fetchChildren: (path, depth) => api.hierarchyTree(path, depth, sid),
+    // Clicking the row navigates the schematic to this scope.
+    onSelect: (node) => jumpToScope(node.path),
+    // Double-clicking reveals the node's module/instance in the source pane (#164):
+    // probe its canonical path → source def → block-span highlight, complementing the
+    // single-click schematic nav so the tree drives both views.
+    onActivate: (node) =>
+      void api
+        .probeNode(node.path, context(), sid)
+        .then((r) => r && publish(crossProbeSelection(r, ["source"]))),
+  });
+  await hierTree.init(top);
 }
 
 // Navigate to an arbitrary scope from the tree. Routed through the selection bus
@@ -488,6 +434,138 @@ function treeItem(node: TreeNode): HTMLLIElement {
 // detached one; the schematic-hosting window runs `navToScope`.
 function jumpToScope(path: string) {
   void publish(scopeSelection(path));
+}
+
+// -- waveform signal picker (#171) -------------------------------------------
+//
+// Every waveform pane carries its own picker — main's and each pop-out's — so a pane
+// populates itself instead of waiting for another window to address lanes at it. It is
+// scoped to this window's session (`sid`), so a pop-out lists its own trace's answers.
+//
+// It deliberately does *not* touch the schematic: a tree row here shows that scope's
+// signals, it doesn't drill. (`jumpToScope` broadcasts, which would drive main's
+// schematic from a pop-out — not what a signal picker means.)
+
+let pickTree: TreeHandle | null = null;
+// The scope whose signals are listed, so a trace swap can refresh their in_trace flags
+// without rebuilding the (design-derived) tree.
+let pickerScope: string | null = null;
+let pickerSigs: SignalEntry[] = [];
+
+function setupPicker() {
+  $("wave-pick-btn").addEventListener("click", () => togglePicker());
+  // Ctrl/⌘+B — the sidebar-toggle convention, and no letter key is otherwise bound.
+  // Gated on a visible waveform pane: in main it fires only while that tab is forward;
+  // in a detached waveform window the pane is always active, so it always fires.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "b") return;
+    if (!$("wave-pane").classList.contains("active")) return;
+    e.preventDefault();
+    togglePicker();
+  });
+  togglePicker(loadPickerOpen());
+}
+
+function togglePicker(open?: boolean) {
+  const el = $("wave-picker");
+  const show = open ?? el.hidden;
+  el.hidden = !show;
+  $("wave-pick-btn").setAttribute("aria-expanded", String(show));
+  try {
+    localStorage.setItem("wavePickerOpen", show ? "1" : "0");
+  } catch {
+    /* private mode / quota — the picker just won't remember */
+  }
+  // #wave-list resizes, and setupResizeRedraw's observer redraws the canvases for us.
+}
+
+// Closed by default, like every other on-demand surface here.
+function loadPickerOpen(): boolean {
+  try {
+    return localStorage.getItem("wavePickerOpen") === "1";
+  } catch {
+    return false;
+  }
+}
+
+// (Re)build this window's picker. The tree is design-derived, so it survives a trace
+// swap untouched — only the signal list's in_trace flags move (see loadTraceOnly).
+async function initPicker() {
+  pickerScope = null;
+  if (!state.top) {
+    pickTree?.clear();
+    renderSignalList([]);
+    return;
+  }
+  pickTree ??= createTree({
+    host: $("wave-picker-tree"),
+    fetchChildren: (path, depth) => api.hierarchyTree(path, depth, sid),
+    onSelect: (node) => void showScopeSignals(node.path),
+  });
+  await pickTree.init(state.top);
+  await showScopeSignals(state.top);
+}
+
+// List `scope`'s signals, resolved against *this* pane's trace.
+async function showScopeSignals(scope: string) {
+  pickerScope = scope;
+  pickTree?.highlight(scope);
+  try {
+    renderSignalList(await api.scopeSignals(scope, sid));
+  } catch (e) {
+    log("error", `scope signals failed: ${e}`);
+  }
+}
+
+function renderSignalList(sigs: SignalEntry[]) {
+  pickerSigs = sigs;
+  const host = $("wave-picker-sigs");
+  host.innerHTML = "";
+  if (!state.top) return;
+  if (!sigs.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "(no signals in this scope)";
+    host.appendChild(empty);
+    return;
+  }
+  // Lanes already pinned, keyed by model path (#170's WaveTrace.path) — so a re-click
+  // reads as a no-op rather than looking broken (addToWaveform dedupes silently).
+  const added = new Set(state.waves.map((w) => w.path).filter(Boolean));
+  for (const s of sigs) {
+    const row = document.createElement("div");
+    row.className = "snode";
+    if (!s.in_trace) row.classList.add("dim");
+    if (added.has(s.path)) row.classList.add("added");
+    const name = document.createElement("span");
+    name.className = "sname";
+    name.textContent = s.name;
+    row.appendChild(name);
+    if (s.width) {
+      const w = document.createElement("span");
+      w.className = "swidth";
+      w.textContent = s.width;
+      row.appendChild(w);
+    }
+    row.title = s.in_trace ? s.path : `${s.path} — not in this trace`;
+    if (s.in_trace) row.onclick = () => void pickSignal(s.path);
+    host.appendChild(row);
+  }
+}
+
+// A picker click is the existing append path: resolve the model path against this
+// window's session, then hand the WaveLink to addToWaveform — same dedupe, enum map,
+// lane order and tab reveal as the right-click menu. Null context, like
+// appendResolved/loadTraceOnly: the path is absolute and canonical.
+async function pickSignal(path: string) {
+  try {
+    const r = await api.probeNode(path, null, sid);
+    if (r) await addToWaveform(r.wave, path);
+  } catch (e) {
+    log("error", `probe failed: ${e}`);
+    return;
+  }
+  renderSignalList(pickerSigs); // refresh the "added" marks
 }
 
 // Drill the schematic into `path`: the breadcrumb becomes the scope's ancestor
@@ -505,9 +583,10 @@ function navToScope(path: string) {
 
 // Keep the tree's selection in step with whatever sets the scope (tree click,
 // schematic drill, breadcrumb). A scope deeper than the fetched tree has no
-// row yet — the highlight simply clears until that branch is expanded.
+// row yet — the highlight simply clears until that branch is expanded. A detached
+// pane has no tree at all, hence the null guard.
 function highlightTree(path: string) {
-  for (const [p, el] of treeItems) el.classList.toggle("sel", p === path);
+  hierTree?.highlight(path);
 }
 
 // -- schematic -------------------------------------------------------------
@@ -2352,19 +2431,6 @@ async function onSourceContextMenu(ev: MouseEvent) {
   ]);
 }
 
-// Breadcrumb frames for every ancestor of a scope path. All ancestors of a
-// navigable scope (Instance/GenBlock) are themselves navigable, so each frame is
-// a valid drill target.
-function framesForScope(path: string): ScopeFrame[] {
-  const out: ScopeFrame[] = [];
-  let acc = "";
-  for (const seg of path.split(".")) {
-    acc = acc ? `${acc}.${seg}` : seg;
-    out.push({ path: acc, label: seg });
-  }
-  return out;
-}
-
 // Navigate the schematic to show `anchor`: drill into it if it is itself a scope,
 // else open the nearest enclosing scope and highlight the box/wire it maps to.
 async function showInSchematic(anchor: NodeRef) {
@@ -2381,7 +2447,7 @@ async function showInSchematic(anchor: NodeRef) {
       continue; // not a navigable scope — walk up
     }
     rememberCurrentView();
-    state.stack = framesForScope(scopePath);
+    state.stack = scopeFrames(scopePath);
     state.graph = graph;
     state.selected = null;
     renderBreadcrumb();
@@ -2619,7 +2685,9 @@ async function initDetached(pane: DetachablePane) {
   // its trace queries (signal_values / trace_timescale) resolve independently.
   if (snap?.load) {
     try {
-      await loadPaneSession(snap.load, selfLabel);
+      // The returned design top is what this pane's signal picker seeds its tree from
+      // (#171) — a pop-out has no #hierarchy and no nav stack to read it off.
+      state.top = await loadPaneSession(snap.load, selfLabel);
     } catch (e) {
       log("error", `pane load failed: ${e}`);
     }
@@ -2643,6 +2711,9 @@ async function initDetached(pane: DetachablePane) {
   syncUnitSelect();
   loadColWidths();
   renderWaves();
+  // This pane's own signal picker (#171), on this pane's session.
+  setupPicker();
+  await initPicker();
 }
 
 // Read this waveform pane's seed snapshot (its design load spec + lanes), written by
@@ -2753,6 +2824,11 @@ async function loadTraceOnly() {
   }
   syncUnitSelect();
   renderWaves();
+  // The design is unchanged, so the picker's tree stands — rebuilding it would collapse
+  // the user's expansion state for nothing. Only which signals the trace carries moved,
+  // so refetch the listed scope's in_trace flags (and the "added" marks, since the swap
+  // drops lanes the new trace lacks).
+  if (pickerScope) await showScopeSignals(pickerScope);
   log("info", `loaded trace ${picked}`);
 }
 
@@ -2785,6 +2861,7 @@ async function init() {
   setupRowSplitter();
   loadColSplit(); // #139
   setupColSplitter(); // #139
+  setupPicker(); // #171 — main's waveform pane gets a signal picker like every pop-out
   // Tab groups (#99): a tab click activates its panel; the toolbar buttons reveal +
   // focus the on-demand schematic / waveform views.
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) =>

@@ -22,3 +22,6 @@ anyhow = { workspace = true }
 # The session tests assert the #153 wave_index cache survives a trace swap (#176),
 # which means resolving its on-disk path.
 svxprobe-ingest = { workspace = true }
+# `scope_signals` reports each row's `NodeKind` (#171); the tests name it to pin the
+# cross-probe's representative (the backing `Var`, not its `Port`).
+svxprobe-model = { workspace = true }
