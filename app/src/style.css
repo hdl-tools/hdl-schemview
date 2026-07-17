@@ -95,15 +95,19 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 /* Top-right content column: a source↔schematic tab group (#99), source active by
    default. .tab-group supplies the flex column; this just anchors it to the grid. */
 #content { grid-area:content; }
-#hierarchy { flex:1; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; }
-#hierarchy ul { list-style:none; margin:0; padding-left:14px; }
-#hierarchy > ul { padding-left:2px; }
-#hierarchy .tnode { display:flex; align-items:baseline; gap:3px; padding:1px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; }
-#hierarchy .tnode:hover .tlabel { text-decoration:underline; }
-#hierarchy .tnode.sel { background:var(--hl); }
-#hierarchy .twist { width:12px; flex:0 0 12px; text-align:center; color:var(--muted); cursor:pointer; }
-#hierarchy .tlabel { color:var(--fg); }
-#hierarchy .tmod { color:var(--sublabel); font-size:11px; }
+/* Tree rows, shared by every tree `createTree` renders (#171): the window's
+   #hierarchy pane and each waveform pane's signal picker. Class-scoped, not
+   id-scoped — an #hierarchy rule would leave the picker's tree unstyled. */
+.tree { overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; }
+#hierarchy { flex:1; }  /* fills #hier-pane; the picker's tree is sized by its own column */
+.tree ul { list-style:none; margin:0; padding-left:14px; }
+.tree > ul { padding-left:2px; }
+.tree .tnode { display:flex; align-items:baseline; gap:3px; padding:1px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; }
+.tree .tnode:hover .tlabel { text-decoration:underline; }
+.tree .tnode.sel { background:var(--hl); }
+.tree .twist { width:12px; flex:0 0 12px; text-align:center; color:var(--muted); cursor:pointer; }
+.tree .tlabel { color:var(--fg); }
+.tree .tmod { color:var(--sublabel); font-size:11px; }
 /* Schematic and source split the content column's height; min-width/height:0 (via
    .pane) let a zoomed-up SVG scroll inside #schematic (overflow:auto) instead of
    widening the pane. */
@@ -170,6 +174,10 @@ body.detached-waveform #bottom-group { grid-area:content; }
 /* The waveform pane's own "Load trace…" affordance (#170) stays available inside a
    detached waveform window (unlike the ⇱ detach button, hidden by the .pop-btn rule). */
 body.detached-waveform #load-trace { display:inline-block; }
+/* The picker toggle (#171) is a per-pane control, not a detach button — re-show it in
+   a detached waveform window, like #load-trace (#170). Both carry .pop-btn only for
+   its tab-aux button styling, which `body.detached .pop-btn` otherwise hides. */
+body.detached-waveform #wave-pick-btn { display:inline-block; }
 /* Marker readout + zoom controls ride in the waveform tab's .tab-aux (#99). */
 #wave-readout { color:var(--muted); font-family:ui-monospace, monospace; font-size:11px; white-space:nowrap; }
 #wave-unit { background:var(--field); color:var(--fg); border:1px solid var(--border); font-size:11px; padding:1px 2px; cursor:pointer; }
@@ -179,7 +187,31 @@ body.detached-waveform #load-trace { display:inline-block; }
    column keeps the time axis aligned across every row (ruler included). */
 /* min-height:0 lets the list shrink to its flex share so it scrolls (overflow:auto)
    when many signals are added, instead of expanding past the fixed-height pane. */
-#wave-list { flex:1; min-height:0; overflow:auto; padding:2px 0; color:var(--muted); font-size:11px; }
+#wave-list { flex:1; min-height:0; min-width:0; overflow:auto; padding:2px 0; color:var(--muted); font-size:11px; }
+
+/* Signal picker (#171): a collapsible sub-column of the waveform pane — scope tree
+   over the signals in that scope, GTKWave-SST style. `.pane` is a flex column, so the
+   waveform pane turns into a row to seat the picker beside the lanes. Fixed width for
+   now; a drag handle would be the third near-identical one in main.ts, so it is its
+   own follow-up. */
+#wave-pane { flex-direction:row; }
+#wave-picker { flex:0 0 240px; display:flex; flex-direction:column; min-width:0; border-right:1px solid var(--border); }
+/* Must outrank `display:flex` above, which would otherwise beat the UA [hidden] rule
+   and leave a "collapsed" picker on screen — the same trick as .tab-aux[hidden]. */
+#wave-picker[hidden] { display:none; }
+#wave-picker-tree { flex:1 1 50%; min-height:0; }  /* .tree supplies overflow/padding */
+#wave-picker-sigs { flex:1 1 50%; min-height:0; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; border-top:1px solid var(--border); }
+#wave-picker-sigs .snode { display:flex; align-items:baseline; gap:4px; padding:1px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg); }
+#wave-picker-sigs .snode:hover { background:var(--hl); }
+/* Already a lane in this pane — the click is a no-op, so say so rather than let it
+   look broken. */
+#wave-picker-sigs .snode.added .sname { text-decoration:underline; }
+/* Not in this pane's trace (#171): the model has the signal, the trace doesn't. Shown
+   dimmed and inert rather than pruned — the same honesty as a dangling pin (#118). */
+#wave-picker-sigs .snode.dim { color:var(--muted); cursor:default; }
+#wave-picker-sigs .snode.dim:hover { background:none; }
+#wave-picker-sigs .swidth { color:var(--sublabel); font-size:11px; }
+#wave-picker-sigs .empty { padding:4px; color:var(--muted); font-size:11px; }
 /* The name/value column widths are user-resizable (#84): driven by CSS vars set on
    drag, falling back to the minmax defaults when unset. */
 #wave-list.has-rows { display:grid; grid-template-columns:var(--wave-col-name, minmax(60px, 240px)) var(--wave-col-value, minmax(40px, 120px)) 1fr max-content; align-items:center; gap:1px 10px; }

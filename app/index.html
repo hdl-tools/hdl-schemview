@@ -29,7 +29,7 @@
     <main id="panes">
       <section id="hier-pane" class="pane">
         <h2>Hierarchy</h2>
-        <div id="hierarchy"></div>
+        <div id="hierarchy" class="tree"></div>
       </section>
       <div id="col-splitter" title="Drag to resize the tree pane"></div>
       <!-- Top-right tab group (#99): source ↔ schematic, source active by default.
@@ -100,6 +100,7 @@
               <button id="wave-zoom-reset" title="Fit waveform to data" aria-label="Fit waveform to data">⤢</button>
               <button id="wave-zoom-in" aria-label="Zoom in">+</button>
             </span>
+            <button id="wave-pick-btn" class="pop-btn" aria-expanded="false" title="Show/hide the signal picker (Ctrl/⌘+B)" aria-label="Toggle the signal picker">☰ Signals</button>
             <button id="load-trace" class="pop-btn" title="Load a trace (VCD/FST/GHW) into this waveform pane, keeping the current design (#170)" aria-label="Load a trace into this waveform pane">Load trace…</button>
             <button id="pop-waveform" class="pop-btn" title="Open the waveform in its own window (#18)" aria-label="Detach waveform to its own window">⇱</button>
           </span>
@@ -108,6 +109,17 @@
           <div id="status-log"></div>
         </section>
         <section id="wave-pane" class="pane tab-panel">
+          <!-- Per-pane signal picker (#171), GTKWave-SST style: the scope tree over the
+               signals in the selected scope. It lives inside #wave-pane rather than the
+               window's #hier-pane column, so every waveform pop-out gets one for free —
+               body.detached-waveform already hands #bottom-group the whole window, so no
+               detached-grid surgery is needed. Collapsed by default; toggled by
+               #wave-pick-btn or Ctrl/⌘+B. (This is the *signal* picker; #picker is the
+               cross-probe alternatives list.) -->
+          <div id="wave-picker" hidden>
+            <div id="wave-picker-tree" class="tree"></div>
+            <div id="wave-picker-sigs"></div>
+          </div>
           <div id="wave-list"></div>
         </section>
       </section>
