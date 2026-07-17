@@ -339,7 +339,11 @@ fn width_of(type_: &Option<String>) -> Option<String> {
 /// Pin bit-range with an enum fallback (#118): the declared packed range, or —
 /// for an enum-typed signal (`lane_state_e`) — the range implied by the enum's
 /// width in the model's normalized enum table. A model fact, never a guess.
-fn pin_width(design: &Design, type_: &Option<String>) -> Option<String> {
+///
+/// Public so the GUI's waveform signal picker (#171) annotates its rows exactly as
+/// the schematic annotates pins — one width rule, no divergence. Same reason
+/// `is_bare_interface`/`module_of` are public.
+pub fn pin_width(design: &Design, type_: &Option<String>) -> Option<String> {
     width_of(type_).or_else(|| {
         let e = design.enum_for_type(type_.as_deref()?)?;
         Some(format!("[{}:0]", e.width.saturating_sub(1)))

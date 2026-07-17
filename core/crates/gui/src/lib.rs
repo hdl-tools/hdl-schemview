@@ -5,6 +5,7 @@
 //! as serializable DTOs. UI-toolkit-free so it builds and tests in CI; the Tauri
 //! shell in `app/src-tauri` is a thin wrapper that exposes these as commands.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -14,7 +15,9 @@ use serde::Serialize;
 pub use startup::{StartupArgs, StartupError};
 use svxprobe_matcher::MatchOptions;
 use svxprobe_model::{Design, EnumMember, NodeId, NodeKind};
-use svxprobe_schematic::{cone, expand, is_bare_interface, module_of, scope_graph, SchematicGraph};
+use svxprobe_schematic::{
+    cone, expand, is_bare_interface, module_of, pin_width, scope_graph, SchematicGraph,
+};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
@@ -74,6 +77,51 @@ pub struct TreeNode {
     pub module: Option<String>,
     pub expandable: bool,
     pub children: Vec<TreeNode>,
+}
+
+/// One signal declared directly inside a scope (#171) — a row of a waveform pane's
+/// signal picker. The tree lists the design's scopes (`hierarchy_tree`); this lists
+/// what is *inside* one, so a pane picks its own lanes without borrowing another
+/// window's tree.
+///
+/// Every field is the cross-probe's own answer for `path` rather than a
+/// re-derivation, so a row and the `probe_node` that follows it cannot disagree.
+/// Note there is deliberately no `dir`: a modport member's direction is relative to
+/// the view reading it, so one signal's equivalence set carries contradictory
+/// directions (`out` of a producer's view, `in` to a consumer's). No single model
+/// answer ⇒ no field.
+#[derive(Debug, Clone, Serialize)]
+pub struct SignalEntry {
+    /// Canonical model path — the picker's key, and what a click probes.
+    pub path: String,
+    /// Last path segment, as declared.
+    pub name: String,
+    /// The *cross-probe's* representative kind for this path. `best_kind` ranks the
+    /// backing `Var` above its `Port`, so a module port reports `Var` — that names
+    /// the node a click actually selects, which is the point.
+    pub kind: NodeKind,
+    /// Declared bit-range (`[31:0]`), enum width fallback included; `None` for a
+    /// scalar. Annotated by the schematic's own `pin_width`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<String>,
+    /// Whether this session's trace carries the signal. False → the frontend dims the
+    /// row rather than pruning it: the model has the signal, the trace doesn't.
+    pub in_trace: bool,
+}
+
+/// The kinds the picker lists: real signal declarations a trace can carry.
+///
+/// `Param` is excluded — an elaboration-time constant is never in a trace, so it
+/// could only ever be a permanently-dimmed row. `Instance`/`GenBlock` and a bare
+/// `Interface` are the *tree's* scopes, `Modport` is a view of a bundle, and
+/// `Ff`/`Comb`/`Latch`/`Assign` are synthesized boxes with no declaration of their
+/// own. Excluding `Interface` also keeps the picker from recursing into a
+/// modport-qualified port, whose children's paths live in a *different* scope.
+fn is_signal_kind(k: NodeKind) -> bool {
+    matches!(
+        k,
+        NodeKind::Port | NodeKind::Net | NodeKind::Var | NodeKind::Memory
+    )
 }
 
 /// A structural scope the hierarchy tree shows — the kinds `scope_graph`
@@ -296,6 +344,76 @@ impl Session {
             .copied()
             .find(|&id| is_tree_scope(design, id))?;
         self.tree_node(root, depth)
+    }
+
+    /// The signals declared directly inside `scope` (#171) — the rows of a waveform
+    /// pane's signal picker, listed in declaration order (matching the source; a sort
+    /// would be one more place to diverge). `None` when `scope` names no structural
+    /// scope, so the shell 404s it exactly as `hierarchy_tree` does; `Some(vec![])`
+    /// for a real scope that declares nothing.
+    ///
+    /// Roots are **every** structural node at the path, not the first: a path can
+    /// carry several (the fixture's `core.genblk1` is three `GenBlock`s, only one of
+    /// which holds children), and a tree row carries only a path — so the union is
+    /// the only answer consistent with whichever identical row the user clicked.
+    /// This deliberately diverges from `hierarchy_tree`'s `find`.
+    ///
+    /// Children are never recursed. Beyond scope-vs-signal, an `Interface` port's
+    /// children carry the *underlying members'* paths, which live in another scope
+    /// entirely — recursing would list a neighbour's signals here.
+    pub fn scope_signals(&self, scope: &str) -> Option<Vec<SignalEntry>> {
+        let design = self.cross.design();
+        let roots: Vec<NodeId> = design
+            .nodes_at_path(scope)
+            .iter()
+            .copied()
+            .filter(|&id| is_tree_scope(design, id))
+            .collect();
+        if roots.is_empty() {
+            return None;
+        }
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut out = Vec::new();
+        for root in roots {
+            let Some(rn) = design.node(root) else {
+                continue;
+            };
+            for &c in &rn.children {
+                let Some(n) = design.node(c) else { continue };
+                if !is_signal_kind(n.kind) {
+                    continue;
+                }
+                // Every port is two nodes at one path — the `Port` and its backing
+                // `Var` (the dual-node pattern `ingest` whitelists). One signal, one
+                // row: dedupe on the canonical path, which is what identifies it.
+                if !seen.insert(n.path.as_str()) {
+                    continue;
+                }
+                if let Some(e) = self.signal_entry(&n.path) {
+                    out.push(e);
+                }
+            }
+        }
+        Some(out)
+    }
+
+    /// One picker row, answered by the cross-probe itself rather than read off the
+    /// child node: `from_node_path` picks the equivalence set's representative
+    /// (`best_kind` — the backing `Var` over its `Port`) and `to_wave` answers the
+    /// trace question across the *whole* set. Asking the child directly would report
+    /// `in_trace: false` for a dual-node `Port` whose `Var` is the matched node — a
+    /// row that contradicts its own click.
+    fn signal_entry(&self, path: &str) -> Option<SignalEntry> {
+        let r = self.cross.from_node_path(path)?;
+        let design = self.cross.design();
+        let n = design.node(r.selection.anchor)?;
+        Some(SignalEntry {
+            path: n.path.clone(),
+            name: n.name.clone(),
+            kind: n.kind,
+            width: pin_width(design, &n.type_),
+            in_trace: matches!(self.cross.to_wave(&r.selection), WaveTarget::Linked { .. }),
+        })
     }
 
     fn tree_node(&self, id: NodeId, depth: usize) -> Option<TreeNode> {
