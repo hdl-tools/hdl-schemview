@@ -108,8 +108,13 @@ move the wrong lane) or the highlighted zone marks it, and `renderWaves`'s
 on the name cell's column resizer is suppressed (`suppressLaneDrag`). A group header's twist
 folds it away (collapsed groups render no tracks — `redrawTracks`/`markerTimeAt` map
 canvases against `visibleLanes`, not `flattenLanes`), and double-clicking the header
-renames it. Groups round-trip the pop-out `WaveSnapshot` (`StoredGroup`) and survive a
-trace swap (`loadTraceOnly` re-resolves per group in place). Each group's lanes are
+renames it. **Right-clicking a group header** (#192, `openGroupMenu`) offers
+collapse/expand, rename, and **delete** — delete is enabled only for an *empty* group (a
+populated one must have its lanes moved/removed first, so signals are never dropped by a
+group delete), and `deleteGroup` splices the group out, `normalizeGroups` keeping the
+trailing-empty invariant so the pane never falls to zero groups. Groups round-trip the
+pop-out `WaveSnapshot` (`StoredGroup`) and survive a trace swap (`loadTraceOnly`
+re-resolves per group in place). Each group's lanes are
 fixed-height rows (`name | value@A | track`) with per-row reorder/remove controls keyed
 by the stable lane `key` (#179); the name/value columns are drag-resizable
 (`state.waveCol`, persisted in `localStorage`). The list is one flat CSS grid
