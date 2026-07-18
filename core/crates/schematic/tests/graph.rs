@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use svxprobe_model::{Design, Dir, NodeId, NodeKind};
-use svxprobe_schematic::{cone, scope_graph, PinRole, Side};
+use svxprobe_schematic::{cone, scope_graph, scope_graph_with, PinRole, Projection, Side};
 
 fn design() -> Design {
     let golden = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1265,4 +1265,225 @@ fn logic_only_generate_blocks_are_not_scopes() {
     }
     // g_lane[0] is a GenBlock too, but holds core/memory/bus instances — it stays.
     assert!(scope_graph(&d, "picorv32_soc.g_lane[0]").is_some());
+}
+
+// --- gate-level projection (#157, ADR 0005) -----------------------------------
+
+/// A tiny gate-level model: `assign y = a & b;` (an `And`) and
+/// `assign z = sel ? c : d;` (a `Mux`), each primitive a flat child of its
+/// `Assign` block, carrying both the process-level edges *and* the gate edges —
+/// exactly what the harness `--gate-level` pass emits. Mirrors the PR2 `GATE_DOC`
+/// shape that ingest already validates.
+const GATE_LEVEL_DOC: &str = r#"{
+    "schema_version": 1,
+    "design": "t",
+    "files": [{"id": 0, "path": "t.sv"}],
+    "nodes": [
+        {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+         "children":[1,2,3,4,5,6,7,8,10],"symbol_key":"t"},
+        {"id":1,"kind":"Port","name":"a","path":"t.a","parent":0,"children":[],
+         "symbol_key":"t.a","dir":"in"},
+        {"id":2,"kind":"Port","name":"b","path":"t.b","parent":0,"children":[],
+         "symbol_key":"t.b","dir":"in"},
+        {"id":3,"kind":"Port","name":"y","path":"t.y","parent":0,"children":[],
+         "symbol_key":"t.y","dir":"out"},
+        {"id":4,"kind":"Port","name":"sel","path":"t.sel","parent":0,"children":[],
+         "symbol_key":"t.sel","dir":"in"},
+        {"id":5,"kind":"Port","name":"c","path":"t.c","parent":0,"children":[],
+         "symbol_key":"t.c","dir":"in"},
+        {"id":6,"kind":"Port","name":"d","path":"t.d","parent":0,"children":[],
+         "symbol_key":"t.d","dir":"in"},
+        {"id":7,"kind":"Port","name":"z","path":"t.z","parent":0,"children":[],
+         "symbol_key":"t.z","dir":"out"},
+        {"id":8,"kind":"Assign","name":"$assign8","path":"t.$assign8","parent":0,
+         "children":[9],"symbol_key":"t.$assign8"},
+        {"id":9,"kind":"And","name":"and","path":"t.$assign8.$and9","parent":8,
+         "children":[],"symbol_key":"t.$assign8.$and9"},
+        {"id":10,"kind":"Assign","name":"$assign10","path":"t.$assign10","parent":0,
+         "children":[11],"symbol_key":"t.$assign10"},
+        {"id":11,"kind":"Mux","name":"mux","path":"t.$assign10.$mux11","parent":10,
+         "children":[],"symbol_key":"t.$assign10.$mux11"}
+    ],
+    "edges": [
+        {"id":0,"port":9,"endpoint":1,"dir":"in"},
+        {"id":1,"port":9,"endpoint":2,"dir":"in"},
+        {"id":2,"port":9,"endpoint":3,"dir":"out"},
+        {"id":3,"port":8,"endpoint":1,"dir":"in"},
+        {"id":4,"port":8,"endpoint":2,"dir":"in"},
+        {"id":5,"port":8,"endpoint":3,"dir":"out"},
+        {"id":6,"port":11,"endpoint":4,"dir":"in","mux_port":"sel"},
+        {"id":7,"port":11,"endpoint":5,"dir":"in","mux_port":"d1"},
+        {"id":8,"port":11,"endpoint":6,"dir":"in","mux_port":"d0"},
+        {"id":9,"port":11,"endpoint":7,"dir":"out"},
+        {"id":10,"port":10,"endpoint":4,"dir":"in"},
+        {"id":11,"port":10,"endpoint":5,"dir":"in"},
+        {"id":12,"port":10,"endpoint":6,"dir":"in"},
+        {"id":13,"port":10,"endpoint":7,"dir":"out"}
+    ]
+}"#;
+
+fn gate_design() -> Design {
+    svxprobe_ingest::from_slice(GATE_LEVEL_DOC.as_bytes()).expect("gate-level model ingests")
+}
+
+// The default projection is byte-identical to today: the process-level `Assign`
+// boxes stay, and the gate/mux children are never surfaced — so a design carrying
+// gate primitives still renders exactly as the process-level view (ADR 0005).
+#[test]
+fn process_level_ignores_gate_primitives() {
+    let d = gate_design();
+    // Both the parameterized default and the bare entry point agree.
+    for g in [
+        scope_graph(&d, "t").expect("scope graph"),
+        scope_graph_with(&d, "t", Projection::ProcessLevel).expect("scope graph"),
+    ] {
+        assert_eq!(
+            g.nodes
+                .iter()
+                .filter(|n| n.kind == NodeKind::Assign)
+                .count(),
+            2,
+            "both assign boxes present at process level"
+        );
+        assert!(
+            !g.nodes
+                .iter()
+                .any(|n| matches!(n.kind, NodeKind::And | NodeKind::Mux)),
+            "no gate boxes at process level"
+        );
+    }
+}
+
+// `GateLevel` dissolves each combinational block into its gate/mux network: the
+// `Assign` boxes disappear, the `And`/`Mux` primitives become boxes wired through
+// the same scope signals, and the mux select carries `PinRole::Sel`.
+#[test]
+fn gate_level_dissolves_logic_into_gate_network() {
+    let d = gate_design();
+    let g = scope_graph_with(&d, "t", Projection::GateLevel).expect("scope graph");
+
+    // The dissolved combinational blocks are gone; their primitives take their place.
+    assert!(
+        !g.nodes.iter().any(|n| n.kind == NodeKind::Assign),
+        "assign boxes dissolved: {:?}",
+        g.nodes.iter().map(|n| n.kind).collect::<Vec<_>>()
+    );
+    let and = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::And)
+        .expect("And box");
+    let mux = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Mux)
+        .expect("Mux box");
+
+    // Gate inputs carry their model paths so a pin right-click cross-probes.
+    assert!(
+        and.ports.iter().any(|p| p.path == "t.a"),
+        "and input a: {:?}",
+        and.ports
+            .iter()
+            .map(|p| p.path.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(and.ports.iter().any(|p| p.path == "t.b"), "and input b");
+    // Exactly one output pin, on the east wall, carrying the gate's own path.
+    let outs: Vec<&_> = and.ports.iter().filter(|p| p.side == Side::East).collect();
+    assert_eq!(outs.len(), 1, "one output pin");
+    assert_eq!(outs[0].path, "t.$assign8.$and9", "output carries gate path");
+
+    // The mux select pin is role-tagged (drawn on the south wall in the frontend);
+    // the data-branch pins are not.
+    let sel = mux
+        .ports
+        .iter()
+        .find(|p| p.path == "t.sel")
+        .expect("sel pin");
+    assert_eq!(sel.role, Some(PinRole::Sel), "select role");
+    let data = mux.ports.iter().find(|p| p.path == "t.c").expect("d1 pin");
+    assert_eq!(data.role, None, "data pin has no select role");
+
+    // The gate output is wired (to the assigned boundary signal), not left dangling.
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.source == outs[0].id || e.target == outs[0].id),
+        "and output is wired into the scope"
+    );
+}
+
+/// `assign y = (a & b) | c;` — an `Or` root whose first input is an `And` node
+/// (gate-to-gate), the second a raw signal. Exercises the self-driver path: the
+/// inner `And` has no `out` edge, yet its result pin must reach the `Or`'s input.
+const NESTED_GATE_DOC: &str = r#"{
+    "schema_version": 1,
+    "design": "u",
+    "files": [{"id": 0, "path": "u.sv"}],
+    "nodes": [
+        {"id":0,"kind":"Instance","name":"u","path":"u","parent":null,
+         "children":[1,2,3,4,5],"symbol_key":"u"},
+        {"id":1,"kind":"Port","name":"a","path":"u.a","parent":0,"children":[],
+         "symbol_key":"u.a","dir":"in"},
+        {"id":2,"kind":"Port","name":"b","path":"u.b","parent":0,"children":[],
+         "symbol_key":"u.b","dir":"in"},
+        {"id":3,"kind":"Port","name":"c","path":"u.c","parent":0,"children":[],
+         "symbol_key":"u.c","dir":"in"},
+        {"id":4,"kind":"Port","name":"y","path":"u.y","parent":0,"children":[],
+         "symbol_key":"u.y","dir":"out"},
+        {"id":5,"kind":"Assign","name":"$assign5","path":"u.$assign5","parent":0,
+         "children":[6,7],"symbol_key":"u.$assign5"},
+        {"id":6,"kind":"Or","name":"or","path":"u.$assign5.$or6","parent":5,
+         "children":[],"symbol_key":"u.$assign5.$or6"},
+        {"id":7,"kind":"And","name":"and","path":"u.$assign5.$and7","parent":5,
+         "children":[],"symbol_key":"u.$assign5.$and7"}
+    ],
+    "edges": [
+        {"id":0,"port":7,"endpoint":1,"dir":"in"},
+        {"id":1,"port":7,"endpoint":2,"dir":"in"},
+        {"id":2,"port":6,"endpoint":7,"dir":"in"},
+        {"id":3,"port":6,"endpoint":3,"dir":"in"},
+        {"id":4,"port":6,"endpoint":4,"dir":"out"}
+    ]
+}"#;
+
+// A nested primitive (no `out` edge of its own) still wires to its consumer gate:
+// the inner `And`'s single east pin connects to the `Or`'s input pin that stands
+// for the `And` (the self-driver path in the signal-join pass).
+#[test]
+fn gate_to_gate_wiring_connects_nested_primitives() {
+    let d = svxprobe_ingest::from_slice(NESTED_GATE_DOC.as_bytes()).expect("nested model ingests");
+    let g = scope_graph_with(&d, "u", Projection::GateLevel).expect("scope graph");
+
+    let and = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::And)
+        .expect("And box");
+    let or = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Or)
+        .expect("Or box");
+    let and_out = and
+        .ports
+        .iter()
+        .find(|p| p.side == Side::East)
+        .expect("and output pin");
+    // The Or's input pin standing for the And carries the And's model path.
+    let or_in = or
+        .ports
+        .iter()
+        .find(|p| p.path == "u.$assign5.$and7")
+        .expect("or input fed by the and");
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| (e.source == and_out.id && e.target == or_in.id)
+                || (e.source == or_in.id && e.target == and_out.id)),
+        "the and result reaches the or input (gate-to-gate)"
+    );
+    // And that inner output is not falsely marked dangling.
+    assert!(!and_out.dangling, "wired gate output is not dangling");
 }
