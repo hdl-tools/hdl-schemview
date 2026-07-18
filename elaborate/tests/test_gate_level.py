@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from svxprobe_elaborate.elaborate import build_model
-from svxprobe_elaborate.validate import _check_invariants
+from svxprobe_elaborate.validate import _check_invariants, validate_model
 
 GATE_KINDS = {
     "And", "Or", "Xor", "Xnor", "Nand", "Nor", "Not", "Buf",
@@ -242,6 +242,26 @@ def test_default_output_has_no_gate_primitives() -> None:
     model = build_model(SOURCES, top="picorv32_soc")
     assert not (GATE_KINDS & {n["kind"] for n in model["nodes"]})
     assert all("mux_port" not in e for e in model["edges"])
+
+
+def test_gate_level_output_validates_against_schema(tmp_path: Path) -> None:
+    """The gate-level projection is part of the model contract (PR2): the new
+    gate/mux `kind`s, the `op` node field, and `mux_port` edges all pass the JSON
+    schema. (PR1 only asserted referential integrity; the schema lands here.)"""
+    model = _model(
+        tmp_path,
+        "  input logic sel, a, b, output logic [3:0] c, dd, output logic y,"
+        " output logic [3:0] z);\n"
+        "  assign y = sel ? a & b : a;\n"
+        "  assign z = c < dd ? c : dd;",
+    )
+    # Sanity: the flag actually produced primitives (an op-carrying Cmp + a Mux)
+    # for the schema to validate — otherwise this would pass vacuously.
+    kinds = {n["kind"] for n in model["nodes"]}
+    assert {"Mux", "And", "Cmp"} <= kinds
+    assert any(n.get("op") for n in model["nodes"])
+    assert any("mux_port" in e for e in model["edges"])
+    validate_model(model)  # raises jsonschema.ValidationError if the schema drifts
 
 
 def test_gate_level_is_purely_additive_on_the_fixture() -> None:

@@ -155,6 +155,7 @@ impl Builder {
             enable: None,
             mem_depth: None,
             init_source: None,
+            op: None,
             drivers: Vec::new(),
             loads: Vec::new(),
         });
@@ -173,6 +174,7 @@ impl Builder {
             dir,
             select: None,
             mem_port: None,
+            mux_port: None,
         });
     }
 }

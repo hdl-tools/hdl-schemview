@@ -65,6 +65,44 @@ pub enum NodeKind {
     /// with addr/din/dout/read/write pins. Process-granularity per ADR 0004 —
     /// the box maps to the array's `def_range`, so cross-probe stays a lookup.
     Memory,
+    // --- Gate-level projection primitives (#157, ADR 0005) ------------------
+    // Emitted only by the harness's opt-in `--gate-level` pass, which
+    // decomposes process/assign RHS expressions into these primitives. Each is a
+    // flat child of its process/assign node and carries a sub-expression
+    // `def_range`, so cross-probe stays a lookup (the scoped ADR-0004
+    // relaxation). Associative chains collapse to one N-input gate; `~` folds
+    // onto the base gate (And→Nand, …); a `?:` becomes a `Mux`. The datapath
+    // kinds (`Add`/`Sub`/`Mul`/`Cmp`/`Shift`) keep the exact operator on
+    // `Node.op`, since the coarse kind can't tell `==` from `<`.
+    /// N-input AND (also a reduction `&a`).
+    And,
+    /// N-input OR (also a reduction `|a`).
+    Or,
+    /// N-input XOR (also a reduction `^a`).
+    Xor,
+    /// N-input XNOR — an XOR with the output bubble folded on (`~^a`, `a ~^ b`).
+    Xnor,
+    /// N-input NAND — an AND with the output bubble folded on (`~(a & b)`, `~&a`).
+    Nand,
+    /// N-input NOR — an OR with the output bubble folded on (`~(a | b)`, `~|a`).
+    Nor,
+    /// Inverter — a standalone `~` over a bare signal (`~a`).
+    Not,
+    /// Buffer — an identity pass (`+a`), drawn as a bare triangle.
+    Buf,
+    /// Adder (`+`). Operator kept on `op`.
+    Add,
+    /// Subtractor (`-`). Operator kept on `op`.
+    Sub,
+    /// Multiplier / divide / mod / power. Exact operator kept on `op`.
+    Mul,
+    /// Comparator (`==`/`!=`/`<`/`>`/`<=`/`>=`). Exact operator kept on `op`.
+    Cmp,
+    /// Shifter (logical/arithmetic, left/right). Exact operator kept on `op`.
+    Shift,
+    /// Multiplexer — a `?:` conditional. Its select/data inputs are tagged on
+    /// the edge via [`MuxPort`].
+    Mux,
 }
 
 /// A point in a source file.
@@ -181,6 +219,13 @@ pub struct Node {
     /// the memory has no `$readmem*` initializer (#112).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init_source: Option<String>,
+    /// Exact operator of a gate-level datapath primitive (#157, ADR 0005) — e.g.
+    /// `"LessThan"` on a [`NodeKind::Cmp`] or `"LogicalShiftLeft"` on a
+    /// [`NodeKind::Shift`]. The coarse `kind` groups these, so the precise
+    /// operator rides here for the label. `None` on non-gate nodes (and on the
+    /// bitwise/reduction gates, whose `kind` already names them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
     #[serde(default)]
     pub drivers: Vec<NodeId>,
     #[serde(default)]
@@ -262,6 +307,31 @@ pub enum MemPort {
     Dout,
 }
 
+/// Which port of a gate-level [`NodeKind::Mux`] an edge feeds (#157, ADR 0005).
+/// A `?:` decomposes to a mux whose three inputs are role-tagged so the
+/// schematic can place the select on its own side and the data inputs in order.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MuxPort {
+    /// The condition expression selecting between the data inputs.
+    Sel,
+    /// The value chosen when the select is false (the `?:` else branch).
+    D0,
+    /// The value chosen when the select is true (the `?:` then branch).
+    D1,
+}
+
 /// A port-connection edge: a module `port` wired to an external `endpoint`
 /// (net / var / port / interface instance).
 #[derive(
@@ -290,6 +360,11 @@ pub struct Edge {
     /// pin's role (addr/din/dout). `None` for ordinary connectivity edges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mem_port: Option<MemPort>,
+    /// Mux-port role of this edge (#157, ADR 0005): set when the edge feeds a
+    /// gate-level [`NodeKind::Mux`]'s select/data input (sel/d0/d1), so the
+    /// schematic places it correctly. `None` for ordinary connectivity edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mux_port: Option<MuxPort>,
 }
 
 /// The deserialized Node-model document (matches `model.schema.json`).
@@ -524,6 +599,7 @@ mod tests {
             enable: None,
             mem_depth: None,
             init_source: None,
+            op: None,
             drivers: vec![],
             loads: vec![],
         }
@@ -594,6 +670,7 @@ mod tests {
                 dir: Dir::Out,
                 select: None,
                 mem_port: None,
+                mux_port: None,
             }],
             enums: HashMap::new(),
         };
