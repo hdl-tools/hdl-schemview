@@ -15,7 +15,8 @@
         "label": "main",
         "title": "hdl-schemview",
         "width": 1400,
-        "height": 900
+        "height": 900,
+        "dragDropEnabled": false
       }
     ],
     "security": {

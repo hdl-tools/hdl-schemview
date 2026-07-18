@@ -28,6 +28,7 @@ import {
   withTrailingEmptyGroup,
   normalizeGroups,
   workingGroupIndex,
+  moveLaneTo,
   type WaveTrace,
   type WaveGroup,
 } from "./wave";
@@ -470,15 +471,23 @@ describe("withTrailingEmptyGroup", () => {
 });
 
 describe("normalizeGroups", () => {
-  it("drops interior empties and keeps exactly one trailing empty", () => {
+  it("preserves interior empty groups and ensures a trailing empty (#188)", () => {
     const gs = [grp(false), grp(false, "a"), grp(false), grp(false, "b")];
     const out = normalizeGroups(gs, () => "NEW");
+    // every original group kept in order (empties included), plus one empty appended
+    // because the last group was populated.
+    expect(out.length).toBe(5);
     expect(laneNames(flattenLanes(out))).toEqual(["a", "b"]);
     expect(out[out.length - 1].waves).toEqual([]);
-    expect(out.filter((g) => g.waves.length === 0).length).toBe(1);
+    expect(out.filter((g) => g.waves.length === 0).length).toBe(3);
   });
 
-  it("yields one empty group for an all-empty (or empty) input", () => {
+  it("does not append when the last group is already empty (empties preserved)", () => {
+    const gs = [grp(false, "a"), grp(false), grp(false)];
+    expect(normalizeGroups(gs, () => "NEW")).toBe(gs);
+  });
+
+  it("yields one empty group for an empty input", () => {
     expect(normalizeGroups([], () => "NEW")).toEqual([
       { name: "NEW", collapsed: false, waves: [] },
     ]);
@@ -492,5 +501,60 @@ describe("workingGroupIndex", () => {
 
   it("falls back to the last group when every group is empty", () => {
     expect(workingGroupIndex([grp(false)])).toBe(0);
+  });
+});
+
+// Keyed group: lanes carry distinct keys so moveLaneTo can address them (#188).
+const kgrp = (collapsed: boolean, ...ks: number[]): WaveGroup => ({
+  name: "g",
+  collapsed,
+  waves: ks.map((k) => ({ ...trace(`n${k}`, []), key: k })),
+});
+const laneKeys = (ls: WaveTrace[]) => ls.map((l) => l.key);
+
+describe("moveLaneTo", () => {
+  it("moves a lane forward within its group (insertion index adjusts for the gap)", () => {
+    const out = moveLaneTo([kgrp(false, 1, 2, 3)], 1, 0, 2);
+    expect(laneKeys(out[0].waves)).toEqual([2, 1, 3]);
+  });
+
+  it("moves a lane to the end of its group", () => {
+    const out = moveLaneTo([kgrp(false, 1, 2, 3)], 1, 0, 3);
+    expect(laneKeys(out[0].waves)).toEqual([2, 3, 1]);
+  });
+
+  it("moves a lane backward within its group", () => {
+    const out = moveLaneTo([kgrp(false, 1, 2, 3)], 3, 0, 0);
+    expect(laneKeys(out[0].waves)).toEqual([3, 1, 2]);
+  });
+
+  it("moves a lane into another group at the given slot", () => {
+    const out = moveLaneTo([kgrp(false, 1, 2), kgrp(false, 3)], 1, 1, 0);
+    expect(laneKeys(out[0].waves)).toEqual([2]);
+    expect(laneKeys(out[1].waves)).toEqual([1, 3]);
+  });
+
+  it("drops a lane into an empty group", () => {
+    const out = moveLaneTo([kgrp(false, 1, 2), kgrp(false)], 2, 1, 0);
+    expect(laneKeys(out[0].waves)).toEqual([1]);
+    expect(laneKeys(out[1].waves)).toEqual([2]);
+  });
+
+  it("returns the input unchanged when the lane is dropped on itself", () => {
+    const gs = [kgrp(false, 1, 2, 3)];
+    expect(moveLaneTo(gs, 2, 0, 1)).toBe(gs); // before itself
+    expect(moveLaneTo(gs, 2, 0, 2)).toBe(gs); // after itself
+  });
+
+  it("returns the input unchanged for an unknown key or out-of-range group", () => {
+    const gs = [kgrp(false, 1)];
+    expect(moveLaneTo(gs, 99, 0, 0)).toBe(gs);
+    expect(moveLaneTo(gs, 1, 5, 0)).toBe(gs);
+  });
+
+  it("does not mutate the input groups", () => {
+    const gs = [kgrp(false, 1, 2, 3)];
+    moveLaneTo(gs, 1, 0, 3);
+    expect(laneKeys(gs[0].waves)).toEqual([1, 2, 3]);
   });
 });
