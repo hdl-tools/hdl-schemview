@@ -91,12 +91,21 @@ signals (`hierarchy_tree` + `scope_signals`, both on the pane's `session_id`), s
 picks its own lanes instead of waiting for another window to address them at it; a
 signal absent from the pane's trace is **dimmed and inert**, not pruned. The pane
 organizes its lanes into **collapsible groups** (#182, `state.groups: WaveGroup[]`,
-each `WaveGroup { name, collapsed, waves }`) — there are no loose lanes, and the pane
-always keeps exactly one **empty group at the bottom** as the landing spot for a new
-group (`normalizeGroups`/`workingGroupIndex` in `wave.ts`; the invariant is re-enforced
-in `renderWaves`). A fresh pane is a single empty group. New signals accumulate in the
-**working group** (last populated); a lane's name-cell menu **Move to group ▸ [group |
-New group…]** regroups it (the non-drag path; #188 adds drag), a group header's twist
+each `WaveGroup { name, collapsed, waves }`) — there are no loose lanes. Groups are
+user-authored containers: **a group emptied by a move/remove is preserved, not pruned**
+(#188), and the pane always ends with a trailing **empty group** as the landing spot for
+a new one (`normalizeGroups`/`workingGroupIndex` in `wave.ts`, re-enforced in
+`renderWaves` — the invariant is now just "keep every group + ensure a trailing empty",
+no interior-empty pruning). A fresh pane is a single empty group. New signals accumulate
+in the **working group** (last populated); a lane's name-cell menu **Move to group ▸
+[group | Group N (empty)]** regroups it (the non-drag path), or you **drag a lane by its
+name cell** to a new slot (#188) — within a group, across groups, or onto an **empty
+group** (rendered as a tall dashed `drop-zone` that lights up while dragging over it,
+since a bodyless header is too small to hit); the drop lands where an accent line
+(`moveLaneTo` in `wave.ts`, keyed by the stable lane `key` so a mid-drag re-render can't
+move the wrong lane) or the highlighted zone marks it, and `renderWaves`'s
+`normalizeGroups` appends a fresh trailing empty when the last group fills. A drag started
+on the name cell's column resizer is suppressed (`suppressLaneDrag`). A group header's twist
 folds it away (collapsed groups render no tracks — `redrawTracks`/`markerTimeAt` map
 canvases against `visibleLanes`, not `flattenLanes`), and double-clicking the header
 renames it. Groups round-trip the pop-out `WaveSnapshot` (`StoredGroup`) and survive a

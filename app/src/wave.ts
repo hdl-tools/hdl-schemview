@@ -98,14 +98,14 @@ export function withTrailingEmptyGroup(
   return [...groups, { name: makeName(), collapsed: false, waves: [] }];
 }
 
-// The full pane invariant (#182): drop *interior* empty groups (emptied by a
-// remove/move), keep a populated group's identity, and keep exactly one trailing empty
-// group — preserving the existing trailing empty when there is one, so its auto-name
-// doesn't churn on every mutation. A fresh or all-empty pane becomes a single empty
-// group. Run after any mutation of the groups.
+// The pane invariant (#182, amended #188): every user-created group persists — a group
+// emptied by a remove/move is *preserved*, not pruned, since groups are user-authored
+// containers — and the pane always ends with an empty group as the landing spot for
+// starting a new one. A fresh or all-empty pane becomes a single empty group. Identity is
+// preserved (returns the input) when the last group is already empty, so an auto-name
+// doesn't churn on every mutation. Run after any mutation of the groups.
 export function normalizeGroups(groups: WaveGroup[], makeName: () => string): WaveGroup[] {
-  const kept = groups.filter((g, i) => g.waves.length > 0 || i === groups.length - 1);
-  return withTrailingEmptyGroup(kept, makeName);
+  return withTrailingEmptyGroup(groups, makeName);
 }
 
 // Where a newly added signal lands (#182): the last populated group, or the last group
@@ -116,6 +116,45 @@ export function workingGroupIndex(groups: readonly WaveGroup[]): number {
     if (groups[i].waves.length > 0) return i;
   }
   return groups.length - 1;
+}
+
+// Move the lane with `key` to a new slot (#188 drag-reorder): a destination group index
+// and an insertion index within that group's waves, both in the *current* array's
+// coordinates (the slot the drop indicator sits before; `waves.length` for the end).
+// Returns a new groups array — the source and destination groups get fresh waves arrays,
+// other groups keep their identity — so callers can reassign without mutating state. When
+// source and destination are the same group and the lane moves forward, the index is
+// adjusted for the gap left by removing it, so a drop "just after itself" is a no-op.
+// Dropping a lane onto its own position, an unknown key, or an out-of-range group all
+// return the input unchanged. Callers should `normalizeGroups` the result to re-establish
+// the trailing-empty-group invariant (a drop into the empty group spawns a fresh one).
+export function moveLaneTo(
+  groups: WaveGroup[],
+  key: number,
+  destGroup: number,
+  destIndex: number,
+): WaveGroup[] {
+  if (destGroup < 0 || destGroup >= groups.length) return groups;
+  let sg = -1;
+  let si = -1;
+  for (let g = 0; g < groups.length; g++) {
+    const i = groups[g].waves.findIndex((w) => w.key === key);
+    if (i >= 0) {
+      sg = g;
+      si = i;
+      break;
+    }
+  }
+  if (sg < 0) return groups;
+  // Dropping onto its own slot (before or just after itself) changes nothing.
+  if (sg === destGroup && (si === destIndex || si === destIndex - 1)) return groups;
+  const next = groups.map((g) => ({ ...g, waves: g.waves.slice() }));
+  const [lane] = next[sg].waves.splice(si, 1);
+  let di = destIndex;
+  if (sg === destGroup && si < destIndex) di -= 1;
+  di = Math.max(0, Math.min(di, next[destGroup].waves.length));
+  next[destGroup].waves.splice(di, 0, lane);
+  return next;
 }
 
 // Fixed per-track canvas height (px). Must match `.wave-track` height in style.css.

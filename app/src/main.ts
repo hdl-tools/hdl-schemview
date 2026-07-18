@@ -58,6 +58,7 @@ import {
   flattenLanes,
   laneCounterSeeds,
   maxTime,
+  moveLaneTo,
   nearestEdge,
   normalizeGroups,
   panWindow,
@@ -318,6 +319,10 @@ async function popOut(pane: DetachablePane) {
       title: `hdl-schemview — ${pane}`,
       width: pane === "schematic" ? 1000 : 1200,
       height: pane === "schematic" ? 800 : 500,
+      // Off, or Tauri's native OS drag-drop layer swallows the webview's HTML5 drag
+      // events and a waveform pop-out couldn't reorder its lanes (#188). The app uses
+      // the dialog plugin, not native file-drop, so nothing else needs it.
+      dragDropEnabled: false,
     });
     w.once("tauri://error", (e) =>
       log("error", `detach failed: ${JSON.stringify(e.payload)}`),
@@ -1931,13 +1936,22 @@ function renderGroupHeader(list: HTMLElement, group: WaveGroup) {
   name.className = "wave-group-name";
   const empty = group.waves.length === 0;
   name.textContent = empty ? `${group.name} — drop signals here` : group.name;
-  if (empty) name.classList.add("empty");
+  // A bodyless empty group becomes a tall dashed drop target (#188) — an 18px header
+  // strip was too small to hit when dragging a lane in to start a new group.
+  if (empty) {
+    name.classList.add("empty");
+    header.classList.add("drop-zone");
+  }
   name.title = "Double-click to rename";
   name.ondblclick = () => renameGroup(group, name);
   const count = document.createElement("span");
   count.className = "wave-group-count";
   if (!empty) count.textContent = `${group.waves.length}`;
   header.append(twist, name, count);
+  // Dropping on the header lands the lane at the top of this group — the way to fill the
+  // empty trailing group, which has no lane rows to aim at (#188).
+  header.ondragover = (e) => groupDragOver(e, group, header);
+  header.ondrop = (e) => commitLaneDrop(e);
   list.append(header);
 }
 
@@ -1954,6 +1968,10 @@ function renderLaneRow(list: HTMLElement, tr: WaveTrace, first: boolean, last: b
     e.preventDefault();
     openSignalMenu(e, tr.key);
   };
+  // Drag the name cell to reorder the lane (#188); the column resizer suppresses it.
+  name.draggable = true;
+  name.ondragstart = (e) => startLaneDrag(e, tr.key, name);
+  name.ondragend = () => endLaneDrag();
   name.appendChild(colResizer("name"));
 
   const value = document.createElement("div");
@@ -1976,6 +1994,11 @@ function renderLaneRow(list: HTMLElement, tr: WaveTrace, first: boolean, last: b
   ctrls.appendChild(waveBtn("↓", last, () => moveLane(tr.key, 1)));
   ctrls.appendChild(waveBtn("×", false, () => removeLane(tr.key)));
 
+  // A drop anywhere across the row's cells targets a slot before/after this lane (#188).
+  for (const el of [name, value, cell, ctrls]) {
+    el.ondragover = (e) => laneDragOver(e, tr.key);
+    el.ondrop = (e) => commitLaneDrop(e);
+  }
   list.append(name, value, cell, ctrls);
 }
 
@@ -2021,6 +2044,7 @@ const COL_MIN = { name: 60, value: 40 };
 function colResizer(col: "name" | "value"): HTMLDivElement {
   const r = document.createElement("div");
   r.className = "col-resizer";
+  r.draggable = false; // it lives inside the draggable name cell (#188)
   r.onmousedown = (ev) => startColResize(col, ev);
   return r;
 }
@@ -2028,6 +2052,10 @@ function colResizer(col: "name" | "value"): HTMLDivElement {
 function startColResize(col: "name" | "value", ev: MouseEvent) {
   ev.preventDefault();
   ev.stopPropagation();
+  // Block the name cell's lane-drag (#188) while a resize gesture is in flight — the
+  // resizer is a child of the draggable cell, so a press-drag here would otherwise start
+  // both. The flag clears on mouseup, whether or not a resize actually happened.
+  suppressLaneDrag = true;
   const cell = (ev.currentTarget as HTMLElement).parentElement!;
   const startX = ev.clientX;
   const startW = cell.getBoundingClientRect().width;
@@ -2038,6 +2066,7 @@ function startColResize(col: "name" | "value", ev: MouseEvent) {
   const onUp = () => {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
+    suppressLaneDrag = false;
     persistColWidths();
   };
   window.addEventListener("mousemove", onMove);
@@ -2273,7 +2302,7 @@ function removeLane(key: number) {
   const found = findLane(key);
   if (!found) return;
   found.group.waves.splice(found.index, 1);
-  renderWaves(); // normalizeWaveGroups (in renderWaves) prunes a now-empty interior group
+  renderWaves(); // a group emptied by removal is preserved, not pruned (#188)
 }
 
 const RADIX_LABELS: { r: Radix; label: string }[] = [
@@ -2352,6 +2381,114 @@ function moveLaneToGroup(key: number, target: WaveGroup) {
   renderWaves();
 }
 
+// --- #188 drag-to-reorder ------------------------------------------------------------
+// Drag state, keyed by the stable lane key (#179) so a mid-drag re-render can't move the
+// wrong lane: the dragged lane, its dimmed name cell, and the pending drop slot (a group
+// index + insertion index in that group's *current* waves array). `suppressLaneDrag`
+// blocks a drag that begins on the column resizer, which owns its own mousedown gesture.
+let dragLaneKey: number | null = null;
+let dragNameCell: HTMLElement | null = null;
+let dropSlot: { group: number; index: number } | null = null;
+let suppressLaneDrag = false;
+
+// The full-width accent line marking where a dropped lane lands. Absolutely positioned in
+// the scroll content (so it tracks scrolling), created lazily since `renderWaves` wipes
+// the list, and hidden when not over a valid target.
+function dropLine(): HTMLElement {
+  const list = $("wave-list");
+  let line = list.querySelector<HTMLElement>(".wave-drop-line");
+  if (!line) {
+    line = document.createElement("div");
+    line.className = "wave-drop-line";
+    line.hidden = true;
+    list.appendChild(line);
+  }
+  return line;
+}
+function showDropLine(y: number) {
+  const line = dropLine();
+  line.style.top = `${y}px`;
+  line.hidden = false;
+}
+// Clear every drop affordance — the thin line and any highlighted empty-group zone — so
+// exactly one shows at a time. Called at the top of each dragover before the new one is
+// set (cheaper and flicker-free vs. per-element dragleave) and on drag end.
+function clearDropMarks() {
+  $("wave-list").querySelector<HTMLElement>(".wave-drop-line")?.setAttribute("hidden", "");
+  $("wave-list")
+    .querySelector<HTMLElement>(".wave-group-header.drag-over")
+    ?.classList.remove("drag-over");
+}
+
+// Begin dragging a lane from its name cell — unless the press landed on the resizer.
+function startLaneDrag(e: DragEvent, key: number, cell: HTMLElement) {
+  if (suppressLaneDrag) {
+    e.preventDefault();
+    return;
+  }
+  dragLaneKey = key;
+  dragNameCell = cell;
+  cell.classList.add("dragging");
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(key));
+  }
+}
+
+// Over a lane row: drop before it (pointer in the top half) or after it (bottom half). The
+// four row cells share a grid row, so any of them gives the same offsetTop/height.
+function laneDragOver(e: DragEvent, key: number) {
+  if (dragLaneKey === null) return;
+  e.preventDefault(); // mark this a valid drop target
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  const found = findLane(key);
+  if (!found) return;
+  const cell = e.currentTarget as HTMLElement;
+  const after = e.clientY - cell.getBoundingClientRect().top > cell.offsetHeight / 2;
+  dropSlot = { group: state.groups.indexOf(found.group), index: found.index + (after ? 1 : 0) };
+  clearDropMarks();
+  showDropLine(after ? cell.offsetTop + cell.offsetHeight : cell.offsetTop);
+}
+
+// Over a group header: drop at the top of that group. For the empty trailing group — a
+// bodyless header with no lane rows to aim at — the whole header is the drop target and
+// lights up (`drag-over`); for a populated group the thin line marks the top slot.
+function groupDragOver(e: DragEvent, group: WaveGroup, header: HTMLElement) {
+  if (dragLaneKey === null) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  dropSlot = { group: state.groups.indexOf(group), index: 0 };
+  clearDropMarks();
+  if (group.waves.length === 0) header.classList.add("drag-over");
+  else showDropLine(header.offsetTop + header.offsetHeight);
+}
+
+// Commit the pending drop via the pure `moveLaneTo`, then re-render (which normalizes the
+// groups: a drop into the empty group spawns a fresh trailing one, emptied groups prune).
+function commitLaneDrop(e: DragEvent) {
+  e.preventDefault();
+  if (dragLaneKey !== null && dropSlot) {
+    const next = moveLaneTo(state.groups, dragLaneKey, dropSlot.group, dropSlot.index);
+    endLaneDrag();
+    if (next !== state.groups) {
+      state.groups = next;
+      renderWaves();
+    }
+    return;
+  }
+  endLaneDrag();
+}
+
+// Clear drag state and the indicator. Idempotent — runs on drop and on dragend (which
+// fires even when the drop misses every target).
+function endLaneDrag() {
+  dragLaneKey = null;
+  dropSlot = null;
+  dragNameCell?.classList.remove("dragging");
+  dragNameCell = null;
+  clearDropMarks();
+}
+
 // Per-signal value-format menu (radix / another view / move to group / sub-bus), opened
 // from the name cell (#78). Addressed by the lane's stable key (#179).
 function openSignalMenu(ev: MouseEvent, key: number) {
@@ -2389,7 +2526,7 @@ function openSignalMenu(ev: MouseEvent, key: number) {
   const groupSubmenu: MenuItem[] = state.groups
     .filter((g) => g !== found.group)
     .map((g) => ({
-      label: g.waves.length === 0 ? `${g.name} (new group)` : g.name,
+      label: g.waves.length === 0 ? `${g.name} (empty)` : g.name,
       enabled: true,
       onClick: () => moveLaneToGroup(key, g),
     }));

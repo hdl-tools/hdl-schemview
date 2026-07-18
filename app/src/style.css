@@ -189,7 +189,9 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
    when many signals are added, instead of expanding past the fixed-height pane.
    No padding (#180): a dense stack sits flush at the top, and any top padding would
    leave a bleed strip above the sticky ruler (#181) for lanes to scroll through. */
-#wave-list { flex:1; min-height:0; min-width:0; overflow:auto; padding:0; color:var(--muted); font-size:11px; }
+/* position:relative anchors the absolute drag drop-indicator (#188) to the scroll
+   content, so it tracks the lanes as they scroll. */
+#wave-list { flex:1; min-height:0; min-width:0; overflow:auto; padding:0; position:relative; color:var(--muted); font-size:11px; }
 
 /* Signal picker (#171): a collapsible sub-column of the waveform pane — scope tree
    over the signals in that scope, GTKWave-SST style. `.pane` is a flex column, so the
@@ -259,6 +261,18 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 .wave-group-name.empty { font-weight:400; font-style:italic; color:var(--muted); }
 .wave-group-count { color:var(--muted); font-variant-numeric:tabular-nums; }
 .wave-group-rename { font:inherit; background:var(--field); color:var(--fg); border:1px solid var(--accent); border-radius:2px; padding:0 3px; width:14ch; }
+/* Drag-to-reorder (#188): the name cell is the drag handle; the dragged lane dims, and a
+   full-width accent line (absolutely positioned in the scroll content) marks the drop
+   slot. `grab`/`grabbing` cursors signal the affordance; the resizer keeps its own
+   col-resize cursor via its higher specificity + z-index. */
+.wave-row-name[draggable="true"] { cursor:grab; }
+.wave-row-name.dragging { opacity:0.4; cursor:grabbing; }
+.wave-drop-line { position:absolute; left:0; right:0; height:0; margin-top:-1px; border-top:2px solid var(--accent); pointer-events:none; z-index:6; }
+/* The empty trailing group is a bodyless header, so it doubles as a tall dashed drop
+   target for starting a new group by drag (#188) — an 18px strip is too small to hit. It
+   lights up while a lane is dragged over it. */
+.wave-group-header.drop-zone { min-height:40px; border:1px dashed var(--border); }
+.wave-group-header.drop-zone.drag-over { border-color:var(--accent); background:var(--hl); }
 
 /* schematic primitives */
 .box { fill:var(--box); stroke:var(--box-stroke); cursor:pointer; }
