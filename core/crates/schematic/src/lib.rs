@@ -11,7 +11,7 @@
 //! * [`cone`] — the fan-in/out of a net (its driving/loading boxes).
 
 use serde::Serialize;
-use svxprobe_model::{Design, Dir, Edge, MemPort, NodeId, NodeKind};
+use svxprobe_model::{Design, Dir, Edge, MemPort, MuxPort, Node, NodeId, NodeKind};
 
 /// Which border a port sits on (drives ELK port placement).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -42,6 +42,26 @@ pub enum PinRole {
     Write,
     /// Read-enable of a `Memory` glyph — the process that reads from it (#112).
     Read,
+    /// Select (control) input of a `Mux` glyph (#157, ADR 0005) — placed on the
+    /// trapezoid's south wall by the frontend, distinguishing it from the west
+    /// data-branch pins. Set from the `MuxPort::Sel` edge role, never guessed.
+    Sel,
+}
+
+/// Which projection [`scope_graph_with`]/[`expand_with`] render (#157, ADR 0005).
+/// The default [`Projection::ProcessLevel`] is byte-identical to the bare
+/// [`scope_graph`]/[`expand`] entry points — one box per `always`/`assign`.
+/// [`Projection::GateLevel`] is the opt-in view: each combinational block dissolves
+/// into its gate/mux primitive network. It never displaces the default — a UI
+/// toggle selects it, and it only surfaces the primitives the harness's opt-in
+/// `--gate-level` pass emits (a model without them renders identically either way).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Projection {
+    /// One box per source construct — the ADR 0004 default.
+    #[default]
+    ProcessLevel,
+    /// Combinational blocks dissolved into gate/mux primitives — the ADR 0005 opt-in.
+    GateLevel,
 }
 
 /// A pin on a box.
@@ -209,7 +229,7 @@ fn boundary_side(dir: Dir) -> Side {
 /// The boxes shown inside a scope: child `Instance`s, with `GenBlock`s dissolved
 /// — their leaf instances are pulled up so e.g. both `g_lane[*].core` sit
 /// together at the top instead of behind a generate-array group box.
-fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
+fn child_boxes(design: &Design, scope: NodeId, projection: Projection) -> Vec<NodeId> {
     let mut out = Vec::new();
     if let Some(n) = design.node(scope) {
         for &c in &n.children {
@@ -217,16 +237,44 @@ fn child_boxes(design: &Design, scope: NodeId) -> Vec<NodeId> {
                 Some(NodeKind::Instance)
                 | Some(NodeKind::Interface)
                 | Some(NodeKind::Ff)
-                | Some(NodeKind::Comb)
-                | Some(NodeKind::Latch)
-                | Some(NodeKind::Assign)
                 | Some(NodeKind::Memory) => out.push(c),
-                Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c)),
+                // A combinational block (comb / assign / latch) is one box at the
+                // process level; under `GateLevel` it dissolves into its gate/mux
+                // primitives — its flat children (#157) — the way a `GenBlock`
+                // dissolves into its instances. A block that carries no primitives
+                // (a bare `assign y = x` with no operator) keeps its box, so the
+                // direct connection still renders. Sequential (`Ff`) and `Memory`
+                // blocks stay opaque at both levels — decomposing their input cloud
+                // is a deferrable later slice (ADR 0005).
+                Some(NodeKind::Comb) | Some(NodeKind::Latch) | Some(NodeKind::Assign) => {
+                    let gates = gate_children(design, c);
+                    if projection == Projection::GateLevel && !gates.is_empty() {
+                        out.extend(gates);
+                    } else {
+                        out.push(c);
+                    }
+                }
+                Some(NodeKind::GenBlock) => out.extend(child_boxes(design, c, projection)),
                 _ => {}
             }
         }
     }
     out
+}
+
+/// The gate-level primitives (#157) that are flat children of a logic block — the
+/// boxes a `GateLevel` projection surfaces when it dissolves the block.
+fn gate_children(design: &Design, block: NodeId) -> Vec<NodeId> {
+    design
+        .node(block)
+        .map(|n| {
+            n.children
+                .iter()
+                .copied()
+                .filter(|&c| is_gate(design, c))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// A bare interface *instance* (a signal bundle) that carries `modport` views —
@@ -319,6 +367,33 @@ fn is_logic_box(design: &Design, id: NodeId) -> bool {
             | Some(NodeKind::Assign)
             | Some(NodeKind::Memory)
     )
+}
+
+/// A gate-level primitive kind (#157, ADR 0005) — the 13 gates + `Mux` the opt-in
+/// projection surfaces from a dissolved combinational block.
+fn is_gate_kind(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::And
+            | NodeKind::Or
+            | NodeKind::Xor
+            | NodeKind::Xnor
+            | NodeKind::Nand
+            | NodeKind::Nor
+            | NodeKind::Not
+            | NodeKind::Buf
+            | NodeKind::Add
+            | NodeKind::Sub
+            | NodeKind::Mul
+            | NodeKind::Cmp
+            | NodeKind::Shift
+            | NodeKind::Mux
+    )
+}
+
+/// Whether `id` is a gate-level primitive node.
+fn is_gate(design: &Design, id: NodeId) -> bool {
+    design.node(id).is_some_and(|n| is_gate_kind(n.kind))
 }
 
 /// Last segment of a path (used to label unnamed generate blocks).
@@ -603,7 +678,9 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         // Other box kinds are drillable only if they contain boxes.
         expandable: n.kind == NodeKind::Instance
             || is_bare_interface(design, bx)
-            || !child_boxes(design, bx).is_empty(),
+            // Drillability is structural (does it contain boxes), independent of
+            // the gate/process projection, so always ask at the process level.
+            || !child_boxes(design, bx, Projection::ProcessLevel).is_empty(),
         ports,
         module: module_of(design, n),
         constant: None,
@@ -802,6 +879,73 @@ fn make_memory_box(
         mem_depth: n.mem_depth,
         init_source: n.init_source.clone(),
     })
+}
+
+/// A gate-level primitive box (#157, ADR 0005): an `And`/`Or`/…/`Cmp`/`Mux`
+/// surfaced when a combinational block is dissolved. Like an FF it has no model
+/// `Port` children, so synthesize an input pin per operand edge (west) plus a
+/// single output pin (east). The output pin is keyed `(gate, gate)` — a gate has
+/// at most one consumer (a scope signal or another gate), and both wire through
+/// the signal-join pass, which drives key `gate` from this pin. A `Mux`'s select
+/// input carries `PinRole::Sel` (from its `MuxPort::Sel` edge role) so the
+/// frontend can place it on the trapezoid's south wall.
+fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<SchNode> {
+    let n = design.node(gate)?;
+    let mut ports: Vec<SchPort> = design
+        .edges_of(gate)
+        .iter()
+        .filter(|e| e.port == gate && e.dir != Dir::Out)
+        .map(|e| {
+            let sig = design.node(e.endpoint);
+            // The select input is the only role-tagged pin; the data branches
+            // (and every non-mux operand) stay plain west pins.
+            let role = matches!(e.mux_port, Some(MuxPort::Sel)).then_some(PinRole::Sel);
+            SchPort {
+                id: pins.pin(gate, e.endpoint),
+                name: sig.map(|s| s.name.clone()).unwrap_or_default(),
+                side: Side::West,
+                path: sig.map(|s| s.path.clone()).unwrap_or_default(),
+                width: sig.and_then(|s| pin_width(design, &s.type_)),
+                role,
+                bundle: false,
+                dangling: false,
+            }
+        })
+        .collect();
+    // The single result pin, keyed on the gate itself so gate→gate and gate→signal
+    // wires resolve to it in the signal-join pass. Carries the gate's own path so a
+    // right-click cross-probes to its sub-expression `def_range`.
+    ports.push(SchPort {
+        id: pins.pin(gate, gate),
+        name: String::new(),
+        side: Side::East,
+        path: n.path.clone(),
+        width: None,
+        role: None,
+        bundle: false,
+        dangling: false,
+    });
+    Some(SchNode {
+        id: gate,
+        kind: n.kind,
+        label: gate_label(n),
+        path: n.path.clone(),
+        expandable: false,
+        ports,
+        module: None,
+        constant: None,
+        modport: None,
+        mem_depth: None,
+        init_source: None,
+    })
+}
+
+/// The label for a gate box: a datapath primitive (`Add`/`Sub`/`Mul`/`Cmp`/`Shift`)
+/// keeps its exact operator (`op`, e.g. `LessThan`) — the coarse kind can't tell
+/// `<` from `==`; the bitwise/reduction gates are named by their kind (`and`,
+/// `mux`, …). The frontend draws the real IEEE glyph over this fallback (PR5).
+fn gate_label(n: &Node) -> String {
+    n.op.clone().unwrap_or_else(|| n.name.clone())
 }
 
 /// A boundary I/O pin for one of the scope's own ports. Rendered as a frame pin
@@ -1045,10 +1189,26 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
     }
 }
 
+/// The schematic of one scope at the process level (ADR 0004 default) — the bare
+/// entry point every existing caller uses. Delegates to [`scope_graph_with`] with
+/// [`Projection::ProcessLevel`], so its output is unchanged.
+pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> {
+    scope_graph_with(design, scope_path, Projection::ProcessLevel)
+}
+
 /// The schematic of one scope: child-instance boxes wired by the connections
 /// whose two ends both live inside the scope. Connections that leave the scope
 /// (e.g. to a top-level clock) are omitted here; use [`cone`] to trace those.
-pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> {
+///
+/// `projection` selects the internal-logic granularity (#157, ADR 0005): the
+/// default [`Projection::ProcessLevel`] keeps one box per `always`/`assign`;
+/// [`Projection::GateLevel`] dissolves each combinational block into its gate/mux
+/// primitive network. A model with no gate primitives renders identically at both.
+pub fn scope_graph_with(
+    design: &Design,
+    scope_path: &str,
+    projection: Projection,
+) -> Option<SchematicGraph> {
     // A logic-only generate block is not a scope (#184) — `is_navigable_scope` rejects
     // it so a cross-probe onto its path walks up to the enclosing module.
     let scope = *design
@@ -1061,7 +1221,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
         return Some(interface_interior(design, scope, scope_path));
     }
 
-    let boxes = child_boxes(design, scope);
+    let boxes = child_boxes(design, scope, projection);
     let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
     // Synthesized pins (FF clk/data/Q) are handed out per (box, signal) so boxes
     // sharing a net keep distinct pins. The same allocator is reused by the FF
@@ -1075,6 +1235,9 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                 make_logic_box(design, b, &mut pins)
             }
             Some(NodeKind::Memory) => make_memory_box(design, b, scope_path, &mut pins),
+            // Gate-level primitives (#157) only reach `boxes` under `GateLevel`,
+            // where `child_boxes` dissolved their parent block into them.
+            Some(k) if is_gate_kind(k) => make_gate_box(design, b, &mut pins),
             _ => make_box(design, b, scope_path),
         };
         nodes.extend(node);
@@ -1255,10 +1418,11 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     let mut seen: std::collections::HashSet<(NodeId, NodeId)> = std::collections::HashSet::new();
     for &i in &cand {
         let e = &design.edges()[i as usize];
-        // Logic boxes wire through the scope-level signals they read and assign;
-        // that is done by the signal-join pass below. Here we draw only the
-        // structural (instance) connections, both ends resolving to in-scope boxes.
-        if is_logic_box(design, e.port) {
+        // Logic boxes and gate primitives wire through the scope-level signals
+        // (and gate-to-gate links) they read and assign; that is done by the
+        // signal-join pass below. Here we draw only the structural (instance)
+        // connections, both ends resolving to in-scope boxes.
+        if is_logic_box(design, e.port) || is_gate(design, e.port) {
             continue;
         }
         if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
@@ -1314,6 +1478,25 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
                     drivers.entry(key).or_default().push(anchor);
                 } else {
                     loads.entry(key).or_default().push(anchor);
+                }
+                continue;
+            }
+            // Gate primitives (#157) wire the same way, but a gate has a single
+            // result pin keyed on itself (`make_gate_box`). Its `out` edge drives
+            // the assigned signal (key = that signal); each `in` edge loads either
+            // a scope signal or a producer gate (key = the endpoint), matched by
+            // the producer's self-driver added below.
+            if is_gate(design, e.port) && box_set.contains(&e.port) {
+                if e.dir == Dir::Out {
+                    drivers
+                        .entry(key)
+                        .or_default()
+                        .push((pins.pin(e.port, e.port), None));
+                } else {
+                    loads
+                        .entry(key)
+                        .or_default()
+                        .push((pins.pin(e.port, e.endpoint), e.select.clone()));
                 }
                 continue;
             }
@@ -1378,6 +1561,15 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
             }
             if let Some(&rp) = raw_port.get(&owner) {
                 fold_anchor(member, rp);
+            }
+        }
+        // Every gate box offers its result under its own id key (#157): a non-root
+        // gate feeding another gate has no `out` edge, so its output pin is offered
+        // here, and the consumer's `in` edge (loaded under the producer's id above)
+        // meets it. A root gate's self-key has no loads and is simply skipped.
+        for &b in &boxes {
+            if is_gate(design, b) {
+                drivers.entry(b).or_default().push((pins.pin(b, b), None));
             }
         }
         // BTreeSet for a deterministic wire order across runs.
@@ -1447,7 +1639,7 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     let wired: std::collections::HashSet<NodeId> =
         edges.iter().flat_map(|e| [e.source, e.target]).collect();
     for node in &mut nodes {
-        if is_logic_box(design, node.id) {
+        if is_logic_box(design, node.id) || is_gate(design, node.id) {
             for p in &mut node.ports {
                 if p.side == Side::East && !wired.contains(&p.id) {
                     p.dangling = true;
@@ -1463,10 +1655,21 @@ pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> 
     })
 }
 
-/// Expand an instance: the scope graph one level down inside it.
+/// Expand an instance at the process level: the scope graph one level down inside
+/// it. Delegates to [`expand_with`] with [`Projection::ProcessLevel`].
 pub fn expand(design: &Design, instance: NodeId) -> Option<SchematicGraph> {
+    expand_with(design, instance, Projection::ProcessLevel)
+}
+
+/// Expand an instance under a chosen [`Projection`] (#157) — the scope graph one
+/// level down inside it, at the process or gate level.
+pub fn expand_with(
+    design: &Design,
+    instance: NodeId,
+    projection: Projection,
+) -> Option<SchematicGraph> {
     let path = design.node(instance)?.path.clone();
-    scope_graph(design, &path)
+    scope_graph_with(design, &path, projection)
 }
 
 /// Fan-in/out cone of a node (typically a net or port): the boxes directly
