@@ -2,11 +2,20 @@
 
 use std::path::{Path, PathBuf};
 
-use svxprobe_gui::{Session, SignalEntry};
+use svxprobe_gui::{Projection, SchematicGraph, Session, SignalEntry};
 use svxprobe_model::NodeKind;
 
 fn names(sigs: &[SignalEntry]) -> Vec<&str> {
     sigs.iter().map(|e| e.name.as_str()).collect()
+}
+
+/// A projection-independent fingerprint of a graph: its boxes (id + label,
+/// order-independent) and its edge count. Two graphs with the same shape render
+/// the same schematic.
+fn shape(g: &SchematicGraph) -> (Vec<(u32, String)>, usize) {
+    let mut nodes: Vec<(u32, String)> = g.nodes.iter().map(|n| (n.id, n.label.clone())).collect();
+    nodes.sort();
+    (nodes, g.edges.len())
 }
 
 fn entry<'a>(sigs: &'a [SignalEntry], name: &str) -> &'a SignalEntry {
@@ -44,6 +53,48 @@ fn scope_and_expand() {
     let g = s.scope_graph("picorv32_soc.g_lane[0]").unwrap();
     assert!(g.nodes.iter().any(|n| n.label == "core"));
     assert!(!g.edges.is_empty());
+}
+
+#[test]
+fn scope_graph_projection_threads_through() {
+    let s = session();
+    let scope = "picorv32_soc.g_lane[0]";
+
+    // The bare `scope_graph` delegates with `ProcessLevel` — same graph.
+    let base = s.scope_graph(scope).expect("base graph");
+    let process = s
+        .scope_graph_with(scope, Projection::ProcessLevel)
+        .expect("process-level graph");
+    assert_eq!(shape(&base), shape(&process), "bare call == ProcessLevel");
+
+    // The committed fixture carries no gate primitives (the harness was not run
+    // with `--gate-level`), so gate level is inert here: identical structure.
+    let gate = s
+        .scope_graph_with(scope, Projection::GateLevel)
+        .expect("gate-level graph");
+    assert_eq!(shape(&base), shape(&gate), "no gate prims ⇒ identical");
+}
+
+#[test]
+fn expand_projection_threads_through() {
+    let s = session();
+    let g = s.scope_graph("picorv32_soc.g_lane[0]").unwrap();
+    let inst = g
+        .nodes
+        .iter()
+        .find(|n| n.expandable)
+        .expect("an expandable box to drill");
+
+    let base = s.expand(inst.id).expect("base expand");
+    let process = s
+        .expand_with(inst.id, Projection::ProcessLevel)
+        .expect("process-level expand");
+    assert_eq!(shape(&base), shape(&process), "bare call == ProcessLevel");
+
+    let gate = s
+        .expand_with(inst.id, Projection::GateLevel)
+        .expect("gate-level expand");
+    assert_eq!(shape(&base), shape(&gate), "no gate prims ⇒ identical");
 }
 
 #[test]

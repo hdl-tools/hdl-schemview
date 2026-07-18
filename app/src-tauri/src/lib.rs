@@ -14,7 +14,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use svxprobe_gui::{ProbeResponse, Session, SignalEntry, StartupArgs, StartupError, TreeNode};
+use svxprobe_gui::{
+    ProbeResponse, Projection, Session, SignalEntry, StartupArgs, StartupError, TreeNode,
+};
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
 use tauri::State;
@@ -126,9 +128,11 @@ fn scope_graph(
     state: State<AppState>,
     session_id: Option<String>,
     scope: String,
+    projection: Option<Projection>,
 ) -> CmdResult<SchematicGraph> {
+    let projection = projection.unwrap_or_default();
     with_session(&state, session_id, |s| {
-        s.scope_graph(&scope)
+        s.scope_graph_with(&scope, projection)
             .ok_or_else(|| format!("scope not found: {scope}"))
     })
 }
@@ -138,9 +142,12 @@ fn expand_node(
     state: State<AppState>,
     session_id: Option<String>,
     node: u32,
+    projection: Option<Projection>,
 ) -> CmdResult<SchematicGraph> {
+    let projection = projection.unwrap_or_default();
     with_session(&state, session_id, |s| {
-        s.expand(node).ok_or_else(|| "not expandable".into())
+        s.expand_with(node, projection)
+            .ok_or_else(|| "not expandable".into())
     })
 }
 

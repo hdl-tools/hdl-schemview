@@ -10,7 +10,7 @@
 //! * [`expand`] — the same, one level down into an instance,
 //! * [`cone`] — the fan-in/out of a net (its driving/loading boxes).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use svxprobe_model::{Design, Dir, Edge, MemPort, MuxPort, Node, NodeId, NodeKind};
 
 /// Which border a port sits on (drives ELK port placement).
@@ -55,7 +55,11 @@ pub enum PinRole {
 /// into its gate/mux primitive network. It never displaces the default — a UI
 /// toggle selects it, and it only surfaces the primitives the harness's opt-in
 /// `--gate-level` pass emits (a model without them renders identically either way).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Serialized (kebab-case) as `"process-level"` / `"gate-level"` — the wire form
+/// the frontend passes to the `scope_graph`/`expand_node` Tauri commands (#157 PR4);
+/// an omitted param deserializes nothing and the command falls back to the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Projection {
     /// One box per source construct — the ADR 0004 default.
     #[default]
