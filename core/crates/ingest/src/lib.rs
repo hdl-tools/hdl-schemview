@@ -390,6 +390,46 @@ mod tests {
         assert!(from_slice(DUAL_NODE.as_bytes()).is_ok());
     }
 
+    // Gate-level projection (#157, ADR 0005): the harness may emit gate/mux
+    // primitive nodes carrying an operator label (`op`) plus edges tagged with a
+    // mux port role (`mux_port` = sel/d0/d1). Ingest must deserialize and index
+    // them like any other node — they are an additive projection over the spine.
+    const GATE_DOC: &str = r#"{
+        "schema_version": 1,
+        "design": "t",
+        "files": [{"id": 0, "path": "t.sv"}],
+        "nodes": [
+            {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+             "children":[1,2,3,4,5],"symbol_key":"t"},
+            {"id":1,"kind":"Var","name":"y","path":"t.y","parent":0,
+             "children":[],"symbol_key":"t.y"},
+            {"id":2,"kind":"Assign","name":"$assign2","path":"t.$assign2","parent":0,
+             "children":[3,4,5],"symbol_key":"t.$assign2"},
+            {"id":3,"kind":"Mux","name":"$mux3","path":"t.$assign2.$mux3","parent":2,
+             "children":[],"symbol_key":"t.$assign2.$mux3"},
+            {"id":4,"kind":"And","name":"$and4","path":"t.$assign2.$and4","parent":2,
+             "children":[],"symbol_key":"t.$assign2.$and4"},
+            {"id":5,"kind":"Cmp","name":"$cmp5","path":"t.$assign2.$cmp5","parent":2,
+             "children":[],"symbol_key":"t.$assign2.$cmp5","op":"LessThan"}
+        ],
+        "edges": [
+            {"id":0,"port":3,"endpoint":1,"dir":"in","mux_port":"sel"}
+        ]
+    }"#;
+
+    #[test]
+    fn accepts_gate_level_projection() {
+        // The raw document deserializes: new kinds, the `op` label, the mux role.
+        let doc: Document = serde_json::from_slice(GATE_DOC.as_bytes()).unwrap();
+        assert_eq!(doc.nodes[3].kind, NodeKind::Mux);
+        assert_eq!(doc.nodes[4].kind, NodeKind::And);
+        assert_eq!(doc.nodes[5].kind, NodeKind::Cmp);
+        assert_eq!(doc.nodes[5].op.as_deref(), Some("LessThan"));
+        assert_eq!(doc.edges[0].mux_port, Some(svxprobe_model::MuxPort::Sel));
+        // And the whole thing passes ingest's referential-integrity build.
+        assert!(from_slice(GATE_DOC.as_bytes()).is_ok());
+    }
+
     #[test]
     fn rejects_same_name_distinct_objects() {
         // Two sibling Vars with the same name but different paths: the name no

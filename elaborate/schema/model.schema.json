@@ -48,7 +48,8 @@
           "endpoint": { "type": "integer", "minimum": 0, "description": "NodeId of the connected endpoint." },
           "dir": { "type": "string", "enum": ["in", "out", "inout"] },
           "select": { "type": ["string", "null"], "description": "Resolved bit-select on the connected expression, e.g. \"[0]\" or \"[7:4]\"; absent/null when the whole signal is connected." },
-          "mem_port": { "type": ["string", "null"], "enum": ["addr", "din", "dout", null], "description": "Memory-access role (#112): set when the edge wires a signal to a Memory node's address/data port (addr/din/dout), so the schematic draws the pin's role. Absent/null on ordinary edges." }
+          "mem_port": { "type": ["string", "null"], "enum": ["addr", "din", "dout", null], "description": "Memory-access role (#112): set when the edge wires a signal to a Memory node's address/data port (addr/din/dout), so the schematic draws the pin's role. Absent/null on ordinary edges." },
+          "mux_port": { "type": ["string", "null"], "enum": ["sel", "d0", "d1", null], "description": "Mux-port role (#157, ADR 0005): set when the edge feeds a gate-level Mux node's select/data input (sel/d0/d1), so the schematic places it correctly. Absent/null on ordinary edges." }
         }
       }
     },
@@ -116,7 +117,7 @@
         "id": { "type": "integer", "minimum": 0 },
         "kind": {
           "type": "string",
-          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport", "Memory"]
+          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport", "Memory", "And", "Or", "Xor", "Xnor", "Nand", "Nor", "Not", "Buf", "Add", "Sub", "Mul", "Cmp", "Shift", "Mux"]
         },
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },
@@ -160,6 +161,10 @@
         "init_source": {
           "type": ["string", "null"],
           "description": "Memory only: the $readmemh/$readmemb initializer's source-file argument text (e.g. \"INIT_FILE\"); presence drives the INIT marker. From the harness's initial-block scan -- initial stays non-logic (ADR 0004). Absent/null when the memory has no $readmem* initializer (#112)."
+        },
+        "op": {
+          "type": ["string", "null"],
+          "description": "Gate-level datapath primitives only (#157, ADR 0005): the exact operator behind a coarse Add/Sub/Mul/Cmp/Shift kind (e.g. \"LessThan\", \"LogicalShiftLeft\"), for the box label. Absent/null on non-gate nodes and on bitwise/reduction gates whose kind already names them."
         },
         "drivers": { "type": "array", "items": { "type": "integer" }, "default": [] },
         "loads": { "type": "array", "items": { "type": "integer" }, "default": [] }
