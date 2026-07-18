@@ -789,3 +789,28 @@ def test_memory_no_untyped_process_edge(model: dict) -> None:
     anchored = [e for e in model["edges"] if e["port"] == ram["id"]]
     assert anchored, "memory has no outgoing typed edges"
     assert all("mem_port" in e for e in anchored), [e for e in anchored if "mem_port" not in e]
+
+
+def test_uninstantiated_generate_branch_is_dropped(tmp_path) -> None:
+    """#178: only the elaborated branch of an if-generate is part of the design.
+    Every branch of an unnamed if-generate shares the LRM-implicit name `genblk1`,
+    so emitting the dead ones both duplicates that canonical path and reparents
+    phantom logic — here a `q <= d` register from the branch `P` disables. The
+    harness gates on slang's `isUninstantiated`, so only the taken `else` (a comb
+    `q = d`) survives."""
+    m = _model_for(
+        "module m #(parameter P = 0) (input clk, d, output logic q);\n"
+        "  generate if (P) begin\n"
+        "    always_ff @(posedge clk) q <= d;\n"
+        "  end else begin\n"
+        "    always_comb q = d;\n"
+        "  end endgenerate\n"
+        "endmodule\n",
+        tmp_path,
+    )
+    genblks = [n for n in m["nodes"] if n["path"] == "m.genblk1"]
+    assert len(genblks) == 1, [n["kind"] for n in genblks]
+
+    kinds = {n["kind"] for n in m["nodes"]}
+    assert "Comb" in kinds, "the taken `else` branch's comb must survive"
+    assert "FF" not in kinds, "the dead `if (P)` branch's register must not be emitted"
