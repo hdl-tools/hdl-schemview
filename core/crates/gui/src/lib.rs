@@ -16,8 +16,12 @@ pub use startup::{StartupArgs, StartupError};
 use svxprobe_matcher::MatchOptions;
 use svxprobe_model::{Design, EnumMember, NodeId, NodeKind};
 use svxprobe_schematic::{
-    cone, expand, is_navigable_scope, module_of, pin_width, scope_graph, SchematicGraph,
+    cone, expand, expand_with, is_navigable_scope, module_of, pin_width, scope_graph,
+    scope_graph_with,
 };
+// Re-exported so the shell and tests name the projection + graph DTOs through the
+// session crate (the Tauri layer's single import surface), not the schematic crate.
+pub use svxprobe_schematic::{Projection, SchematicGraph};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
@@ -330,6 +334,13 @@ impl Session {
         scope_graph(self.cross.design(), scope)
     }
 
+    /// [`scope_graph`] at an explicit [`Projection`] (#157 PR4). The bare method is
+    /// exactly this at [`Projection::ProcessLevel`]; the shell forwards the frontend's
+    /// gate-level toggle here.
+    pub fn scope_graph_with(&self, scope: &str, projection: Projection) -> Option<SchematicGraph> {
+        scope_graph_with(self.cross.design(), scope, projection)
+    }
+
     /// The instance-hierarchy tree under `scope`, `depth` levels deep (#92).
     /// Tree nodes are the structural scopes (`Instance` / `GenBlock` — the same
     /// kinds `scope_graph` accepts as roots, so every node is navigable); the
@@ -437,6 +448,12 @@ impl Session {
 
     pub fn expand(&self, node: NodeId) -> Option<SchematicGraph> {
         expand(self.cross.design(), node)
+    }
+
+    /// [`expand`] at an explicit [`Projection`] (#157 PR4) — the drill-down twin of
+    /// [`scope_graph_with`]. The bare method is this at [`Projection::ProcessLevel`].
+    pub fn expand_with(&self, node: NodeId, projection: Projection) -> Option<SchematicGraph> {
+        expand_with(self.cross.design(), node, projection)
     }
 
     pub fn cone(&self, net: NodeId, dir: &str, depth: usize) -> SchematicGraph {
