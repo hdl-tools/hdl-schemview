@@ -186,8 +186,10 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 /* Grid: name | value@A | track | controls, plus a top ruler row. The 1fr track
    column keeps the time axis aligned across every row (ruler included). */
 /* min-height:0 lets the list shrink to its flex share so it scrolls (overflow:auto)
-   when many signals are added, instead of expanding past the fixed-height pane. */
-#wave-list { flex:1; min-height:0; min-width:0; overflow:auto; padding:2px 0; color:var(--muted); font-size:11px; }
+   when many signals are added, instead of expanding past the fixed-height pane.
+   No padding (#180): a dense stack sits flush at the top, and any top padding would
+   leave a bleed strip above the sticky ruler (#181) for lanes to scroll through. */
+#wave-list { flex:1; min-height:0; min-width:0; overflow:auto; padding:0; color:var(--muted); font-size:11px; }
 
 /* Signal picker (#171): a collapsible sub-column of the waveform pane — scope tree
    over the signals in that scope, GTKWave-SST style. `.pane` is a flex column, so the
@@ -213,8 +215,11 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 #wave-picker-sigs .swidth { color:var(--sublabel); font-size:11px; }
 #wave-picker-sigs .empty { padding:4px; color:var(--muted); font-size:11px; }
 /* The name/value column widths are user-resizable (#84): driven by CSS vars set on
-   drag, falling back to the minmax defaults when unset. */
-#wave-list.has-rows { display:grid; grid-template-columns:var(--wave-col-name, minmax(60px, 240px)) var(--wave-col-value, minmax(40px, 120px)) 1fr max-content; align-items:center; gap:1px 10px; }
+   drag, falling back to the minmax defaults when unset.
+   align-content:start packs the lanes at the top (#180): the default (stretch) would
+   inflate the auto rows to fill this tall flex child, spreading the lanes apart with
+   dead space between them — the very thing #180 is about. */
+#wave-list.has-rows { display:grid; grid-template-columns:var(--wave-col-name, minmax(60px, 240px)) var(--wave-col-value, minmax(40px, 120px)) 1fr max-content; align-content:start; align-items:center; gap:1px 10px; }
 /* Fixed 20px height (== the track row) keeps the name/value cells aligned with the
    waveform AND gives the full-height drag handle something to fill even when the
    value is short or empty; line-height centres the text. */
@@ -229,6 +234,16 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 .col-resizer:hover, :root[data-theme="light"] .col-resizer:hover { box-shadow:inset -2px 0 0 var(--accent); }
 .wave-ruler-cell { min-width:0; height:16px; }
 .wave-ruler { width:100%; height:16px; display:block; }
+/* Pin the ruler row so the time axis stays visible while the lanes scroll under it
+   (#181). The ruler is the first grid row (its cells are `.wave-spacer` ×3 flanking
+   `.wave-ruler-cell`); all four must be sticky or the axis tears from the name/value
+   columns. Opaque background because the ruler canvas is transparent (drawRuler uses
+   clearRect) — without it the scrolling lanes would show through. z-index outranks the
+   lane `.col-resizer` (z-index:3) so a resizer can't paint over the pinned ruler.
+   align-self:stretch fills the row height in the name/value columns (the spacers are
+   empty, so the grid's align-items:center would give them 0-height backgrounds and let
+   a scrolling lane's text show through above the axis). */
+.wave-spacer, .wave-ruler-cell { position:sticky; top:0; z-index:5; align-self:stretch; background:var(--bg); }
 .wave-track-cell { min-width:0; height:20px; }
 .wave-track { width:100%; height:20px; display:block; background:var(--wavebg); cursor:crosshair; }
 .wave-ctrls { display:flex; gap:3px; padding-right:6px; }

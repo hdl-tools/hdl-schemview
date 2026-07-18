@@ -90,12 +90,19 @@ carries its own **signal picker** (#171, `Ctrl/⌘+B`) — a scope tree over tha
 signals (`hierarchy_tree` + `scope_signals`, both on the pane's `session_id`), so a pane
 picks its own lanes instead of waiting for another window to address them at it; a
 signal absent from the pane's trace is **dimmed and inert**, not pruned. The pane
-holds many traces (`state.waves`), stacked in scrollable fixed-height rows
-(`name | value@A | track`) with per-row reorder/remove controls; the name/value
-columns are drag-resizable (`state.waveCol`, persisted in `localStorage`). The tracks are
+holds many traces (`state.waves`), stacked as a dense top-anchored stack of
+fixed-height rows (`name | value@A | track`) with per-row reorder/remove controls; the
+name/value columns are drag-resizable (`state.waveCol`, persisted in `localStorage`). The
+list is one flat CSS grid (`#wave-list.has-rows`) whose `align-content:start` (#180)
+packs the lanes at the top — the grid's default `stretch` would inflate the auto rows to
+fill the tall pane and spread the lanes apart — with no container padding so the stack
+sits flush. The tracks are
 interactive: header buttons + Ctrl/⌘-scroll zoom (`state.waveView`) and drag-pan the
 shared time window; left-click sets marker **A**, right-click marker **B**
-(`state.markers`) — a top ruler shows tick timestamps, the header shows A/B/Δ, and the
+(`state.markers`) — a top ruler shows tick timestamps and **stays pinned** while the
+lanes scroll under it (#181: `position:sticky;top:0` on all four ruler-row cells — the
+three `.wave-spacer`s and `.wave-ruler-cell` — with an opaque `--bg`, since the ruler
+canvas is transparent), the header shows A/B/Δ, and the
 value column reads each trace's value at A. A header unit dropdown (`state.waveUnit`,
 ps/ns/µs/ms) rescales the ruler + readout via the trace's real timescale
 (`trace_timescale` → `state.timescale`); marker/window state stays in raw ticks.
