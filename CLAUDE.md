@@ -107,9 +107,17 @@ value column reads each trace's value at A. A header unit dropdown (`state.waveU
 ps/ns/µs/ms) rescales the ruler + readout via the trace's real timescale
 (`trace_timescale` → `state.timescale`); marker/window state stays in raw ticks.
 Right-clicking a signal's **name cell** opens a per-signal value-format menu: change
-radix (bin/oct/dec/hex; multi-bit buses default hex via `WaveTrace.radix`) or **create
-a sub-bus** — a derived track of `parent[hi:lo]` (synthetic negative `ref`) built by
-slicing each value's bits. Native trace values are binary strings; `formatValue` and
+radix (bin/oct/dec/hex; multi-bit buses default hex via `WaveTrace.radix`), **add
+another view** (#179 — stack the same signal as a second lane so it can be read as hex
+*and* state name at once; a plain append still dedupes by `ref`, this deliberately does
+not), or **create a sub-bus** — a derived track of `parent[hi:lo]` (synthetic negative
+`ref`) built by slicing each value's bits, carrying `WaveTrace.slice` + the parent
+`path` so a trace swap re-derives it (`reresolveLane`) instead of dropping it. Because a
+signal can now be several lanes, `ref` no longer identifies a lane: each carries a
+stable `WaveTrace.key` (minted per window, round-tripped in the snapshot, counters
+reseeded on load via `laneCounterSeeds` so a pop-out never re-mints a collision);
+reorder/remove stay index-keyed and the picker's *added* mark stays path-keyed, so
+duplicates don't break them. Native trace values are binary strings; `formatValue` and
 `sliceBits` (in `wave.ts`) do the conversion/slicing. **Enum/FSM signals** show the
 **state name** by default: the elaboration emits a normalized `enums` table
 (value→name), surfaced per-signal via `WaveLink.enum_map` → `WaveTrace.enumMap`;

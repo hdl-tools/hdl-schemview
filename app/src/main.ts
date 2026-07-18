@@ -55,9 +55,11 @@ import {
   displayValue,
   drawTrack,
   drawRuler,
+  laneCounterSeeds,
   maxTime,
   nearestEdge,
   panWindow,
+  reresolveLane,
   sliceBits,
   TRACK_H,
   valueAt,
@@ -211,11 +213,13 @@ interface WaveSnapshot {
 // A WaveTrace carries an enumMap Map that JSON.stringify drops; (de)serialize it
 // as pairs so a detached waveform window rebuilds the exact lanes main has.
 interface StoredTrace {
+  key?: number; // #179 lane identity; optional so a pre-#179 snapshot still loads
   ref: number;
   name: string;
   // Canonical model path of the signal (#170), so a lane survives a trace switch and
   // an addressed append can re-resolve it against a different session's trace.
   path?: string;
+  slice?: { hi: number; lo: number }; // a sub-bus of `path` (#179)
   values: WaveTrace["values"];
   radix?: Radix;
   enumPairs?: [number, string][];
@@ -223,9 +227,11 @@ interface StoredTrace {
 }
 function storeTrace(tr: WaveTrace): StoredTrace {
   return {
+    key: tr.key,
     ref: tr.ref,
     name: tr.name,
     path: tr.path,
+    slice: tr.slice,
     values: tr.values,
     radix: tr.radix,
     enumPairs: tr.enumMap ? [...tr.enumMap] : undefined,
@@ -234,9 +240,11 @@ function storeTrace(tr: WaveTrace): StoredTrace {
 }
 function loadTrace(s: StoredTrace): WaveTrace {
   return {
+    key: s.key ?? nextLaneKey(), // mint one for a pre-#179 snapshot that lacks it
     ref: s.ref,
     name: s.name,
     path: s.path,
+    slice: s.slice,
     values: s.values,
     radix: s.radix,
     enumMap: s.enumPairs ? new Map(s.enumPairs) : undefined,
@@ -2174,8 +2182,19 @@ const RADIX_LABELS: { r: Radix; label: string }[] = [
 ];
 
 // Derived sub-bus tracks get unique negative refs so they never collide with real
-// u32 signal_refs (dedup/reorder/remove stay correct).
+// u32 signal_refs. Lane keys (#179) count up from 1 — a lane's stable identity now that
+// several lanes can share a `ref`. Both are per-window counters; `reseedLaneCounters`
+// resumes them past a snapshot's restored lanes so a pop-out never re-mints a collision.
 let derivedSeq = -1;
+let laneSeq = 1;
+function nextLaneKey(): number {
+  return laneSeq++;
+}
+function reseedLaneCounters(): void {
+  const { laneKey, derivedRef } = laneCounterSeeds(state.waves);
+  laneSeq = laneKey;
+  derivedSeq = derivedRef;
+}
 
 // Bit width of a trace when it is a sliceable bit-vector (binary value string), else 0.
 function busWidth(tr: WaveTrace): number {
@@ -2215,6 +2234,23 @@ function openSignalMenu(ev: MouseEvent, i: number) {
   openContextMenu(ev.clientX, ev.clientY, [
     { label: "Change radix", enabled: true, submenu: radixSubmenu },
     {
+      // Add the same signal as a second lane so it can be read a different way at once
+      // (#179) — a bus as hex *and* state name, hex next to binary. Bypasses the append
+      // dedupe (which stays the default for picker/schematic clicks). Starts on numeric
+      // hex so the clone reads differently from the original by default.
+      label: "Add another view",
+      enabled: true,
+      onClick: () => {
+        state.waves.splice(i + 1, 0, {
+          ...tr,
+          key: nextLaneKey(),
+          radix: "hex",
+          showName: false,
+        });
+        renderWaves();
+      },
+    },
+    {
       label: width > 1 ? "Create sub-bus…" : "Create sub-bus… (not a bus)",
       enabled: width > 1,
       onClick: () => openSubBusPopover(ev, i, width),
@@ -2222,14 +2258,21 @@ function openSignalMenu(ev: MouseEvent, i: number) {
   ]);
 }
 
-// Insert a derived track of parent[hi:lo] right after the parent.
+// Insert a derived track of parent[hi:lo] right after the parent. When the parent is a
+// plain signal, the sub-bus records the parent path + slice so a trace swap re-derives
+// it (see reresolveLane); a sub-bus of a sub-bus can't be re-derived from a single path,
+// so it carries neither and is simply dropped on a swap (#179).
 function makeSubBus(i: number, hi: number, lo: number) {
   const tr = state.waves[i];
   if (!tr) return;
   const values = tr.values.map((c) => ({ time: c.time, value: sliceBits(c.value, hi, lo) }));
+  const derivable = tr.path !== undefined && tr.slice === undefined;
   state.waves.splice(i + 1, 0, {
+    key: nextLaneKey(),
     ref: derivedSeq--,
     name: `${tr.name}[${hi}:${lo}]`,
+    path: derivable ? tr.path : undefined,
+    slice: derivable ? { hi, lo } : undefined,
     values,
     radix: tr.radix ?? "hex",
   });
@@ -2472,8 +2515,10 @@ async function showInSchematic(anchor: NodeRef) {
   }
 }
 
-// Append the signal as a new waveform lane (deduped by trace ref); a no-op when the
-// object has no trace signal. Lanes stack in append order (#15).
+// Append the signal as a new waveform lane; a no-op when the object has no trace
+// signal. Lanes stack in append order (#15). Deduped by trace ref by default — a
+// picker/schematic re-click of an already-pinned signal is a no-op — while the name
+// cell's "Add another view" (#179) deliberately bypasses this to stack a second lane.
 async function addToWaveform(wave: WaveLink, path?: string) {
   if (!wave.in_trace) return;
   if (state.waves.some((w) => w.ref === wave.signal_ref)) return;
@@ -2483,6 +2528,7 @@ async function addToWaveform(wave: WaveLink, path?: string) {
     ? new Map(wave.enum_map.map((m) => [m.value, m.name]))
     : undefined;
   state.waves.push({
+    key: nextLaneKey(),
     ref: wave.signal_ref,
     name: wave.full_name,
     path,
@@ -2702,6 +2748,7 @@ async function initDetached(pane: DetachablePane) {
     // Seeded lanes are valid as-is: the pane booted on main's current trace, so their
     // signal_refs still resolve. A later "Load trace…" re-resolves them by model path.
     state.waves = (snap.waves ?? []).map(loadTrace);
+    reseedLaneCounters(); // resume key/sub-bus-ref counters past the restored lanes (#179)
     state.waveView = snap.waveView ?? null;
     state.markers = snap.markers ?? { a: null, b: null };
     if (snap.waveUnit) state.waveUnit = snap.waveUnit;
@@ -2787,6 +2834,8 @@ async function loadTraceOnly() {
   }
   state.waveUnit = defaultDisplayUnit(state.timescale);
   // Re-resolve lanes against the new trace by model path; drop any it doesn't carry.
+  // reresolveLane keeps a sub-bus sliced (and its synthetic ref) rather than reverting
+  // it to the full word (#179).
   const resolved: WaveTrace[] = [];
   for (const t of state.waves) {
     if (!t.path) continue; // no model path → can't re-resolve across traces
@@ -2794,7 +2843,7 @@ async function loadTraceOnly() {
       const local = await api.probeNode(t.path, null, sid);
       if (local?.wave?.in_trace) {
         const values = await api.signalValues(local.wave.signal_ref, sid);
-        resolved.push({ ...t, ref: local.wave.signal_ref, values });
+        resolved.push(reresolveLane(t, local.wave.signal_ref, values));
       }
     } catch {
       /* skip a lane that fails to re-resolve */
