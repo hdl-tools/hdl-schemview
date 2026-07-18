@@ -23,7 +23,13 @@ import {
   defaultDisplayUnit,
   reresolveLane,
   laneCounterSeeds,
+  flattenLanes,
+  visibleLanes,
+  withTrailingEmptyGroup,
+  normalizeGroups,
+  workingGroupIndex,
   type WaveTrace,
+  type WaveGroup,
 } from "./wave";
 
 const trace = (name: string, values: [number, string][]): WaveTrace => ({
@@ -418,5 +424,73 @@ describe("laneCounterSeeds", () => {
 
   it("ignores positive refs when seeding the synthetic-ref counter", () => {
     expect(laneCounterSeeds([{ key: 2, ref: 100 }])).toEqual({ laneKey: 3, derivedRef: -1 });
+  });
+});
+
+// #182: lanes live inside groups. These pure helpers give the flat views the renderer
+// and index-based code still need, and enforce the pane invariant (always ≥1 group, the
+// last one empty as a drop target for a new group).
+const grp = (collapsed: boolean, ...names: string[]): WaveGroup => ({
+  name: "g",
+  collapsed,
+  waves: names.map((n) => trace(n, [])),
+});
+const laneNames = (ls: WaveTrace[]) => ls.map((l) => l.name);
+
+describe("flattenLanes", () => {
+  it("concatenates every group's lanes in order, collapsed or not", () => {
+    const gs = [grp(true, "a"), grp(false, "b", "c")];
+    expect(laneNames(flattenLanes(gs))).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("visibleLanes", () => {
+  it("omits the lanes of collapsed groups", () => {
+    const gs = [grp(true, "a"), grp(false, "b", "c")];
+    expect(laneNames(visibleLanes(gs))).toEqual(["b", "c"]);
+  });
+});
+
+describe("withTrailingEmptyGroup", () => {
+  it("seeds a single empty group for an empty pane", () => {
+    const out = withTrailingEmptyGroup([], () => "G1");
+    expect(out).toEqual([{ name: "G1", collapsed: false, waves: [] }]);
+  });
+
+  it("appends an empty group when the last is populated", () => {
+    const out = withTrailingEmptyGroup([grp(false, "a")], () => "G2");
+    expect(out.length).toBe(2);
+    expect(out[1].waves).toEqual([]);
+  });
+
+  it("is a no-op when the last group is already empty", () => {
+    const gs = [grp(false, "a"), grp(false)];
+    expect(withTrailingEmptyGroup(gs, () => "X")).toBe(gs);
+  });
+});
+
+describe("normalizeGroups", () => {
+  it("drops interior empties and keeps exactly one trailing empty", () => {
+    const gs = [grp(false), grp(false, "a"), grp(false), grp(false, "b")];
+    const out = normalizeGroups(gs, () => "NEW");
+    expect(laneNames(flattenLanes(out))).toEqual(["a", "b"]);
+    expect(out[out.length - 1].waves).toEqual([]);
+    expect(out.filter((g) => g.waves.length === 0).length).toBe(1);
+  });
+
+  it("yields one empty group for an all-empty (or empty) input", () => {
+    expect(normalizeGroups([], () => "NEW")).toEqual([
+      { name: "NEW", collapsed: false, waves: [] },
+    ]);
+  });
+});
+
+describe("workingGroupIndex", () => {
+  it("is the last populated group when one exists", () => {
+    expect(workingGroupIndex([grp(false, "a"), grp(false, "b"), grp(false)])).toBe(1);
+  });
+
+  it("falls back to the last group when every group is empty", () => {
+    expect(workingGroupIndex([grp(false)])).toBe(0);
   });
 });

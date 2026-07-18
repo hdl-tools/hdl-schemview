@@ -63,6 +63,61 @@ export function laneCounterSeeds(
   return { laneKey, derivedRef };
 }
 
+// A named, collapsible group of lanes (#182). The waveform pane is organized entirely
+// into groups — there are no loose lanes — and always keeps one empty group at the
+// bottom as the landing spot for a new group (see `withTrailingEmptyGroup`).
+export interface WaveGroup {
+  name: string;
+  collapsed: boolean;
+  waves: WaveTrace[];
+}
+
+// Every lane across every group, in order — the flat view the index-based lane code and
+// `maxTime`/dedupe still work against.
+export function flattenLanes(groups: readonly WaveGroup[]): WaveTrace[] {
+  return groups.flatMap((g) => g.waves);
+}
+
+// The lanes actually drawn: those of non-collapsed groups, in order. A collapsed group
+// contributes its header row but none of its tracks, so `redrawTracks` maps canvases
+// against this, not `flattenLanes`.
+export function visibleLanes(groups: readonly WaveGroup[]): WaveTrace[] {
+  return groups.filter((g) => !g.collapsed).flatMap((g) => g.waves);
+}
+
+// Enforce half of the pane invariant (#182): the last group is always empty, a drop
+// target for starting a new group. Returns the input unchanged when it already holds
+// (last group empty), a fresh single empty group for an empty pane, else the input with
+// one empty group appended. Identity is preserved on the no-op so callers can `===`-check.
+export function withTrailingEmptyGroup(
+  groups: WaveGroup[],
+  makeName: () => string,
+): WaveGroup[] {
+  const last = groups[groups.length - 1];
+  if (last && last.waves.length === 0) return groups;
+  return [...groups, { name: makeName(), collapsed: false, waves: [] }];
+}
+
+// The full pane invariant (#182): drop *interior* empty groups (emptied by a
+// remove/move), keep a populated group's identity, and keep exactly one trailing empty
+// group — preserving the existing trailing empty when there is one, so its auto-name
+// doesn't churn on every mutation. A fresh or all-empty pane becomes a single empty
+// group. Run after any mutation of the groups.
+export function normalizeGroups(groups: WaveGroup[], makeName: () => string): WaveGroup[] {
+  const kept = groups.filter((g, i) => g.waves.length > 0 || i === groups.length - 1);
+  return withTrailingEmptyGroup(kept, makeName);
+}
+
+// Where a newly added signal lands (#182): the last populated group, or the last group
+// when the pane is all-empty (the default group of a fresh pane). New signals accumulate
+// in the working group; the trailing empty group is reserved for starting a new group.
+export function workingGroupIndex(groups: readonly WaveGroup[]): number {
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i].waves.length > 0) return i;
+  }
+  return groups.length - 1;
+}
+
 // Fixed per-track canvas height (px). Must match `.wave-track` height in style.css.
 export const TRACK_H = 20;
 
