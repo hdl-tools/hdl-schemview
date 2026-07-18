@@ -244,6 +244,47 @@ pub fn is_bare_interface(design: &Design, id: NodeId) -> bool {
     })
 }
 
+/// Whether `id` is a navigable scope root — the *single* predicate `scope_graph`
+/// resolves against and the GUI's hierarchy tree lists (#184), so the schematic and
+/// the tree can never disagree on what is navigable (both call this one function).
+/// An `Instance` always is; a `GenBlock` only if [`genblk_is_navigable`]; any other
+/// node only if it is a drillable bare interface bundle ([`is_bare_interface`]).
+/// Public so the GUI reuses it, mirroring [`is_bare_interface`]/[`module_of`] as the
+/// single source of truth.
+pub fn is_navigable_scope(design: &Design, id: NodeId) -> bool {
+    match design.node(id).map(|n| n.kind) {
+        Some(NodeKind::Instance) => true,
+        Some(NodeKind::GenBlock) => genblk_is_navigable(design, id),
+        _ => is_bare_interface(design, id),
+    }
+}
+
+/// Whether a `GenBlock` is a navigable design scope (#184). A generate block is a
+/// place in the design only if its subtree holds a real design object — an `Instance`
+/// or a bare `Interface`. A block that contains only logic (`comb`/`ff`/`assign`/nets,
+/// or a `Memory` array — all of which dissolve into the parent via [`child_boxes`]) is
+/// a syntactic wrapper: its contents already render in the enclosing module, so a
+/// standalone scope for it would be redundant and the tree/schematic must not offer
+/// one. The test is contents, not the generate keyword — `g_lane[0]` is a `GenBlock`
+/// too, but holds instances, so it stays. Non-`GenBlock` ids return `false`.
+fn genblk_is_navigable(design: &Design, id: NodeId) -> bool {
+    is_kind(design, id, NodeKind::GenBlock) && genblk_has_design_content(design, id)
+}
+
+/// Recursive helper for [`genblk_is_navigable`]: does this node's subtree carry an
+/// `Instance` or bare `Interface`, descending through nested generate blocks?
+fn genblk_has_design_content(design: &Design, id: NodeId) -> bool {
+    design.node(id).is_some_and(|n| {
+        n.children
+            .iter()
+            .any(|&c| match design.node(c).map(|k| k.kind) {
+                Some(NodeKind::Instance) => true,
+                Some(NodeKind::GenBlock) => genblk_has_design_content(design, c),
+                _ => is_bare_interface(design, c),
+            })
+    })
+}
+
 /// The box (from `boxes`) that `node` lives in — its nearest ancestor that is a
 /// box. `None` if `node` is outside all of them.
 fn box_of(
@@ -1008,12 +1049,12 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
 /// whose two ends both live inside the scope. Connections that leave the scope
 /// (e.g. to a top-level clock) are omitted here; use [`cone`] to trace those.
 pub fn scope_graph(design: &Design, scope_path: &str) -> Option<SchematicGraph> {
-    let scope = *design.nodes_at_path(scope_path).iter().find(|&&id| {
-        matches!(
-            design.node(id).map(|n| n.kind),
-            Some(NodeKind::Instance) | Some(NodeKind::GenBlock)
-        ) || is_bare_interface(design, id)
-    })?;
+    // A logic-only generate block is not a scope (#184) — `is_navigable_scope` rejects
+    // it so a cross-probe onto its path walks up to the enclosing module.
+    let scope = *design
+        .nodes_at_path(scope_path)
+        .iter()
+        .find(|&&id| is_navigable_scope(design, id))?;
     // A bare interface bundle drills into its modport views/members (#97), a
     // different projection than the instance-wiring path below.
     if is_bare_interface(design, scope) {

@@ -1233,14 +1233,36 @@ fn an_uninstantiated_generate_branch_is_not_drawn() {
         "one live branch ⇒ one node at `{path}`"
     );
 
-    let g = scope_graph(&d, path).expect("scope graph");
+    // genblk3 is logic-only, so it is no longer a scope of its own (#184); its live
+    // `else` branch renders dissolved into the enclosing module. Draw `core` and
+    // confirm the elaborated comb is there (the dead `if (TWO_CYCLE_ALU)` FF is gone
+    // from the model — proven by the single node above — so it cannot double-drive).
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0].core").expect("scope graph");
     let kinds: Vec<NodeKind> = g.nodes.iter().map(|n| n.kind).collect();
     assert!(
         kinds.contains(&NodeKind::Comb),
-        "the elaborated `else` branch: {kinds:?}"
+        "the elaborated `else` branch renders in the parent: {kinds:?}"
     );
-    assert!(
-        !kinds.contains(&NodeKind::Ff),
-        "the dead `if (TWO_CYCLE_ALU)` branch must not be drawn: {kinds:?}"
-    );
+}
+
+// A generate block that holds only logic (`comb`/`ff`/`assign`) is a syntactic
+// wrapper, not a navigable design scope (#184): `scope_graph` rejects it, so a
+// cross-probe landing on its path walks up to the enclosing module — where the logic
+// already renders (`child_boxes` dissolves generate blocks into their contents). A
+// generate block that holds instances stays a scope; the test is contents, not keyword.
+#[test]
+fn logic_only_generate_blocks_are_not_scopes() {
+    let d = design();
+    for p in [
+        "picorv32_soc.g_lane[0].core.genblk1",
+        "picorv32_soc.g_lane[0].core.genblk2",
+        "picorv32_soc.g_lane[0].core.genblk3",
+    ] {
+        assert!(
+            scope_graph(&d, p).is_none(),
+            "`{p}` holds only logic and must not resolve as a scope"
+        );
+    }
+    // g_lane[0] is a GenBlock too, but holds core/memory/bus instances — it stays.
+    assert!(scope_graph(&d, "picorv32_soc.g_lane[0]").is_some());
 }

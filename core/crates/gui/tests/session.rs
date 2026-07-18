@@ -281,13 +281,12 @@ fn scope_signals_covers_every_tree_row() {
             c.path
         );
     }
-    // `core.genblk1` is three separate GenBlock nodes at one path, and only one holds
-    // children. A tree row carries only a path, so the picker unions every structural
-    // node there rather than picking one — otherwise the answer would depend on which
-    // of three identical rows was clicked.
+    // `core.genblk1` holds only logic (assigns), so it is not a navigable scope (#184)
+    // and never appears as a picker row; addressing it directly resolves nothing,
+    // exactly as `hierarchy_tree`/`scope_graph` reject it.
     assert!(s
         .scope_signals("picorv32_soc.g_lane[0].core.genblk1")
-        .is_some());
+        .is_none());
 }
 
 // A pane's "Load trace…" (#170/#176) swaps the trace under an unchanged design, so the
@@ -384,16 +383,16 @@ fn hierarchy_tree_is_lazy_and_navigable() {
     assert!(s.hierarchy_tree("picorv32_soc.g_lane[0].bus", 1).is_some());
 }
 
-// A tree row is identified by its path, and several `GenBlock` nodes can share one
-// (the fixture's `core.genblk1` is three). One scope, one row: rows that repeat a path
-// are dead clicks — indistinguishable to the user, and the row map in `tree.ts` is
-// path-keyed, so only the last of them can ever highlight (#178).
+// A tree row is identified by its path, and the row map in `tree.ts` is path-keyed, so
+// rows that repeat a path are dead clicks — only the last of them can ever highlight
+// (#178). g_lane[0] carries several real rows (core/memory/bus); their paths must be
+// distinct.
 #[test]
 fn tree_rows_never_repeat_a_path() {
     let s = session();
     let core = s
-        .hierarchy_tree("picorv32_soc.g_lane[0].core", 1)
-        .expect("core subtree");
+        .hierarchy_tree("picorv32_soc.g_lane[0]", 1)
+        .expect("lane subtree");
 
     let paths: Vec<&str> = core.children.iter().map(|c| c.path.as_str()).collect();
     let mut uniq = paths.clone();
@@ -402,30 +401,54 @@ fn tree_rows_never_repeat_a_path() {
     assert_eq!(uniq.len(), paths.len(), "duplicate tree rows: {paths:?}");
 }
 
-// Every row the tree offers must open onto the design it claims. A generate branch the
-// elaboration discarded has no contents to show, so listing one is a dead click — and
-// `find`-ing a node by path would land on it before the live branch (#178).
+// A generate block that holds only logic (`genblk1/2/3` — assigns and a comb, no
+// instance or interface) is a syntactic wrapper, not a navigable design scope (#184).
+// core (picorv32) is all logic, so after pruning it is a leaf: no genblk row appears,
+// and addressing one directly resolves nothing — the frontend then walks up to the
+// enclosing module, where the logic already renders dissolved.
 #[test]
-fn every_generate_row_opens_a_real_scope() {
+fn logic_only_generate_blocks_are_pruned_from_the_tree() {
     let s = session();
     let core = s
         .hierarchy_tree("picorv32_soc.g_lane[0].core", 1)
         .expect("core subtree");
 
-    for row in core
+    let genblks: Vec<&str> = core
         .children
         .iter()
-        .filter(|c| c.label.starts_with("genblk"))
-    {
-        let g = s
-            .scope_graph(&row.path)
-            .unwrap_or_else(|| panic!("`{}` must open a schematic", row.path));
-        assert!(
-            !g.nodes.is_empty(),
-            "`{}` opens an empty schematic — a dead branch was listed",
-            row.path
-        );
-    }
+        .map(|c| c.label.as_str())
+        .filter(|l| l.starts_with("genblk"))
+        .collect();
+    assert!(
+        genblks.is_empty(),
+        "logic-only genblk rows leaked: {genblks:?}"
+    );
+
+    assert!(
+        s.hierarchy_tree("picorv32_soc.g_lane[0].core.genblk3", 1)
+            .is_none(),
+        "a logic-only genblk must not resolve as a tree scope"
+    );
+    assert!(
+        s.scope_graph("picorv32_soc.g_lane[0].core.genblk3")
+            .is_none(),
+        "a logic-only genblk must not resolve as a schematic scope"
+    );
+}
+
+// The prune is contents-based, not keyword-based: a generate block that holds
+// instances stays navigable. g_lane[0] is itself a GenBlock (a generate-for iteration)
+// but holds core/memory/bus — the tool's most useful view. #184 must not touch it.
+#[test]
+fn instance_bearing_generate_blocks_stay_navigable() {
+    let s = session();
+    let top = s.hierarchy_tree("picorv32_soc", 1).unwrap();
+    assert!(
+        top.children.iter().any(|c| c.label == "g_lane[0]"),
+        "instance-bearing generate iteration must stay a tree row: {:?}",
+        top.children.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+    assert!(s.scope_graph("picorv32_soc.g_lane[0]").is_some());
 }
 
 #[test]
