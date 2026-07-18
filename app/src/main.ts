@@ -1948,6 +1948,11 @@ function renderGroupHeader(list: HTMLElement, group: WaveGroup) {
   count.className = "wave-group-count";
   if (!empty) count.textContent = `${group.waves.length}`;
   header.append(twist, name, count);
+  // Right-click the header for group actions: collapse/rename/delete (#192).
+  header.oncontextmenu = (e) => {
+    e.preventDefault();
+    openGroupMenu(e, group, name);
+  };
   // Dropping on the header lands the lane at the top of this group — the way to fill the
   // empty trailing group, which has no lane rows to aim at (#188).
   header.ondragover = (e) => groupDragOver(e, group, header);
@@ -2378,6 +2383,40 @@ function moveLaneToGroup(key: number, target: WaveGroup) {
   if (!found || found.group === target) return;
   const [lane] = found.group.waves.splice(found.index, 1);
   target.waves.push(lane);
+  renderWaves();
+}
+
+// Right-click a group header (#192) for group actions: collapse/expand, rename, delete.
+// `nameEl` is the header's name span so Rename can reuse the in-place `renameGroup` editor.
+function openGroupMenu(ev: MouseEvent, group: WaveGroup, nameEl: HTMLElement) {
+  const n = group.waves.length;
+  openContextMenu(ev.clientX, ev.clientY, [
+    {
+      label: group.collapsed ? "Expand group" : "Collapse group",
+      enabled: true,
+      onClick: () => {
+        group.collapsed = !group.collapsed;
+        renderWaves();
+      },
+    },
+    { label: "Rename group…", enabled: true, onClick: () => renameGroup(group, nameEl) },
+    {
+      // Only an empty group is deletable — populated groups must have their lanes moved
+      // or removed first, so a group is never deleted with signals still in it (#192).
+      label: n === 0 ? "Delete group" : `Delete group (remove ${n} signal${n === 1 ? "" : "s"} first)`,
+      enabled: n === 0,
+      onClick: () => deleteGroup(group),
+    },
+  ]);
+}
+
+// Delete an empty group (#192). Re-found by identity so a stale menu closure is safe;
+// guarded to empty groups. `renderWaves`'s `normalizeGroups` re-establishes the invariant
+// (a trailing empty always remains, so the pane never drops to zero groups).
+function deleteGroup(group: WaveGroup) {
+  const i = state.groups.indexOf(group);
+  if (i < 0 || group.waves.length > 0) return;
+  state.groups.splice(i, 1);
   renderWaves();
 }
 
