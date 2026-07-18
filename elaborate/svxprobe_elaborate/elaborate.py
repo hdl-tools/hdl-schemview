@@ -68,6 +68,12 @@ def _kind_name(sym: Any) -> str:
     return str(sym.kind).replace("SymbolKind.", "")
 
 
+def _op_name(expr: Any) -> str:
+    """Bare operator name of a Binary/Unary expression (`BinaryAnd`, `BitwiseNot`,
+    …). slang prints it as ``BinaryOperator.BinaryAnd``; take the last segment."""
+    return str(getattr(expr, "op", "")).split(".")[-1]
+
+
 class _NetInitializer:
     """Presents a net declaration initializer (``wire w = expr;``) to
     ``_logic_edges`` as a continuous assign (#110): ``assignment`` is the RHS
@@ -140,7 +146,12 @@ class Elaborator:
         files: list[str],
         top: Optional[str] = None,
         include_dirs: Optional[list[str]] = None,
+        gate_level: bool = False,
     ) -> None:
+        # Opt-in gate-level projection (#157, ADR 0005): decompose process/assign
+        # RHS expressions into gate/mux primitive nodes *in addition* to the
+        # process-level logic nodes. Off by default ⇒ output byte-identical.
+        self.gate_level = gate_level
         opts = CompilationOptions()
         if top:
             opts.topModules = {top}
@@ -216,6 +227,22 @@ class Elaborator:
         except Exception:
             return None
         return {"file": self._file_id(self.sm.getFileName(sl)), "start": loc, "end": loc}
+
+    def _range_from_expr(self, expr: Any) -> Optional[dict[str, Any]]:
+        """`def_range` for a gate-level primitive: the *sub-expression's* own
+        ``sourceRange`` (a span within a line, e.g. the ``a & b`` fragment). This
+        is the one scoped relaxation of ADR 0004's "one box = one source
+        construct" — sanctioned for the opt-in gate-level projection by ADR 0005 —
+        so clicking a gate still cross-probes to source by lookup, never a guess."""
+        try:
+            sr = expr.sourceRange
+            return {
+                "file": self._file_id(self.sm.getFileName(sr.start)),
+                "start": self._loc(sr.start),
+                "end": self._loc(sr.end),
+            }
+        except Exception:
+            return None
 
     # -- node emission -------------------------------------------------------
     def _add(
@@ -688,7 +715,7 @@ class Elaborator:
                     and nid != mem_id
                     and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
                 ):
-                    seen.add((mem_id, nid, direction, None, mem_port))
+                    seen.add((mem_id, nid, direction, None, mem_port, None))
 
         for a in assigns:
             left = getattr(a, "left", None)
@@ -746,7 +773,7 @@ class Elaborator:
                     and nid != logic_id
                     and self.nodes[nid]["kind"] in ("Net", "Var", "Port")
                 ):
-                    seen.add((logic_id, nid, direction, selects.get(p), None))
+                    seen.add((logic_id, nid, direction, selects.get(p), None, None))
                     ids.append(nid)
             return ids
 
@@ -785,6 +812,274 @@ class Elaborator:
                 eid = self._pick_node(next(iter(gate)), ("Net", "Var", "Port"))
                 if eid is not None and self.nodes[eid]["kind"] in ("Net", "Var", "Port"):
                     self.nodes[logic_id]["enable"] = self.nodes[eid]["path"]
+
+    # -- gate-level projection (#157, ADR 0005) ------------------------------
+    # slang operator name -> primitive NodeKind. Operators that share a glyph and
+    # meaning fold together (all comparisons -> Cmp, all shifts -> Shift); the
+    # exact operator is preserved on the node's `op` field for the label. Div/Mod/
+    # Power render as a labelled Mul-family box (ADR 0005 out-of-scope note).
+    _BINOP_KIND = {
+        "BinaryAnd": "And", "LogicalAnd": "And",
+        "BinaryOr": "Or", "LogicalOr": "Or",
+        "BinaryXor": "Xor",
+        "BinaryXnor": "Xnor",
+        "Add": "Add",
+        "Subtract": "Sub",
+        "Multiply": "Mul", "Divide": "Mul", "Mod": "Mul", "Power": "Mul",
+        "Equality": "Cmp", "Inequality": "Cmp",
+        "CaseEquality": "Cmp", "CaseInequality": "Cmp",
+        "WildcardEquality": "Cmp", "WildcardInequality": "Cmp",
+        "LessThan": "Cmp", "GreaterThan": "Cmp",
+        "LessThanEqual": "Cmp", "GreaterThanEqual": "Cmp",
+        "LogicalShiftLeft": "Shift", "LogicalShiftRight": "Shift",
+        "ArithmeticShiftLeft": "Shift", "ArithmeticShiftRight": "Shift",
+    }
+    # Associative logic operators whose same-op chain collapses to one N-input gate
+    # (`a & b & c` -> one 3-input And). Datapath/compare/shift ops stay binary.
+    _ASSOC = {"And", "Or", "Xor", "Xnor"}
+    # Reduction unary operators fold into the matching gate kind — a reduction-AND
+    # *is* an And gate with one wide input; the negated reductions (`~&`, `~|`,
+    # `~^`) carry the output bubble (ADR 0005 §2).
+    _REDUCE = {
+        "BitwiseAnd": "And", "BitwiseOr": "Or", "BitwiseXor": "Xor",
+        "BitwiseNand": "Nand", "BitwiseNor": "Nor", "BitwiseXnor": "Xnor",
+    }
+    # A `~`/`!` directly wrapping an associative gate chain folds the bubble onto
+    # the gate (`~(a & b)` -> one Nand), instead of a redundant inverter on a gate.
+    _FOLD = {"And": "Nand", "Or": "Nor", "Xor": "Xnor"}
+
+    def _add_gate(
+        self, kind: str, expr: Any, parent: int, op: Optional[str] = None
+    ) -> int:
+        """Emit a synthesized gate/mux primitive node as a flat child of the logic
+        block `parent`. Its path extends `_add_logic`'s scheme with a per-kind
+        synthetic segment (`…$and{nid}` / `…$mux{nid}`); `def_range` is the
+        sub-expression's own span (`_range_from_expr`)."""
+        nid = len(self.nodes)
+        base = self.nodes[parent]["path"]
+        tag = kind.lower()
+        path = f"{base}.${tag}{nid}"
+        node: dict[str, Any] = {
+            "id": nid,
+            "kind": kind,
+            "name": tag,
+            "path": path,
+            "parent": parent,
+            "children": [],
+            "symbol_key": path,
+            "def_range": self._range_from_expr(expr),
+            "inst_range": None,
+            "type": None,
+            "dir": None,
+            "const": None,
+            "modport": None,
+            "drivers": [],
+            "loads": [],
+        }
+        # The exact operator (`Equality`, `LessThan`, `Divide`, `LogicalShiftLeft`,
+        # …) so the frontend can label a Cmp/Shift/Mul box, which the coarse kind
+        # alone cannot disambiguate.
+        if op is not None:
+            node["op"] = op
+        self.nodes.append(node)
+        self.nodes[parent]["children"].append(nid)
+        return nid
+
+    def _leaf_signal(self, expr: Any) -> Optional[str]:
+        """Canonical path if `expr` reads a single signal (a name, or a
+        bit/part/member select of one) — a gate input wired straight to that
+        signal. None for a compound expression (which decomposes further).
+
+        The bit-select is peeled to the base signal and *not* carried onto the
+        gate input edge (the 6-tuple's `select` slot stays None in `_wire_input`),
+        unlike `_logic_edges`' process-level wiring. A gate reading `a[3:0]` thus
+        renders wired to whole `a` — a known fidelity simplification of the opt-in
+        gate view, deferred to a follow-up slice."""
+        if expr is None:
+            return None
+        k = _kind_name(expr)
+        if "NamedValue" in k or "HierarchicalValue" in k:
+            return _value_sym_path(getattr(expr, "symbol", None))
+        if "ElementSelect" in k or "RangeSelect" in k or "MemberAccess" in k:
+            return self._leaf_signal(getattr(expr, "value", None))
+        return None
+
+    @staticmethod
+    def _flatten_assoc(expr: Any, op: str) -> list[Any]:
+        """Operands of a same-operator associative chain: `a & b & c` (parsed as
+        `(a & b) & c`) -> [a, b, c]."""
+        out: list[Any] = []
+
+        def rec(e: Any) -> None:
+            if e is not None and "BinaryOp" in _kind_name(e) and _op_name(e) == op:
+                rec(getattr(e, "left", None))
+                rec(getattr(e, "right", None))
+            else:
+                out.append(e)
+
+        rec(expr)
+        return out
+
+    def _emit_expr(
+        self, expr: Any, logic_id: int, seen: set
+    ) -> Optional[tuple[str, Any]]:
+        """Decompose `expr` into gate/mux nodes (children of `logic_id`), returning
+        the endpoint that carries its result: ``("sig", path)`` for a bare signal,
+        ``("node", nid)`` for a synthesized primitive, or None (constant / not
+        decomposable) — no wire."""
+        if expr is None:
+            return None
+        k = _kind_name(expr)
+        # Implicit width/sign conversions slang inserts are transparent to the view.
+        if "Conversion" in k or "Cast" in k:
+            return self._emit_expr(getattr(expr, "operand", None), logic_id, seen)
+        sig = self._leaf_signal(expr)
+        if sig is not None:
+            return ("sig", sig)
+        if "ConditionalOp" in k:
+            return self._emit_mux(expr, logic_id, seen)
+        if "BinaryOp" in k:
+            op = _op_name(expr)
+            kind = self._BINOP_KIND.get(op)
+            if kind is None:
+                return None
+            if kind in self._ASSOC:
+                operands = self._flatten_assoc(expr, op)
+            else:
+                operands = [getattr(expr, "left", None), getattr(expr, "right", None)]
+            return self._emit_gate(kind, expr, operands, logic_id, seen, op)
+        if "UnaryOp" in k:
+            op = _op_name(expr)
+            operand = getattr(expr, "operand", None)
+            if op in ("BitwiseNot", "LogicalNot"):
+                fold = self._fold_not(operand)
+                if fold is not None:
+                    folded_kind, inner_op = fold
+                    operands = self._flatten_assoc(operand, inner_op)
+                    return self._emit_gate(folded_kind, expr, operands, logic_id, seen, op)
+                return self._emit_gate("Not", expr, [operand], logic_id, seen, op)
+            red = self._REDUCE.get(op)
+            if red is not None:
+                return self._emit_gate(red, expr, [operand], logic_id, seen, op)
+            if op == "Plus":
+                # Unary `+` is identity -> a buffer (bare triangle, ADR 0005 §2).
+                return self._emit_gate("Buf", expr, [operand], logic_id, seen, op)
+            # Unary `-` (Minus) has no distinct taxonomy glyph and stays
+            # process-level (no gate), like Div/Mod's datapath deferral.
+            return None
+        return None
+
+    def _fold_not(self, operand: Any) -> Optional[tuple[str, str]]:
+        """If `operand` is an associative gate chain, the (folded kind, inner op)
+        so `~(a & b)` becomes one Nand — else None (a plain inverter)."""
+        if operand is None or "BinaryOp" not in _kind_name(operand):
+            return None
+        inner_op = _op_name(operand)
+        folded = self._FOLD.get(self._BINOP_KIND.get(inner_op, ""))
+        return (folded, inner_op) if folded is not None else None
+
+    def _emit_gate(
+        self,
+        kind: str,
+        expr: Any,
+        operand_exprs: list[Any],
+        logic_id: int,
+        seen: set,
+        op: Optional[str] = None,
+    ) -> tuple[str, int]:
+        nid = self._add_gate(kind, expr, logic_id, op)
+        for oe in operand_exprs:
+            self._wire_input(nid, self._emit_expr(oe, logic_id, seen), seen)
+        return ("node", nid)
+
+    def _emit_mux(self, expr: Any, logic_id: int, seen: set) -> tuple[str, int]:
+        """A `?:` conditional -> a Mux: select on the south wall (`mux_port` sel),
+        the true branch as D1 and the false branch as D0 (both west). Each input
+        expression decomposes recursively."""
+        nid = self._add_gate("Mux", expr, logic_id, "Conditional")
+        conds = getattr(expr, "conditions", None) or []
+        # A plain `sel ? a : b` has one condition. A pattern/`&&&`-joined ternary
+        # (`c1 &&& c2 ? a : b`) is rare in RTL; we take the first condition as the
+        # select and leave the rest process-level rather than guess a gate for them.
+        sel = getattr(conds[0], "expr", None) if conds else None
+        self._wire_input(nid, self._emit_expr(sel, logic_id, seen), seen, "sel")
+        self._wire_input(
+            nid, self._emit_expr(getattr(expr, "left", None), logic_id, seen), seen, "d1"
+        )
+        self._wire_input(
+            nid, self._emit_expr(getattr(expr, "right", None), logic_id, seen), seen, "d0"
+        )
+        return ("node", nid)
+
+    def _wire_input(
+        self,
+        gate_id: int,
+        endpoint: Optional[tuple[str, Any]],
+        seen: set,
+        mux_port: Optional[str] = None,
+    ) -> None:
+        """Wire a resolved endpoint into `gate_id` as an input. A ``("node", nid)``
+        is another primitive (gate-to-gate); a ``("sig", path)`` resolves to the
+        real scalar/bus signal it reads."""
+        if endpoint is None:
+            return
+        tag, val = endpoint
+        if tag == "node":
+            seen.add((gate_id, val, "in", None, None, mux_port))
+            return
+        sid = self._pick_node(val, ("Net", "Var", "Port"))
+        if (
+            sid is not None
+            and sid != gate_id
+            and self.nodes[sid]["kind"] in ("Net", "Var", "Port")
+        ):
+            seen.add((gate_id, sid, "in", None, None, mux_port))
+
+    def _gate_assignments(self, sym: Any) -> list[tuple[Any, Any]]:
+        """Every ``(lhs, rhs)`` this block drives, for gate decomposition. `lhs` is
+        an l-value expression, or ``("path", str)`` for a net-declaration
+        initializer (whose target is not in the expression tree, #110)."""
+        tp = getattr(sym, "target_path", None)
+        if tp is not None:
+            return [(("path", tp), getattr(sym, "assignment", None))]
+        root = getattr(sym, "assignment", None) or sym
+        out: list[tuple[Any, Any]] = []
+
+        def cb(n: Any) -> None:
+            if "Assignment" in _kind_name(n):
+                out.append((getattr(n, "left", None), getattr(n, "right", None)))
+
+        try:
+            root.visit(cb)
+        except Exception:
+            pass
+        return out
+
+    def _gate_block(self, logic_id: int, sym: Any, role: str, seen: set) -> None:
+        """Decompose one logic block's driven expressions into a gate/mux network
+        feeding the block's assigned signals. Runs *in addition* to `_logic_edges`;
+        the root primitive of each RHS wires out to that assignment's l-value."""
+        for lhs, rhs in self._gate_assignments(sym):
+            out = self._emit_expr(rhs, logic_id, seen)
+            if out is None or out[0] != "node":
+                # A bare signal / constant RHS (`assign y = x;`) has no gate — the
+                # direct wire is already carried by the process-level edges.
+                continue
+            root_id = out[1]
+            if isinstance(lhs, tuple) and lhs and lhs[0] == "path":
+                targets = {lhs[1]}
+            elif lhs is not None:
+                targets = self._lvalue_bases(lhs)
+            else:
+                targets = set()
+            for lp in sorted(targets):
+                sid = self._pick_node(lp, ("Net", "Var", "Port"))
+                if (
+                    sid is not None
+                    and sid != root_id
+                    and self.nodes[sid]["kind"] in ("Net", "Var", "Port")
+                ):
+                    seen.add((root_id, sid, "out", None, None, None))
 
     def _members(self, sym: Any):
         body = getattr(sym, "body", None)
@@ -947,12 +1242,16 @@ class Elaborator:
             self._by_path.setdefault(n["path"], []).append((n["id"], n["kind"]))
 
         dir_map = {"In": "in", "Out": "out", "InOut": "inout"}
-        # Collect as a set keyed by (port, endpoint, dir, select, mem_port), then
-        # sort, so the output is canonical regardless of pyslang container
-        # iteration order. `select` is the resolved bit-select (e.g. `[0]`) or None
-        # for the whole signal; `mem_port` tags a memory-array pin ("addr"/"din"/
-        # "dout", #112) or None for an ordinary edge.
-        seen_edges: set[tuple[int, int, str, Optional[str], Optional[str]]] = set()
+        # Collect as a set keyed by (port, endpoint, dir, select, mem_port,
+        # mux_port), then sort, so the output is canonical regardless of pyslang
+        # container iteration order. `select` is the resolved bit-select (e.g.
+        # `[0]`) or None for the whole signal; `mem_port` tags a memory-array pin
+        # ("addr"/"din"/"dout", #112); `mux_port` tags a gate-level mux input
+        # ("sel"/"d0"/"d1", #157). All but the first three are None on an ordinary
+        # edge.
+        seen_edges: set[
+            tuple[int, int, str, Optional[str], Optional[str], Optional[str]]
+        ] = set()
         for inst_id, sym in self.instances:
             conns = getattr(sym, "portConnections", None)
             if conns is None:
@@ -975,7 +1274,9 @@ class Elaborator:
                 for rp in refs:
                     end_id = self._pick_node(rp, ("Net", "Var", "Port", "Instance"))
                     if end_id is not None and end_id != port_id:
-                        seen_edges.add((port_id, end_id, direction, selects.get(rp), None))
+                        seen_edges.add(
+                            (port_id, end_id, direction, selects.get(rp), None, None)
+                        )
                 # Input tied to a literal (no net): record the constant on the
                 # port so the schematic can show its driver (e.g. 32'd0).
                 if not refs and port_id != inst_id:
@@ -989,21 +1290,32 @@ class Elaborator:
         for pid, mpath, d in self.modport_pins:
             end_id = self._pick_node(mpath, ("Net", "Var", "Port"))
             if end_id is not None and end_id != pid:
-                seen_edges.add((pid, end_id, d, None, None))
+                seen_edges.add((pid, end_id, d, None, None, None))
 
         for logic_id, logic_sym, role in self.logic_blocks:
             self._logic_edges(logic_id, logic_sym, role, seen_edges)
 
+        # Optional gate-level projection (#157): after the process-level edges are
+        # wired, decompose each block's expressions into gate/mux nodes + edges.
+        # Additive — the process nodes/edges above are untouched, so the schematic
+        # can render either projection over the same spine.
+        if self.gate_level:
+            for logic_id, logic_sym, role in self.logic_blocks:
+                self._gate_block(logic_id, logic_sym, role, seen_edges)
+
         edges: list[dict[str, Any]] = []
         ordered = sorted(
-            seen_edges, key=lambda t: (t[0], t[1], t[2], t[3] or "", t[4] or "")
+            seen_edges,
+            key=lambda t: (t[0], t[1], t[2], t[3] or "", t[4] or "", t[5] or ""),
         )
-        for i, (p, e, d, s, mp) in enumerate(ordered):
+        for i, (p, e, d, s, mp, xp) in enumerate(ordered):
             edge: dict[str, Any] = {"id": i, "port": p, "endpoint": e, "dir": d}
             if s is not None:
                 edge["select"] = s
             if mp is not None:
                 edge["mem_port"] = mp
+            if xp is not None:
+                edge["mux_port"] = xp
             edges.append(edge)
         return edges
 
@@ -1124,8 +1436,9 @@ def build_model(
     files: list[str],
     top: Optional[str] = None,
     include_dirs: Optional[list[str]] = None,
+    gate_level: bool = False,
 ) -> dict[str, Any]:
-    return Elaborator(files, top, include_dirs).build()
+    return Elaborator(files, top, include_dirs, gate_level=gate_level).build()
 
 
 def _error_report(el: Elaborator) -> Optional[str]:
@@ -1163,6 +1476,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Add an include directory (repeatable).",
     )
     ap.add_argument("-o", "--out", default="-", help="Output path ('-' = stdout).")
+    ap.add_argument(
+        "--gate-level",
+        action="store_true",
+        help="Also emit the optional gate-level projection: decompose process/"
+        "assign expressions into gate/mux primitive nodes (#157). Off by default; "
+        "the default output is unchanged.",
+    )
     args = ap.parse_args(argv)
 
     files: list[str] = list(args.files)
@@ -1174,7 +1494,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not files:
         ap.error("no source files given (pass files and/or -f FILELIST)")
 
-    el = Elaborator(files, args.top, include_dirs)
+    el = Elaborator(files, args.top, include_dirs, gate_level=args.gate_level)
     model = el.build()
     # Compile errors always render to stderr for visibility, but only an empty
     # design (nothing elaborated) fails the run: slang flags pedantic errors
