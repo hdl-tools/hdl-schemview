@@ -90,10 +90,21 @@ carries its own **signal picker** (#171, `Ctrl/⌘+B`) — a scope tree over tha
 signals (`hierarchy_tree` + `scope_signals`, both on the pane's `session_id`), so a pane
 picks its own lanes instead of waiting for another window to address them at it; a
 signal absent from the pane's trace is **dimmed and inert**, not pruned. The pane
-holds many traces (`state.waves`), stacked as a dense top-anchored stack of
-fixed-height rows (`name | value@A | track`) with per-row reorder/remove controls; the
-name/value columns are drag-resizable (`state.waveCol`, persisted in `localStorage`). The
-list is one flat CSS grid (`#wave-list.has-rows`) whose `align-content:start` (#180)
+organizes its lanes into **collapsible groups** (#182, `state.groups: WaveGroup[]`,
+each `WaveGroup { name, collapsed, waves }`) — there are no loose lanes, and the pane
+always keeps exactly one **empty group at the bottom** as the landing spot for a new
+group (`normalizeGroups`/`workingGroupIndex` in `wave.ts`; the invariant is re-enforced
+in `renderWaves`). A fresh pane is a single empty group. New signals accumulate in the
+**working group** (last populated); a lane's name-cell menu **Move to group ▸ [group |
+New group…]** regroups it (the non-drag path; #188 adds drag), a group header's twist
+folds it away (collapsed groups render no tracks — `redrawTracks`/`markerTimeAt` map
+canvases against `visibleLanes`, not `flattenLanes`), and double-clicking the header
+renames it. Groups round-trip the pop-out `WaveSnapshot` (`StoredGroup`) and survive a
+trace swap (`loadTraceOnly` re-resolves per group in place). Each group's lanes are
+fixed-height rows (`name | value@A | track`) with per-row reorder/remove controls keyed
+by the stable lane `key` (#179); the name/value columns are drag-resizable
+(`state.waveCol`, persisted in `localStorage`). The list is one flat CSS grid
+(`#wave-list.has-rows`, group headers span all columns) whose `align-content:start` (#180)
 packs the lanes at the top — the grid's default `stretch` would inflate the auto rows to
 fill the tall pane and spread the lanes apart — with no container padding so the stack
 sits flush. The tracks are
@@ -110,7 +121,7 @@ Right-clicking a signal's **name cell** opens a per-signal value-format menu: ch
 radix (bin/oct/dec/hex; multi-bit buses default hex via `WaveTrace.radix`), **add
 another view** (#179 — stack the same signal as a second lane so it can be read as hex
 *and* state name at once; a plain append still dedupes by `ref`, this deliberately does
-not), or **create a sub-bus** — a derived track of `parent[hi:lo]` (synthetic negative
+not), **move to group** (#182), or **create a sub-bus** — a derived track of `parent[hi:lo]` (synthetic negative
 `ref`) built by slicing each value's bits, carrying `WaveTrace.slice` + the parent
 `path` so a trace swap re-derives it (`reresolveLane`) instead of dropping it. Because a
 signal can now be several lanes, `ref` no longer identifies a lane: each carries a

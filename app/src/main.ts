@@ -55,21 +55,26 @@ import {
   displayValue,
   drawTrack,
   drawRuler,
+  flattenLanes,
   laneCounterSeeds,
   maxTime,
   nearestEdge,
+  normalizeGroups,
   panWindow,
   reresolveLane,
   sliceBits,
   TRACK_H,
   valueAt,
   valueAtMarker,
+  visibleLanes,
+  workingGroupIndex,
   xToTime,
   zoomWindow,
   type DisplayUnit,
   type Markers,
   type Radix,
   type TimeWindow,
+  type WaveGroup,
   type WaveTrace,
 } from "./wave";
 
@@ -110,10 +115,10 @@ const state = {
   stack: [] as ScopeFrame[],
   selected: null as number | null,
   source: new Map<number, string[]>(),
-  // Signals pinned to the waveform pane, in lane order (top → bottom). Appended via
-  // the schematic/source right-click menu; reordered/removed via the per-lane
-  // controls. Cleared on model reload (#15).
-  waves: [] as WaveTrace[],
+  // Signals pinned to the waveform pane, organized into collapsible groups (#182) with
+  // one always-empty trailing group. Lanes append to the working group; reordered/removed
+  // via the per-lane controls, regrouped via the name-cell menu. Reset on model reload.
+  groups: [] as WaveGroup[],
   // Visible waveform time window (null = full window, derived from maxTime) and the
   // A (left-click) / B (right-click) markers. Reset on model reload (#16).
   waveView: null as TimeWindow | null,
@@ -204,10 +209,34 @@ const detachWaveKey = (label: string) => `detach:${label}:wave`;
 // lanes/view/markers main was showing at pop-out time.
 interface WaveSnapshot {
   load?: LoadSpec;
+  groups?: StoredGroup[]; // #182; pre-#182 snapshots carry `waves` instead (migrated on load)
   waves?: StoredTrace[];
   waveView?: TimeWindow | null;
   markers?: Markers;
   waveUnit?: DisplayUnit;
+}
+
+// A group serialized for a pop-out snapshot (#182): its lanes as StoredTraces.
+interface StoredGroup {
+  name: string;
+  collapsed: boolean;
+  waves: StoredTrace[];
+}
+function storeGroup(g: WaveGroup): StoredGroup {
+  return { name: g.name, collapsed: g.collapsed, waves: g.waves.map(storeTrace) };
+}
+function loadGroup(s: StoredGroup): WaveGroup {
+  return { name: s.name, collapsed: s.collapsed ?? false, waves: (s.waves ?? []).map(loadTrace) };
+}
+// Restore the pane's groups from a snapshot, migrating a pre-#182 flat `waves` list into
+// a single group. Always normalized so the trailing empty group is present.
+function loadGroups(snap: WaveSnapshot): WaveGroup[] {
+  const groups = snap.groups
+    ? snap.groups.map(loadGroup)
+    : snap.waves
+      ? [{ name: nextGroupName(), collapsed: false, waves: snap.waves.map(loadTrace) }]
+      : [];
+  return normalizeGroups(groups, nextGroupName);
 }
 
 // A WaveTrace carries an enumMap Map that JSON.stringify drops; (de)serialize it
@@ -275,7 +304,7 @@ async function popOut(pane: DetachablePane) {
   } else {
     const snap: WaveSnapshot = {
       load: state.loaded ?? undefined,
-      waves: state.waves.map(storeTrace),
+      groups: state.groups.map(storeGroup),
       waveView: state.waveView,
       markers: state.markers,
       waveUnit: state.waveUnit,
@@ -350,8 +379,10 @@ async function load() {
     log("info", `loaded ${top}`);
     state.stack = [];
     viewCache.clear();
-    // A new design invalidates the old traces (signal_refs are model-specific).
-    state.waves = [];
+    // A new design invalidates the old traces (signal_refs are model-specific). Reset to
+    // a single empty group (#182), the pane's default view.
+    state.groups = [];
+    normalizeWaveGroups();
     state.waveView = null;
     state.markers = { a: null, b: null };
     state.timescale = await api.traceTimescale();
@@ -539,7 +570,7 @@ function renderSignalList(sigs: SignalEntry[]) {
   }
   // Lanes already pinned, keyed by model path (#170's WaveTrace.path) — so a re-click
   // reads as a no-op rather than looking broken (addToWaveform dedupes silently).
-  const added = new Set(state.waves.map((w) => w.path).filter(Boolean));
+  const added = new Set(laneList().map((w) => w.path).filter(Boolean));
   for (const s of sigs) {
     const row = document.createElement("div");
     row.className = "snode";
@@ -1851,22 +1882,19 @@ const RULER_H = 16;
 
 // The visible time window, defaulting to the full data window when unset.
 function currentView(): TimeWindow {
-  return state.waveView ?? { t0: 0, t1: maxTime(state.waves) };
+  return state.waveView ?? { t0: 0, t1: maxTime(laneList()) };
 }
 
-// Rebuild the waveform pane: a top ruler row, then one grid row per pinned signal —
-// name | value-at-A | track | reorder (↑/↓) + remove (×). Track/ruler cells are
-// canvases drawn by `redrawTracks` on the shared visible window; the grid keeps the
-// time columns aligned across rows (#15, #16).
+// Rebuild the waveform pane: a top ruler row, then, per group (#182), a collapsible
+// header row followed by its lanes (unless collapsed) — each lane a grid row of
+// name | value-at-A | track | reorder (↑/↓) + remove (×). Track/ruler cells are canvases
+// drawn by `redrawTracks` on the shared visible window; the flat grid keeps the time
+// columns aligned across every row (#15, #16). The pane is always ≥1 group with an empty
+// trailing one, so there is no "(no signals)" state — a fresh pane shows an empty group.
 function renderWaves() {
   const list = $("wave-list");
+  normalizeWaveGroups(); // guarantee the always-present empty trailing group
   list.innerHTML = "";
-  if (!state.waves.length) {
-    list.classList.remove("has-rows");
-    list.textContent = "(no signals)";
-    updateMarkerReadout();
-    return;
-  }
   list.classList.add("has-rows");
   // Ruler row: spacers flank a track-column canvas so it aligns with the tracks.
   const rulerCell = document.createElement("div");
@@ -1876,42 +1904,108 @@ function renderWaves() {
   rulerCell.appendChild(ruler);
   list.append(spacer(), spacer(), rulerCell, spacer());
 
-  state.waves.forEach((tr, i) => {
-    const name = document.createElement("div");
-    name.className = "wave-row-name";
-    name.textContent = tr.name;
-    name.title = tr.name;
-    // Right-click the name (not the track — that drops marker B) for per-signal
-    // value formatting: change radix / create a sub-bus (#78).
-    name.oncontextmenu = (e) => {
-      e.preventDefault();
-      openSignalMenu(e, i);
-    };
-    name.appendChild(colResizer("name"));
-
-    const value = document.createElement("div");
-    value.className = "wave-row-value";
-    // The value text lives in a span so redrawTracks can update it without wiping the
-    // resizer (textContent on the cell would remove all children).
-    const valueLbl = document.createElement("span");
-    valueLbl.className = "wave-val-lbl";
-    value.append(valueLbl, colResizer("value"));
-
-    const cell = document.createElement("div");
-    cell.className = "wave-track-cell";
-    const canvas = document.createElement("canvas");
-    canvas.className = "wave-track";
-    cell.appendChild(canvas);
-
-    const ctrls = document.createElement("div");
-    ctrls.className = "wave-ctrls";
-    ctrls.appendChild(waveBtn("↑", i === 0, () => moveWave(i, -1)));
-    ctrls.appendChild(waveBtn("↓", i === state.waves.length - 1, () => moveWave(i, 1)));
-    ctrls.appendChild(waveBtn("×", false, () => removeWave(i)));
-
-    list.append(name, value, cell, ctrls);
-  });
+  for (const group of state.groups) {
+    renderGroupHeader(list, group);
+    if (group.collapsed) continue;
+    group.waves.forEach((tr, i) =>
+      renderLaneRow(list, tr, i === 0, i === group.waves.length - 1),
+    );
+  }
   redrawTracks();
+}
+
+// A full-width group header row: collapse twist, name (double-click to rename), and a
+// lane count. The empty trailing group reads as a drop target for a new group.
+function renderGroupHeader(list: HTMLElement, group: WaveGroup) {
+  const header = document.createElement("div");
+  header.className = "wave-group-header";
+  const twist = document.createElement("button");
+  twist.className = "wave-twist";
+  twist.textContent = group.collapsed ? "▸" : "▾";
+  twist.title = group.collapsed ? "Expand group" : "Collapse group";
+  twist.onclick = () => {
+    group.collapsed = !group.collapsed;
+    renderWaves();
+  };
+  const name = document.createElement("span");
+  name.className = "wave-group-name";
+  const empty = group.waves.length === 0;
+  name.textContent = empty ? `${group.name} — drop signals here` : group.name;
+  if (empty) name.classList.add("empty");
+  name.title = "Double-click to rename";
+  name.ondblclick = () => renameGroup(group, name);
+  const count = document.createElement("span");
+  count.className = "wave-group-count";
+  if (!empty) count.textContent = `${group.waves.length}`;
+  header.append(twist, name, count);
+  list.append(header);
+}
+
+// One lane: name | value@A | track | ↑/↓/×. Controls address the lane by its stable key
+// (#179) so they stay correct with duplicate refs and across groups.
+function renderLaneRow(list: HTMLElement, tr: WaveTrace, first: boolean, last: boolean) {
+  const name = document.createElement("div");
+  name.className = "wave-row-name";
+  name.textContent = tr.name;
+  name.title = tr.name;
+  // Right-click the name (not the track — that drops marker B) for per-signal value
+  // formatting: change radix / add another view / move to group / create a sub-bus.
+  name.oncontextmenu = (e) => {
+    e.preventDefault();
+    openSignalMenu(e, tr.key);
+  };
+  name.appendChild(colResizer("name"));
+
+  const value = document.createElement("div");
+  value.className = "wave-row-value";
+  // The value text lives in a span so redrawTracks can update it without wiping the
+  // resizer (textContent on the cell would remove all children).
+  const valueLbl = document.createElement("span");
+  valueLbl.className = "wave-val-lbl";
+  value.append(valueLbl, colResizer("value"));
+
+  const cell = document.createElement("div");
+  cell.className = "wave-track-cell";
+  const canvas = document.createElement("canvas");
+  canvas.className = "wave-track";
+  cell.appendChild(canvas);
+
+  const ctrls = document.createElement("div");
+  ctrls.className = "wave-ctrls";
+  ctrls.appendChild(waveBtn("↑", first, () => moveLane(tr.key, -1)));
+  ctrls.appendChild(waveBtn("↓", last, () => moveLane(tr.key, 1)));
+  ctrls.appendChild(waveBtn("×", false, () => removeLane(tr.key)));
+
+  list.append(name, value, cell, ctrls);
+}
+
+// Rename a group in place: swap the label for an input, commit on Enter/blur, cancel on
+// Escape. `renderWaves` clears `#wave-list`, which removes the focused input and fires a
+// synchronous blur — so `finish` is guarded (and detaches `onblur`) to run exactly once
+// and not re-enter `renderWaves` mid-rebuild.
+function renameGroup(group: WaveGroup, label: HTMLElement) {
+  const input = document.createElement("input");
+  input.className = "wave-group-rename";
+  input.value = group.name;
+  let done = false;
+  const finish = (save: boolean) => {
+    if (done) return;
+    done = true;
+    input.onblur = null;
+    if (save) {
+      const v = input.value.trim();
+      if (v) group.name = v;
+    }
+    renderWaves();
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  };
+  input.onblur = () => finish(true);
+  label.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 function spacer(): HTMLDivElement {
@@ -2108,7 +2202,8 @@ function redrawTracks() {
   }
   const canvases = list.querySelectorAll<HTMLCanvasElement>(".wave-track");
   const valueLbls = list.querySelectorAll<HTMLElement>(".wave-val-lbl");
-  state.waves.forEach((tr, i) => {
+  // Only non-collapsed groups render tracks, so map against the visible lanes (#182).
+  visibleLaneList().forEach((tr, i) => {
     const radix = tr.radix ?? "hex";
     const canvas = canvases[i];
     if (canvas) {
@@ -2162,16 +2257,23 @@ function waveBtn(label: string, disabled: boolean, onClick: () => void): HTMLBut
   return b;
 }
 
-function moveWave(i: number, dir: number) {
-  const j = i + dir;
-  if (j < 0 || j >= state.waves.length) return;
-  [state.waves[i], state.waves[j]] = [state.waves[j], state.waves[i]];
+// Move a lane one slot within its own group (#182 keeps reorder inside a group; regroup
+// is the name-cell menu / #188 drag). Addressed by stable key so duplicate refs are safe.
+function moveLane(key: number, dir: number) {
+  const found = findLane(key);
+  if (!found) return;
+  const { group, index } = found;
+  const j = index + dir;
+  if (j < 0 || j >= group.waves.length) return;
+  [group.waves[index], group.waves[j]] = [group.waves[j], group.waves[index]];
   renderWaves();
 }
 
-function removeWave(i: number) {
-  state.waves.splice(i, 1);
-  renderWaves();
+function removeLane(key: number) {
+  const found = findLane(key);
+  if (!found) return;
+  found.group.waves.splice(found.index, 1);
+  renderWaves(); // normalizeWaveGroups (in renderWaves) prunes a now-empty interior group
 }
 
 const RADIX_LABELS: { r: Radix; label: string }[] = [
@@ -2183,17 +2285,55 @@ const RADIX_LABELS: { r: Radix; label: string }[] = [
 
 // Derived sub-bus tracks get unique negative refs so they never collide with real
 // u32 signal_refs. Lane keys (#179) count up from 1 — a lane's stable identity now that
-// several lanes can share a `ref`. Both are per-window counters; `reseedLaneCounters`
-// resumes them past a snapshot's restored lanes so a pop-out never re-mints a collision.
+// several lanes can share a `ref`. Group names (#182) count up too. All are per-window
+// counters; `reseedLaneCounters` resumes them past a snapshot's restored lanes/groups so
+// a pop-out never re-mints a collision.
 let derivedSeq = -1;
 let laneSeq = 1;
+let groupSeq = 1;
 function nextLaneKey(): number {
   return laneSeq++;
 }
+function nextGroupName(): string {
+  return `Group ${groupSeq++}`;
+}
 function reseedLaneCounters(): void {
-  const { laneKey, derivedRef } = laneCounterSeeds(state.waves);
+  const { laneKey, derivedRef } = laneCounterSeeds(flattenLanes(state.groups));
   laneSeq = laneKey;
   derivedSeq = derivedRef;
+  // Resume group numbering past the largest `Group N` already present.
+  for (const g of state.groups) {
+    const m = /^Group (\d+)$/.exec(g.name);
+    if (m && Number(m[1]) >= groupSeq) groupSeq = Number(m[1]) + 1;
+  }
+}
+
+// --- #182 group helpers -------------------------------------------------------------
+
+// Every pinned lane, flat and in order; and just the drawn ones (non-collapsed groups).
+const laneList = (): WaveTrace[] => flattenLanes(state.groups);
+const visibleLaneList = (): WaveTrace[] => visibleLanes(state.groups);
+
+// Re-establish the pane invariant after any mutation: one trailing empty group, no
+// interior empties, ≥1 group. Call before re-rendering.
+function normalizeWaveGroups(): void {
+  state.groups = normalizeGroups(state.groups, nextGroupName);
+}
+
+// Locate a lane by its stable key (#179) across all groups.
+function findLane(key: number): { group: WaveGroup; index: number } | null {
+  for (const group of state.groups) {
+    const index = group.waves.findIndex((w) => w.key === key);
+    if (index >= 0) return { group, index };
+  }
+  return null;
+}
+
+// The group a newly added signal lands in — the working group (last populated, or the
+// default group of a fresh pane), guaranteed to exist by the invariant.
+function workingGroup(): WaveGroup {
+  if (state.groups.length === 0) normalizeWaveGroups();
+  return state.groups[workingGroupIndex(state.groups)];
 }
 
 // Bit width of a trace when it is a sliceable bit-vector (binary value string), else 0.
@@ -2202,10 +2342,22 @@ function busWidth(tr: WaveTrace): number {
   return v && /^[01xz]+$/i.test(v.value) ? v.value.length : 0;
 }
 
-// Per-signal value-format menu (radix + sub-bus), opened from the name cell (#78).
-function openSignalMenu(ev: MouseEvent, i: number) {
-  const tr = state.waves[i];
-  if (!tr) return;
+// Move a lane into an existing group (#182): splice from its current group, push onto
+// the target. Re-found by key so a stale menu closure can't move the wrong lane.
+function moveLaneToGroup(key: number, target: WaveGroup) {
+  const found = findLane(key);
+  if (!found || found.group === target) return;
+  const [lane] = found.group.waves.splice(found.index, 1);
+  target.waves.push(lane);
+  renderWaves();
+}
+
+// Per-signal value-format menu (radix / another view / move to group / sub-bus), opened
+// from the name cell (#78). Addressed by the lane's stable key (#179).
+function openSignalMenu(ev: MouseEvent, key: number) {
+  const found = findLane(key);
+  if (!found) return;
+  const tr = found.group.waves[found.index];
   const cur = tr.radix ?? "hex";
   const radixSubmenu: MenuItem[] = [];
   // Enum signals get a "State name" mode at the top of the submenu (default on).
@@ -2230,6 +2382,17 @@ function openSignalMenu(ev: MouseEvent, i: number) {
       },
     });
   }
+  // Move to any other group — including the empty trailing group, which is how you start
+  // a new group: dropping a lane into it populates it and the invariant spawns a fresh
+  // empty group below (the non-drag path; #188 adds the drag gesture). Only the lane's
+  // own group is omitted.
+  const groupSubmenu: MenuItem[] = state.groups
+    .filter((g) => g !== found.group)
+    .map((g) => ({
+      label: g.waves.length === 0 ? `${g.name} (new group)` : g.name,
+      enabled: true,
+      onClick: () => moveLaneToGroup(key, g),
+    }));
   const width = busWidth(tr);
   openContextMenu(ev.clientX, ev.clientY, [
     { label: "Change radix", enabled: true, submenu: radixSubmenu },
@@ -2241,7 +2404,9 @@ function openSignalMenu(ev: MouseEvent, i: number) {
       label: "Add another view",
       enabled: true,
       onClick: () => {
-        state.waves.splice(i + 1, 0, {
+        const f = findLane(key);
+        if (!f) return;
+        f.group.waves.splice(f.index + 1, 0, {
           ...tr,
           key: nextLaneKey(),
           radix: "hex",
@@ -2250,24 +2415,26 @@ function openSignalMenu(ev: MouseEvent, i: number) {
         renderWaves();
       },
     },
+    { label: "Move to group", enabled: true, submenu: groupSubmenu },
     {
       label: width > 1 ? "Create sub-bus…" : "Create sub-bus… (not a bus)",
       enabled: width > 1,
-      onClick: () => openSubBusPopover(ev, i, width),
+      onClick: () => openSubBusPopover(ev, key, width),
     },
   ]);
 }
 
-// Insert a derived track of parent[hi:lo] right after the parent. When the parent is a
-// plain signal, the sub-bus records the parent path + slice so a trace swap re-derives
-// it (see reresolveLane); a sub-bus of a sub-bus can't be re-derived from a single path,
-// so it carries neither and is simply dropped on a swap (#179).
-function makeSubBus(i: number, hi: number, lo: number) {
-  const tr = state.waves[i];
-  if (!tr) return;
+// Insert a derived track of parent[hi:lo] right after the parent, in the parent's group.
+// When the parent is a plain signal, the sub-bus records the parent path + slice so a
+// trace swap re-derives it (see reresolveLane); a sub-bus of a sub-bus can't be
+// re-derived from a single path, so it carries neither and is dropped on a swap (#179).
+function makeSubBus(key: number, hi: number, lo: number) {
+  const found = findLane(key);
+  if (!found) return;
+  const tr = found.group.waves[found.index];
   const values = tr.values.map((c) => ({ time: c.time, value: sliceBits(c.value, hi, lo) }));
   const derivable = tr.path !== undefined && tr.slice === undefined;
-  state.waves.splice(i + 1, 0, {
+  found.group.waves.splice(found.index + 1, 0, {
     key: nextLaneKey(),
     ref: derivedSeq--,
     name: `${tr.name}[${hi}:${lo}]`,
@@ -2280,7 +2447,7 @@ function makeSubBus(i: number, hi: number, lo: number) {
 }
 
 // Small inline popover to pick the [hi:lo] bit range for a sub-bus.
-function openSubBusPopover(ev: MouseEvent, i: number, width: number) {
+function openSubBusPopover(ev: MouseEvent, key: number, width: number) {
   closeContextMenu();
   document.getElementById("subbus-pop")?.remove();
   const pop = document.createElement("div");
@@ -2309,7 +2476,7 @@ function openSubBusPopover(ev: MouseEvent, i: number, width: number) {
     hi = Math.min(Math.max(hi, 0), width - 1);
     lo = Math.min(Math.max(lo, 0), width - 1);
     close();
-    makeSubBus(i, hi, lo);
+    makeSubBus(key, hi, lo);
   };
   pop.addEventListener("keydown", (e) => {
     if (e.key === "Enter") ok.click();
@@ -2521,13 +2688,15 @@ async function showInSchematic(anchor: NodeRef) {
 // cell's "Add another view" (#179) deliberately bypasses this to stack a second lane.
 async function addToWaveform(wave: WaveLink, path?: string) {
   if (!wave.in_trace) return;
-  if (state.waves.some((w) => w.ref === wave.signal_ref)) return;
+  if (laneList().some((w) => w.ref === wave.signal_ref)) return;
   const values = await api.signalValues(wave.signal_ref, sid);
   // Enum-typed signals carry a value→name map; show the state name by default.
   const enumMap = wave.enum_map
     ? new Map(wave.enum_map.map((m) => [m.value, m.name]))
     : undefined;
-  state.waves.push({
+  // New signals land in the working group (last populated, or the default group of a
+  // fresh pane) — they accumulate there; the trailing empty group is for new groups (#182).
+  workingGroup().waves.push({
     key: nextLaneKey(),
     ref: wave.signal_ref,
     name: wave.full_name,
@@ -2591,7 +2760,7 @@ function initSettings() {
 // rect (drawing width == clientWidth, so 1 CSS px == 1 device px — see redrawTracks).
 function setupWaveInteraction() {
   const list = $("wave-list");
-  const tMax = () => maxTime(state.waves);
+  const tMax = () => maxTime(laneList());
 
   const zoomBy = (factor: number, pivotT: number) => {
     state.waveView = zoomWindow(currentView(), factor, pivotT, tMax());
@@ -2635,10 +2804,13 @@ function setupWaveInteraction() {
     const r = canvas.getBoundingClientRect();
     const v = currentView();
     const raw = xToTime(ev.clientX - r.left, v.t0, v.t1, r.width);
-    let candidates = state.waves;
+    // DOM tracks exist only for visible lanes (collapsed groups draw none), so map the
+    // clicked canvas against the visible lane list (#182).
+    const visible = visibleLaneList();
+    let candidates = visible;
     if (canvas.classList.contains("wave-track")) {
       const idx = Array.from(list.querySelectorAll(".wave-track")).indexOf(canvas);
-      if (idx >= 0 && state.waves[idx]) candidates = [state.waves[idx]];
+      if (idx >= 0 && visible[idx]) candidates = [visible[idx]];
     }
     let snapped = raw;
     let bestD = Infinity;
@@ -2747,8 +2919,9 @@ async function initDetached(pane: DetachablePane) {
   if (snap) {
     // Seeded lanes are valid as-is: the pane booted on main's current trace, so their
     // signal_refs still resolve. A later "Load trace…" re-resolves them by model path.
-    state.waves = (snap.waves ?? []).map(loadTrace);
-    reseedLaneCounters(); // resume key/sub-bus-ref counters past the restored lanes (#179)
+    // Groups round-trip (#182); a pre-#182 snapshot's flat `waves` migrates to one group.
+    state.groups = loadGroups(snap);
+    reseedLaneCounters(); // resume key/sub-bus-ref/group counters past the restored lanes
     state.waveView = snap.waveView ?? null;
     state.markers = snap.markers ?? { a: null, b: null };
     if (snap.waveUnit) state.waveUnit = snap.waveUnit;
@@ -2833,23 +3006,26 @@ async function loadTraceOnly() {
     state.timescale = null;
   }
   state.waveUnit = defaultDisplayUnit(state.timescale);
-  // Re-resolve lanes against the new trace by model path; drop any it doesn't carry.
-  // reresolveLane keeps a sub-bus sliced (and its synthetic ref) rather than reverting
-  // it to the full word (#179).
-  const resolved: WaveTrace[] = [];
-  for (const t of state.waves) {
-    if (!t.path) continue; // no model path → can't re-resolve across traces
-    try {
-      const local = await api.probeNode(t.path, null, sid);
-      if (local?.wave?.in_trace) {
-        const values = await api.signalValues(local.wave.signal_ref, sid);
-        resolved.push(reresolveLane(t, local.wave.signal_ref, values));
+  // Re-resolve lanes against the new trace by model path, in place per group so grouping
+  // survives the swap (#182); drop any lane the new trace doesn't carry. reresolveLane
+  // keeps a sub-bus sliced (and its synthetic ref) rather than reverting it (#179).
+  for (const group of state.groups) {
+    const resolved: WaveTrace[] = [];
+    for (const t of group.waves) {
+      if (!t.path) continue; // no model path → can't re-resolve across traces
+      try {
+        const local = await api.probeNode(t.path, null, sid);
+        if (local?.wave?.in_trace) {
+          const values = await api.signalValues(local.wave.signal_ref, sid);
+          resolved.push(reresolveLane(t, local.wave.signal_ref, values));
+        }
+      } catch {
+        /* skip a lane that fails to re-resolve */
       }
-    } catch {
-      /* skip a lane that fails to re-resolve */
     }
+    group.waves = resolved;
   }
-  state.waves = resolved;
+  normalizeWaveGroups(); // prune groups the swap emptied; keep the trailing empty
   state.waveView = null;
   state.markers = { a: null, b: null };
   if (sid === undefined) {
@@ -2859,12 +3035,12 @@ async function loadTraceOnly() {
     const field = document.getElementById("trace") as HTMLInputElement | null;
     if (field) field.value = picked;
   } else {
-    // A pop-out persists the new trace *and* the re-resolved lanes together, so
+    // A pop-out persists the new trace *and* the re-resolved groups together, so
     // reopening it reseeds against the trace it is actually showing (pre-switch refs
     // would mis-render).
     const saved: WaveSnapshot = {
       load: next,
-      waves: resolved.map(storeTrace),
+      groups: state.groups.map(storeGroup),
       waveView: state.waveView,
       markers: state.markers,
       waveUnit: state.waveUnit,
