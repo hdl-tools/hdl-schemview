@@ -231,6 +231,10 @@ npm run tauri build  # Bundle desktop app (Win/Linux/macOS)
 uv sync
 uv run pytest -q
 uv run svxprobe-elaborate --top <top> -f <filelist.f> -o <out.json>
+# Opt-in gate-level projection (#157, ADR 0005) — decomposes process/assign
+# expressions into gate/mux primitive nodes. Additive + off by default, so the
+# default output above stays byte-identical:
+uv run svxprobe-elaborate --top <top> -f <filelist.f> --gate-level -o <out.json>
 ```
 
 Fixtures: `fixtures/picorv32_soc/` (committed golden + VCD/FST). PR-gate tests run
