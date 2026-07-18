@@ -21,10 +21,13 @@ import {
   unitExponent,
   displayScale,
   defaultDisplayUnit,
+  reresolveLane,
+  laneCounterSeeds,
   type WaveTrace,
 } from "./wave";
 
 const trace = (name: string, values: [number, string][]): WaveTrace => ({
+  key: 0,
   ref: 0,
   name,
   values: values.map(([time, value]) => ({ time, value })),
@@ -366,5 +369,54 @@ describe("defaultDisplayUnit", () => {
   it("falls back to ns for unknown / out-of-range native units", () => {
     expect(defaultDisplayUnit(null)).toBe("ns");
     expect(defaultDisplayUnit({ factor: 1, unit: "fs" })).toBe("ns");
+  });
+});
+
+// #179: when a pane swaps its trace, each lane re-resolves by model path. A plain lane
+// takes the new trace's ref and values; a sub-bus keeps its synthetic ref and re-slices
+// the parent's *new* values (so it stays parent[hi:lo], not the full word) — the fix for
+// sub-buses silently vanishing on every trace swap.
+describe("reresolveLane", () => {
+  it("takes the new ref and full values for a plain lane, keeping identity", () => {
+    const tr: WaveTrace = { key: 7, ref: 5, name: "a", path: "top.a", values: vc([[0, "1"]]) };
+    const out = reresolveLane(tr, 9, vc([[0, "0"], [10, "1"]]));
+    expect(out.ref).toBe(9);
+    expect(out.values).toEqual(vc([[0, "0"], [10, "1"]]));
+    expect(out.key).toBe(7);
+  });
+
+  it("keeps a sub-bus's synthetic ref and re-slices the parent's new values", () => {
+    const tr: WaveTrace = {
+      key: 8,
+      ref: -1,
+      name: "a[1:0]",
+      path: "top.a",
+      slice: { hi: 1, lo: 0 },
+      values: vc([]),
+    };
+    const out = reresolveLane(tr, 9, vc([[0, "1010"]]));
+    expect(out.ref).toBe(-1); // synthetic ref preserved, NOT the parent's new ref
+    expect(out.values).toEqual(vc([[0, "10"]])); // low two bits of 1010
+  });
+});
+
+// #179: several lanes can now share a `ref`, and a pop-out reseeded from a snapshot must
+// not re-mint a lane key or sub-bus ref that a restored lane already holds. The seeds
+// advance past every existing key and below every existing synthetic ref.
+describe("laneCounterSeeds", () => {
+  it("defaults to 1 / -1 for an empty pane", () => {
+    expect(laneCounterSeeds([])).toEqual({ laneKey: 1, derivedRef: -1 });
+  });
+
+  it("advances past the largest key and below the smallest ref", () => {
+    const seeds = laneCounterSeeds([
+      { key: 3, ref: 7 },
+      { key: 1, ref: -2 },
+    ]);
+    expect(seeds).toEqual({ laneKey: 4, derivedRef: -3 });
+  });
+
+  it("ignores positive refs when seeding the synthetic-ref counter", () => {
+    expect(laneCounterSeeds([{ key: 2, ref: 100 }])).toEqual({ laneKey: 3, derivedRef: -1 });
   });
 });

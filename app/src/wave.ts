@@ -10,13 +10,57 @@ import type { ValueChange } from "./types";
 // A signal pinned to the waveform pane: its trace `ref` (the wellen signal_ref used
 // to fetch values), display `name`, and the fetched value-change samples.
 export interface WaveTrace {
+  // Stable per-lane identity (#179). `ref` no longer identifies a lane: a signal can be
+  // pinned as several lanes (each with its own radix), so they share a `ref`; a sub-bus
+  // uses a synthetic negative `ref`. `key` is unique per lane and survives reorder and
+  // the snapshot round-trip, so grouping/addressing has something to hold onto.
+  key: number;
   ref: number;
   name: string;
   path?: string; // canonical model node path, so a lane re-resolves across traces (#170)
+  // A derived sub-bus of the signal at `path` (#179): `parent[hi:lo]`. Carried so a
+  // trace swap re-derives the slice from the parent's new values instead of dropping
+  // the lane. Absent on a plain lane.
+  slice?: { hi: number; lo: number };
   values: ValueChange[];
   radix?: Radix; // per-signal display radix; defaults to hex for multi-bit buses
   enumMap?: Map<number, string>; // value→name for enum/FSM signals (#81)
   showName?: boolean; // when an enumMap is present, show the state name (default true)
+}
+
+// Re-resolve a lane against a freshly-loaded trace (#179, the "Load trace…" swap). A
+// plain lane adopts the new `ref` and the trace's values; a sub-bus keeps its synthetic
+// `ref` and re-slices the parent's new `values` so it stays `parent[hi:lo]` rather than
+// silently reverting to the full word (or being dropped). Pure: the caller fetches
+// `fullValues` for `tr.path` from the new trace and hands them in.
+export function reresolveLane(
+  tr: WaveTrace,
+  ref: number,
+  fullValues: ValueChange[],
+): WaveTrace {
+  if (tr.slice) {
+    const { hi, lo } = tr.slice;
+    const values = fullValues.map((c) => ({ time: c.time, value: sliceBits(c.value, hi, lo) }));
+    return { ...tr, values };
+  }
+  return { ...tr, ref, values: fullValues };
+}
+
+// The next lane-key and synthetic-ref seeds for a pane reseeded from a snapshot (#179).
+// Keys count up from 1, sub-bus refs down from -1; a restored lane may already hold
+// either, so the counters must resume past every existing key and below every existing
+// negative ref, or a pop-out would re-mint a collision. Positive refs (real signals)
+// don't constrain the synthetic-ref counter.
+export function laneCounterSeeds(
+  waves: readonly { key: number; ref: number }[],
+): { laneKey: number; derivedRef: number } {
+  let laneKey = 1;
+  let derivedRef = -1;
+  for (const w of waves) {
+    if (w.key >= laneKey) laneKey = w.key + 1;
+    if (w.ref <= derivedRef) derivedRef = w.ref - 1;
+  }
+  return { laneKey, derivedRef };
 }
 
 // Fixed per-track canvas height (px). Must match `.wave-track` height in style.css.
