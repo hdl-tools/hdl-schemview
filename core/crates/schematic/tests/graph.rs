@@ -996,8 +996,11 @@ fn leaf_core_shows_wired_internal_logic() {
         .collect();
     assert!(combs > 0, "drilled core has no comb (always @*) boxes");
     assert!(assigns > 0, "drilled core has no assign nodes");
+    // Nine clocked-always FFs. Was ten until #178 stopped emitting the uninstantiated
+    // `genblk3` branch, whose `always @(posedge clk)` was a phantom tenth register that
+    // does not exist in this (single-cycle-ALU) elaboration.
     assert!(
-        ffs.len() >= 10,
+        ffs.len() >= 9,
         "drilled core should expose its clocked-always FFs, got {}",
         ffs.len()
     );
@@ -1212,4 +1215,32 @@ fn ff_reset_and_latch_enable_pins_carry_roles() {
         "path matches Node.enable"
     );
     assert_eq!(role_of(Latch, "d"), None, "latch data input is untagged");
+}
+
+// Only the *elaborated* branch of an if-generate is part of the design. `core.genblk3`
+// is `if (TWO_CYCLE_ALU) always @(posedge clk) … else always @* …` with `TWO_CYCLE_ALU`
+// 0, so this scope is the comb branch and the registered one does not exist. Every
+// branch of an unnamed if-generate shares the LRM-implicit name, so emitting a dead one
+// would both put a second node on this path and draw a flip-flop that isn't in the
+// design — a phantom that double-drives `alu_add_sub` alongside the real comb (#178).
+#[test]
+fn an_uninstantiated_generate_branch_is_not_drawn() {
+    let d = design();
+    let path = "picorv32_soc.g_lane[0].core.genblk3";
+    assert_eq!(
+        d.nodes_at_path(path).len(),
+        1,
+        "one live branch ⇒ one node at `{path}`"
+    );
+
+    let g = scope_graph(&d, path).expect("scope graph");
+    let kinds: Vec<NodeKind> = g.nodes.iter().map(|n| n.kind).collect();
+    assert!(
+        kinds.contains(&NodeKind::Comb),
+        "the elaborated `else` branch: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&NodeKind::Ff),
+        "the dead `if (TWO_CYCLE_ALU)` branch must not be drawn: {kinds:?}"
+    );
 }

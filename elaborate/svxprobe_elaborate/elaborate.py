@@ -798,6 +798,22 @@ class Elaborator:
         kname = _kind_name(sym)
         kind = _KIND_MAP.get(kname)
 
+        # A generate branch the elaboration discarded is not part of the design, so it
+        # is not part of the model (#178). Every branch of an unnamed if-generate
+        # shares one LRM-implicit name (`genblk1`), so emitting the dead ones put
+        # several nodes on one canonical path — the tree drew a row per branch, and
+        # `find`-by-path answered with whichever came first. Worse, a dead branch's
+        # members are real symbols: `picorv32`'s `if (TWO_CYCLE_ALU)` branch emitted its
+        # `always @(posedge clk)` as an `Ff` that double-drove `alu_add_sub` alongside
+        # the live `always @*` — logic no simulator would ever run.
+        #
+        # `isUninstantiated` is the only sound test. Not `name == ""`: a generate-for's
+        # iteration blocks (`g_lane[0]`) are unnamed and very much live. Returning,
+        # rather than just skipping the node, is what drops the dead members with it —
+        # descending would reparent them onto the enclosing scope.
+        if kind == "GenBlock" and getattr(sym, "isUninstantiated", False):
+            return
+
         # A process / continuous assign becomes a logic spine node: an inferred
         # register (`ff`) or a combinational block (`comb`). Its read/assigned (and
         # clock) wiring is recovered later in `_logic_edges`.

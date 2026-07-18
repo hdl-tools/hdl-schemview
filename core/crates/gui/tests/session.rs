@@ -384,6 +384,50 @@ fn hierarchy_tree_is_lazy_and_navigable() {
     assert!(s.hierarchy_tree("picorv32_soc.g_lane[0].bus", 1).is_some());
 }
 
+// A tree row is identified by its path, and several `GenBlock` nodes can share one
+// (the fixture's `core.genblk1` is three). One scope, one row: rows that repeat a path
+// are dead clicks — indistinguishable to the user, and the row map in `tree.ts` is
+// path-keyed, so only the last of them can ever highlight (#178).
+#[test]
+fn tree_rows_never_repeat_a_path() {
+    let s = session();
+    let core = s
+        .hierarchy_tree("picorv32_soc.g_lane[0].core", 1)
+        .expect("core subtree");
+
+    let paths: Vec<&str> = core.children.iter().map(|c| c.path.as_str()).collect();
+    let mut uniq = paths.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    assert_eq!(uniq.len(), paths.len(), "duplicate tree rows: {paths:?}");
+}
+
+// Every row the tree offers must open onto the design it claims. A generate branch the
+// elaboration discarded has no contents to show, so listing one is a dead click — and
+// `find`-ing a node by path would land on it before the live branch (#178).
+#[test]
+fn every_generate_row_opens_a_real_scope() {
+    let s = session();
+    let core = s
+        .hierarchy_tree("picorv32_soc.g_lane[0].core", 1)
+        .expect("core subtree");
+
+    for row in core
+        .children
+        .iter()
+        .filter(|c| c.label.starts_with("genblk"))
+    {
+        let g = s
+            .scope_graph(&row.path)
+            .unwrap_or_else(|| panic!("`{}` must open a schematic", row.path));
+        assert!(
+            !g.nodes.is_empty(),
+            "`{}` opens an empty schematic — a dead branch was listed",
+            row.path
+        );
+    }
+}
+
 #[test]
 fn elaborate_and_load_runs_the_harness() {
     // Requires `svxprobe-elaborate` on PATH — the app's runtime contract for
