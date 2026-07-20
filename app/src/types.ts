@@ -47,6 +47,12 @@ export interface SchPort {
    * absent for connected pins.
    */
   dangling?: boolean;
+  /**
+   * Literal/parameter value tied to this input (#199): a gate/mux/datapath operand
+   * that is a hard-coded constant or a parameter. Drawn as an inline tie value
+   * beside the pin (so it is traceable at the gate); absent for net-driven pins.
+   */
+  constant?: string;
 }
 export interface SchNode {
   id: number;

@@ -85,6 +85,7 @@ jobs:
             fixtures/picorv32_soc/rtl/mem_if.sv \
             fixtures/picorv32_soc/rtl/soc_mem.sv \
             fixtures/picorv32_soc/rtl/picorv32_soc.sv \
+            --gate-level \
             -o /tmp/golden_regen.json
           diff <(jq -S . fixtures/picorv32_soc/golden/hierarchy.json) \
                <(jq -S . /tmp/golden_regen.json) \

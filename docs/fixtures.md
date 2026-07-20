@@ -43,7 +43,7 @@ picorv32_soc/
   rtl/        picorv32.v (vendored, ISC) + soc_pkg.sv + mem_if.sv + soc_mem.sv + picorv32_soc.sv
   tb/         tb_picorv32_soc.sv (deterministic) + gen_firmware.py (tiny RV32I assembler)
   traces/     picorv32_soc.vcd, picorv32_soc.fst   (frozen, committed)
-  golden/     hierarchy.json   (elaborated spine incl. parameters; reproducible from RTL)
+  golden/     hierarchy.json   (elaborated spine incl. parameters + gate-level projection; reproducible from RTL)
   excluded_scopes.txt          (TOP, tb, soc_pkg)
 ```
 
@@ -54,13 +54,17 @@ picorv32_soc/
 bash fixtures/regen.sh picorv32_soc
 
 # Golden hierarchy (needs the elaborate harness; deterministic). The explicit
-# file order matches ci.yml — a bare *.sv glob would skip picorv32.v:
+# file order matches ci.yml — a bare *.sv glob would skip picorv32.v. The golden
+# is elaborated WITH --gate-level (#199): the gate/mux/const projection is additive
+# and process-level rendering ignores it, so the default view is unchanged while the
+# committed fixture also exercises the gate-level toggle:
 uv run --project elaborate svxprobe-elaborate --top picorv32_soc \
     fixtures/picorv32_soc/rtl/picorv32.v \
     fixtures/picorv32_soc/rtl/soc_pkg.sv \
     fixtures/picorv32_soc/rtl/mem_if.sv \
     fixtures/picorv32_soc/rtl/soc_mem.sv \
     fixtures/picorv32_soc/rtl/picorv32_soc.sv \
+    --gate-level \
     -o fixtures/picorv32_soc/golden/hierarchy.json
 
 # Verify committed traces are still reproducible (structural; restores committed):

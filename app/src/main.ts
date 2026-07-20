@@ -1256,6 +1256,8 @@ function gateSymbol(node: SchNode): string {
   switch (node.kind) {
     case "Add":
       return "+";
+    case "Concat":
+      return "{ }";
     case "Sub":
       return "−"; // minus
     case "Mul":
@@ -1432,6 +1434,18 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
       circ.style.pointerEvents = "none";
       g.appendChild(circ);
     }
+    // A constant/parameter operand (#199): draw its value inline in the west margin
+    // just left of the wall, so the tie value is traceable right at the gate input.
+    if (sp.constant) {
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("class", "const-label");
+      t.setAttribute("x", "-3");
+      t.setAttribute("y", String(py + 3));
+      t.setAttribute("text-anchor", "end");
+      t.style.pointerEvents = "none";
+      t.textContent = sp.constant;
+      g.appendChild(t);
+    }
   }
   parent.appendChild(g);
 }
@@ -1466,7 +1480,22 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
   for (const p of c.ports ?? []) {
     const pid = Number(String(p.id).slice(1));
     const sp = portById.get(pid);
-    if (!sp || sp.role !== "sel") continue;
+    if (!sp) continue;
+    // A constant/parameter data branch (#199): its value inline at the west wall,
+    // so a `sel ? a : 'x` don't-care (or a tied data input) is traceable at the mux.
+    if (sp.constant && sp.side !== "east" && sp.role !== "sel") {
+      const py = p.y ?? 0;
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("class", "const-label");
+      t.setAttribute("x", "-3");
+      t.setAttribute("y", String(py + 3));
+      t.setAttribute("text-anchor", "end");
+      t.style.pointerEvents = "none";
+      t.textContent = sp.constant;
+      g.appendChild(t);
+      continue;
+    }
+    if (sp.role !== "sel") continue;
     const px = p.x ?? 0;
     const lab = document.createElementNS(SVGNS, "text");
     lab.setAttribute("class", "pin-label");

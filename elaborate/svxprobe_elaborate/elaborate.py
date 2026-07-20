@@ -935,6 +935,11 @@ class Elaborator:
             return self._emit_expr(getattr(expr, "operand", None), logic_id, seen)
         sig = self._leaf_signal(expr)
         if sig is not None:
+            # A named leaf referencing a parameter (#199): keep its node/path for
+            # cross-probe but carry the parameter's resolved value too.
+            pv = self._param_value(expr)
+            if pv is not None:
+                return ("param", sig, pv)
             return ("sig", sig)
         if "ConditionalOp" in k:
             return self._emit_mux(expr, logic_id, seen)
@@ -942,7 +947,7 @@ class Elaborator:
             op = _op_name(expr)
             kind = self._BINOP_KIND.get(op)
             if kind is None:
-                return None
+                return self._const_input(expr)
             if kind in self._ASSOC:
                 operands = self._flatten_assoc(expr, op)
             else:
@@ -965,9 +970,21 @@ class Elaborator:
                 # Unary `+` is identity -> a buffer (bare triangle, ADR 0005 §2).
                 return self._emit_gate("Buf", expr, [operand], logic_id, seen, op)
             # Unary `-` (Minus) has no distinct taxonomy glyph and stays
-            # process-level (no gate), like Div/Mod's datapath deferral.
-            return None
-        return None
+            # process-level (no gate), like Div/Mod's datapath deferral — unless
+            # it folds to a constant, in which case surface the value (#199).
+            return self._const_input(expr)
+        # A bit concatenation / replication (#199) becomes a `Concat` primitive box
+        # gathering its elements, so a mux data branch like `{x[31:2], 2'b00}` renders
+        # with its input instead of vanishing.
+        if "Concatenation" in k:
+            operands = list(getattr(expr, "operands", None) or [])
+            if operands:
+                return self._emit_gate("Concat", expr, operands, logic_id, seen)
+        if "Replication" in k:
+            inner = getattr(expr, "concat", None)
+            if inner is not None:
+                return self._emit_gate("Concat", expr, [inner], logic_id, seen)
+        return self._const_input(expr)
 
     def _fold_not(self, operand: Any) -> Optional[tuple[str, str]]:
         """If `operand` is an associative gate chain, the (folded kind, inner op)
@@ -1011,6 +1028,67 @@ class Elaborator:
         )
         return ("node", nid)
 
+    def _const_input(self, expr: Any) -> Optional[tuple[str, Any, Any]]:
+        """A hard-coded literal operand (`8'hFF`, `'x`, #199) → a ``("const", lit,
+        expr)`` tie, or None if the sub-expression isn't a bare literal/constant."""
+        lit = self._const_str(expr)
+        if lit is None:
+            lit = self._literal_value(expr)
+        return ("const", lit, expr) if lit is not None else None
+
+    def _literal_value(self, expr: Any) -> Optional[str]:
+        """The value of a bare integer literal (#199). slang leaves `.constant`
+        unset for a literal in a non-constant context (e.g. an `'x` don't-care
+        branch of a mux), but the `SVInt` is always on `.value` — so a `sel ? a :
+        'x` else-branch still ties instead of vanishing."""
+        k = _kind_name(expr)
+        if "IntegerLiteral" not in k:  # covers Unbased/UnsizedIntegerLiteral too
+            return None
+        v = getattr(expr, "value", None)
+        s = str(v) if v is not None else ""
+        return s if s and s != "None" else None
+
+    def _param_value(self, expr: Any) -> Optional[str]:
+        """The resolved value of a parameter reference (#199), else None. A parameter
+        `NamedValue` carries no `.constant`, but its symbol holds the elaborated
+        `.value` (e.g. `8'd170`)."""
+        sym = getattr(expr, "symbol", None)
+        if sym is None or "Parameter" not in _kind_name(sym):
+            return None
+        val = getattr(sym, "value", None)
+        s = str(val) if val is not None else ""
+        return s if s and s != "None" else None
+
+    def _add_const(self, lit: str, gate_id: int, expr: Any) -> int:
+        """A synthetic `Const` node carrying a literal operand's value (#199), a flat
+        child of the gate's logic block. The schematic turns it into a tie value on
+        the gate input, rendered like an instance-port constant tie."""
+        nid = len(self.nodes)
+        parent = self.nodes[gate_id]["parent"]
+        base = self.nodes[parent]["path"]
+        path = f"{base}.$const{nid}"
+        self.nodes.append(
+            {
+                "id": nid,
+                "kind": "Const",
+                "name": "const",
+                "path": path,
+                "parent": parent,
+                "children": [],
+                "symbol_key": path,
+                "def_range": self._range_from_expr(expr),
+                "inst_range": None,
+                "type": None,
+                "dir": None,
+                "const": lit,
+                "modport": None,
+                "drivers": [],
+                "loads": [],
+            }
+        )
+        self.nodes[parent]["children"].append(nid)
+        return nid
+
     def _wire_input(
         self,
         gate_id: int,
@@ -1019,14 +1097,29 @@ class Elaborator:
         mux_port: Optional[str] = None,
     ) -> None:
         """Wire a resolved endpoint into `gate_id` as an input. A ``("node", nid)``
-        is another primitive (gate-to-gate); a ``("sig", path)`` resolves to the
-        real scalar/bus signal it reads."""
+        is another primitive (gate-to-gate); a ``("sig", path)`` resolves to the real
+        scalar/bus signal it reads; ``("const", lit, expr)`` synthesizes a literal
+        tie node; ``("param", path, lit)`` wires to a parameter's node and stamps its
+        resolved value (#199)."""
         if endpoint is None:
             return
-        tag, val = endpoint
+        tag = endpoint[0]
         if tag == "node":
-            seen.add((gate_id, val, "in", None, None, mux_port))
+            seen.add((gate_id, endpoint[1], "in", None, None, mux_port))
             return
+        if tag == "const":
+            cid = self._add_const(endpoint[1], gate_id, endpoint[2])
+            seen.add((gate_id, cid, "in", None, None, mux_port))
+            return
+        if tag == "param":
+            _, path, lit = endpoint
+            sid = self._pick_node(path, ("Param", "Net", "Var", "Port"))
+            if sid is not None and sid != gate_id:
+                if self.nodes[sid]["kind"] == "Param":
+                    self.nodes[sid]["const"] = lit
+                seen.add((gate_id, sid, "in", None, None, mux_port))
+            return
+        val = endpoint[1]
         sid = self._pick_node(val, ("Net", "Var", "Port"))
         if (
             sid is not None
