@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ProbeResponse,
+  Projection,
   SchematicGraph,
   SignalEntry,
   StartupArgs,
@@ -48,10 +49,14 @@ export const api = {
     invoke<void>("load_trace", { sessionId, trace }),
   unloadDesign: (sessionId?: string) => invoke<void>("unload_design", { sessionId }),
 
-  scopeGraph: (scope: string, sessionId?: string) =>
-    invoke<SchematicGraph>("scope_graph", { sessionId, scope }),
-  expandNode: (node: number, sessionId?: string) =>
-    invoke<SchematicGraph>("expand_node", { sessionId, node }),
+  // `projection` (#157) picks the schematic granularity: "process-level" (default,
+  // omit) keeps today's one-box-per-process view; "gate-level" dissolves each
+  // combinational block into its gate/mux primitives. `undefined` is dropped from
+  // the payload, so the Rust `Option<Projection>` resolves to ProcessLevel.
+  scopeGraph: (scope: string, sessionId?: string, projection?: Projection) =>
+    invoke<SchematicGraph>("scope_graph", { sessionId, scope, projection }),
+  expandNode: (node: number, sessionId?: string, projection?: Projection) =>
+    invoke<SchematicGraph>("expand_node", { sessionId, node, projection }),
   hierarchyTree: (scope: string, depth: number, sessionId?: string) =>
     invoke<TreeNode>("hierarchy_tree", { sessionId, scope, depth }),
   // The signals inside a scope, for a waveform pane's signal picker (#171).

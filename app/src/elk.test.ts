@@ -12,6 +12,11 @@ import {
   FF_CLK_ZONE,
   MEM_W,
   MEM_H,
+  MUX_W,
+  MUX_H,
+  GATE_W,
+  GATE_H,
+  isGateKind,
   trunkGroups,
   gatherBar,
   wireLabelPlacement,
@@ -831,5 +836,78 @@ describe("fitZoom", () => {
 
   it("ignores maxZoom when the pane is unmeasurable", () => {
     expect(fitZoom(200, 150, 0, 0, 6)).toBe(1);
+  });
+});
+
+// --- gate-level primitives (#157) ------------------------------------------
+const primOf = (kind: string, ports: SchPort[]) =>
+  toElk({
+    root: "s",
+    nodes: [{ id: 1, kind, label: kind, path: "s.g", expandable: false, ports }],
+    edges: [],
+  }).children[0];
+
+const sided = (c: any, side: string): any[] =>
+  c.ports.filter((p: any) => p.layoutOptions["elk.port.side"] === side);
+
+describe("gate child (#157)", () => {
+  it("classifies the 13 boolean/datapath kinds but not Mux", () => {
+    for (const k of ["And", "Or", "Xor", "Xnor", "Nand", "Nor", "Not", "Buf", "Add", "Sub", "Mul", "Cmp", "Shift"]) {
+      expect(isGateKind(k)).toBe(true);
+    }
+    expect(isGateKind("Mux")).toBe(false);
+    expect(isGateKind("Comb")).toBe(false);
+  });
+
+  it("sizes a 2-input gate to the floor with inputs west, result east, FIXED_POS", () => {
+    const c = primOf("And", [
+      { id: 10, name: "a", side: "west", path: "s.a" },
+      { id: 11, name: "b", side: "west", path: "s.b" },
+      { id: 12, name: "", side: "east", path: "s.g" },
+    ]);
+    expect(c.width).toBe(GATE_W);
+    expect(c.height).toBe(GATE_H);
+    expect(c.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    expect(sided(c, "WEST").length).toBe(2);
+    const east = sided(c, "EAST");
+    expect(east.length).toBe(1);
+    expect(east[0].x).toBe(c.width);
+    expect(east[0].y).toBe(c.height / 2);
+  });
+
+  it("widens a datapath box to fit its operator label", () => {
+    const c = primOf("Cmp", [
+      { id: 10, name: "a", side: "west", path: "s.a" },
+      { id: 12, name: "", side: "east", path: "s.g" },
+    ]);
+    // Label "Cmp" (len 3) is short, so it stays at the floor width here — the
+    // point is the sizer never goes *below* the floor.
+    expect(c.width).toBeGreaterThanOrEqual(GATE_W);
+  });
+});
+
+describe("mux child (#157)", () => {
+  const muxPorts: SchPort[] = [
+    { id: 10, name: "d0", side: "west", path: "s.a" },
+    { id: 11, name: "d1", side: "west", path: "s.b" },
+    { id: 12, name: "sel", side: "west", path: "s.sel", role: "sel" },
+    { id: 13, name: "", side: "east", path: "s.g" },
+  ];
+
+  it("puts the select pin on the SOUTH wall, data west, result east", () => {
+    const c = primOf("Mux", muxPorts);
+    expect(c.width).toBe(MUX_W);
+    expect(c.height).toBe(MUX_H);
+    expect(c.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    // Two data branches on the west wall, not the sel pin.
+    expect(sided(c, "WEST").length).toBe(2);
+    const south = sided(c, "SOUTH");
+    expect(south.length).toBe(1);
+    expect(south[0].id).toBe(portId(12));
+    expect(south[0].x).toBe(c.width / 2);
+    expect(south[0].y).toBe(c.height);
+    const east = sided(c, "EAST");
+    expect(east.length).toBe(1);
+    expect(east[0].y).toBe(c.height / 2);
   });
 });
