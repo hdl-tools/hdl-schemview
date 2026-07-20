@@ -46,6 +46,11 @@ pub enum PinRole {
     /// trapezoid's south wall by the frontend, distinguishing it from the west
     /// data-branch pins. Set from the `MuxPort::Sel` edge role, never guessed.
     Sel,
+    /// An inverted gate input (#157): a `~signal` operand whose single-fanout `Not`
+    /// primitive was folded into an inversion bubble on this pin instead of a
+    /// separate inverter box. The pin's `path` is the *un-inverted* operand (the
+    /// signal driving the folded `Not`), so cross-probe still lands on it.
+    Inv,
 }
 
 /// Which projection [`scope_graph_with`]/[`expand_with`] render (#157, ADR 0005).
@@ -275,7 +280,9 @@ fn gate_children(design: &Design, block: NodeId) -> Vec<NodeId> {
             n.children
                 .iter()
                 .copied()
-                .filter(|&c| is_gate(design, c))
+                // A single-fanout `~operand` inverter is folded into a bubble on its
+                // consumer's pin (#157), so it is not drawn as its own box.
+                .filter(|&c| is_gate(design, c) && !is_foldable_not(design, c))
                 .collect()
         })
         .unwrap_or_default()
@@ -398,6 +405,51 @@ fn is_gate_kind(kind: NodeKind) -> bool {
 /// Whether `id` is a gate-level primitive node.
 fn is_gate(design: &Design, id: NodeId) -> bool {
     design.node(id).is_some_and(|n| is_gate_kind(n.kind))
+}
+
+/// The single operand a `Not` primitive inverts (the node driving its `in` edge).
+fn not_operand(design: &Design, not_id: NodeId) -> Option<NodeId> {
+    design
+        .edges_of(not_id)
+        .iter()
+        .find(|e| e.port == not_id && e.dir != Dir::Out)
+        .map(|e| e.endpoint)
+}
+
+/// Whether a `Not` primitive should be folded into an inversion bubble on its
+/// consumer's input pin (#157) rather than drawn as a separate inverter box. True
+/// only for a non-root inverter (no `out` edge — a pure sub-expression) whose
+/// output feeds exactly one gate input, i.e. `a & ~b`. A `~signal` that drives a
+/// scope signal directly (`assign y = ~a`) has an `out` edge and stays a Not box.
+fn is_foldable_not(design: &Design, id: NodeId) -> bool {
+    if design.node(id).map(|n| n.kind) != Some(NodeKind::Not) {
+        return false;
+    }
+    let incident = design.edges_of(id);
+    // A root inverter drives a scope signal via an `out` edge — keep it visible.
+    if incident.iter().any(|e| e.port == id && e.dir == Dir::Out) {
+        return false;
+    }
+    // The Not must have exactly one reader and it must be a gate (single fan-out
+    // into one operator) — so folding it away never drops another consumer.
+    let readers: Vec<_> = incident
+        .iter()
+        .filter(|e| e.endpoint == id && e.dir == Dir::In)
+        .collect();
+    readers.len() == 1 && is_gate(design, readers[0].port) && not_operand(design, id).is_some()
+}
+
+/// Resolve a gate-input edge endpoint through a foldable `Not` (#157): returns the
+/// un-inverted operand and `true` when the endpoint is a folded inverter, else the
+/// endpoint unchanged and `false`. Used identically by `make_gate_box` (pin build)
+/// and the signal-join pass (wiring key) so the pin id and its wire agree.
+fn fold_inverter(design: &Design, endpoint: NodeId) -> (NodeId, bool) {
+    if is_foldable_not(design, endpoint) {
+        if let Some(op) = not_operand(design, endpoint) {
+            return (op, true);
+        }
+    }
+    (endpoint, false)
 }
 
 /// Last segment of a path (used to label unnamed generate blocks).
@@ -900,12 +952,24 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
         .iter()
         .filter(|e| e.port == gate && e.dir != Dir::Out)
         .map(|e| {
-            let sig = design.node(e.endpoint);
-            // The select input is the only role-tagged pin; the data branches
-            // (and every non-mux operand) stay plain west pins.
-            let role = matches!(e.mux_port, Some(MuxPort::Sel)).then_some(PinRole::Sel);
+            // Fold a single-fanout `~operand` inverter into a bubble on this pin:
+            // the pin then represents the un-inverted operand (its `path`/width),
+            // tagged `Inv` so the frontend draws the bubble. The producer `Not` is
+            // dropped from `child_boxes`, and the signal-join keys this load on the
+            // same folded endpoint.
+            let (endpoint, inverted) = fold_inverter(design, e.endpoint);
+            let sig = design.node(endpoint);
+            // Sel wins the role slot (a mux select is never a folded inverter); an
+            // inverted operand is tagged `Inv`; other data branches stay plain.
+            let role = if matches!(e.mux_port, Some(MuxPort::Sel)) {
+                Some(PinRole::Sel)
+            } else if inverted {
+                Some(PinRole::Inv)
+            } else {
+                None
+            };
             SchPort {
-                id: pins.pin(gate, e.endpoint),
+                id: pins.pin(gate, endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: Side::West,
                 path: sig.map(|s| s.path.clone()).unwrap_or_default(),
@@ -1497,10 +1561,15 @@ pub fn scope_graph_with(
                         .or_default()
                         .push((pins.pin(e.port, e.port), None));
                 } else {
+                    // Fold a `~operand` inverter: load under the operand signal (the
+                    // dropped Not's input), on the pin `make_gate_box` keyed the same
+                    // way — so the wire runs operand -> bubbled pin, no Not box.
+                    let (endpoint, _) = fold_inverter(design, e.endpoint);
+                    let key = *boundary_of.get(&endpoint).unwrap_or(&endpoint);
                     loads
                         .entry(key)
                         .or_default()
-                        .push((pins.pin(e.port, e.endpoint), e.select.clone()));
+                        .push((pins.pin(e.port, endpoint), e.select.clone()));
                 }
                 continue;
             }

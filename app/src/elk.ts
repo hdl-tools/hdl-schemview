@@ -57,13 +57,34 @@ const pinLabelLen = (p: SchPort) => p.name.length + (p.width ? p.width.length + 
 // with the renderer so layout and glyph agree on the straight-wall zone.
 export const IFACE_CAP = 12;
 
+// Gate-level projection primitives (#157) — the 13 boolean/datapath gate kinds a
+// dissolved combinational block surfaces. `Mux` is deliberately excluded: it has
+// its own trapezoid sizer/glyph, so callers dispatch it separately.
+const GATE_KINDS = new Set([
+  "And",
+  "Or",
+  "Xor",
+  "Xnor",
+  "Nand",
+  "Nor",
+  "Not",
+  "Buf",
+  "Add",
+  "Sub",
+  "Mul",
+  "Cmp",
+  "Shift",
+]);
+export const isGateKind = (k: string): boolean => GATE_KINDS.has(k);
+
 // Process-level logic nodes (combinational process / level latch / continuous
-// assign). They draw bare pin stubs and size compactly — distinct from module
-// instances. (FF and Latch dispatch to the storage symbol and Assign to the
-// capsule before the generic path, so only Comb still reaches the call sites
-// that use this predicate — kept complete so it states the kind taxonomy.)
+// assign) plus the gate-level primitives (#157). They draw bare pin stubs and
+// size compactly — distinct from module instances. (FF/Latch/Assign/Memory and
+// every gate dispatch to their own symbol before the generic path, so only Comb
+// still reaches the call sites that use this predicate — kept complete so it
+// states the kind taxonomy and colours a gate as logic on any generic path.)
 export const isLogicKind = (k: string): boolean =>
-  k === "Comb" || k === "Latch" || k === "Assign";
+  k === "Comb" || k === "Latch" || k === "Assign" || k === "Mux" || isGateKind(k);
 
 // --- inferred FF symbol ----------------------------------------------------
 export type FfRole = "clk" | "reset" | "enable" | "q" | "data";
@@ -218,6 +239,113 @@ function assignChild(n: SchNode): ElkChild {
   };
 }
 
+// --- gate-level primitives (#157) ------------------------------------------
+export const GATE_W = 52; // default gate box width (west lead zone + body; grows for a datapath op label)
+export const GATE_H = 40; // default gate box height
+const GATE_TOP = 8; // top/bottom inset of the west input column
+const GATE_PITCH = 12; // vertical pitch between adjacent west input rows
+export const MUX_W = 30; // mux trapezoid width (fixed — the glyph is narrow)
+export const MUX_H = 44; // default mux trapezoid height
+const MUX_TOP = 8; // top/bottom inset of the west data-input column
+const MUX_PITCH = 14; // vertical pitch between adjacent data inputs
+
+// A boolean/datapath gate (And/Or/…/Cmp/Shift): operand inputs spread down the
+// west wall, the single result leaves the east wall centre — like an assign, but
+// wider so the IEEE distinctive glyph (or a datapath op label) has room. The
+// renderer picks the shape from `kind`; layout only needs a fixed box + walled
+// ports. FIXED_POS so the renderer's glyph lines up with the ports.
+function gateChild(n: SchNode): ElkChild {
+  const west = n.ports.filter((p) => p.side !== "east");
+  const east = n.ports.filter((p) => p.side === "east");
+  const rows = Math.max(west.length, 1);
+  // Datapath boxes (Add/Cmp/Shift/…) show the operator label; boolean gates draw
+  // a bare glyph, so only widen when there is a label to fit.
+  const w = Math.max(GATE_W, n.label.length * TITLE_CH + 16);
+  const h = Math.max(GATE_H, 2 * GATE_TOP + (rows - 1) * GATE_PITCH);
+  const span = Math.max(0, h - 2 * GATE_TOP);
+  const ports: ElkPort[] = [];
+  west.forEach((p, i) =>
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: 0,
+      y: west.length > 1 ? GATE_TOP + (span * i) / (west.length - 1) : h / 2,
+      layoutOptions: { "elk.port.side": "WEST" },
+    }),
+  );
+  east.forEach((p) =>
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: w,
+      y: h / 2,
+      layoutOptions: { "elk.port.side": "EAST" },
+    }),
+  );
+  return {
+    id: nodeId(n.id),
+    width: w,
+    height: h,
+    labels: [],
+    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    ports,
+  };
+}
+
+// A gate-level multiplexer (#157): data-branch inputs spread down the west wall,
+// the single result on the east wall centre, and the select input on the SOUTH
+// wall (the `role === "sel"` pin, from the model's MuxPort::Sel) so the renderer
+// can place it under the trapezoid — mirroring the FF reset-bubble placement.
+function muxChild(n: SchNode): ElkChild {
+  const sel = n.ports.filter((p) => p.role === "sel");
+  const data = n.ports.filter((p) => p.side !== "east" && p.role !== "sel");
+  const east = n.ports.filter((p) => p.side === "east");
+  const rows = Math.max(data.length, 1);
+  const w = MUX_W;
+  const h = Math.max(MUX_H, 2 * MUX_TOP + (rows - 1) * MUX_PITCH);
+  const span = Math.max(0, h - 2 * MUX_TOP);
+  const ports: ElkPort[] = [];
+  data.forEach((p, i) =>
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: 0,
+      y: data.length > 1 ? MUX_TOP + (span * i) / (data.length - 1) : h / 2,
+      layoutOptions: { "elk.port.side": "WEST" },
+    }),
+  );
+  east.forEach((p) =>
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: w,
+      y: h / 2,
+      layoutOptions: { "elk.port.side": "EAST" },
+    }),
+  );
+  for (const p of sel)
+    ports.push({
+      id: portId(p.id),
+      width: 0,
+      height: 0,
+      x: w / 2,
+      y: h,
+      layoutOptions: { "elk.port.side": "SOUTH" },
+    });
+  return {
+    id: nodeId(n.id),
+    width: w,
+    height: h,
+    labels: [],
+    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    ports,
+  };
+}
+
 // --- memory array (#112) ---------------------------------------------------
 export const MEM_W = 84; // default memory-array box width
 export const MEM_H = 56; // default memory-array box height
@@ -307,6 +435,10 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     if (n.kind === "Assign") return assignChild(n);
     // Memory array (#112): an array box, addr/din west, dout east.
     if (n.kind === "Memory") return memoryChild(n);
+    // Gate-level primitives (#157): a mux trapezoid (select on the south wall) or
+    // a boolean/datapath gate box (operands west, result east).
+    if (n.kind === "Mux") return muxChild(n);
+    if (isGateKind(n.kind)) return gateChild(n);
     // Boundary I/O pin: a small node sized to its label, with its single port
     // already sided toward the design.
     if (n.kind === "Port") {

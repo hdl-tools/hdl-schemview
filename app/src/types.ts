@@ -2,6 +2,13 @@
 
 export type Side = "west" | "east";
 
+/**
+ * Schematic granularity (#157) mirroring the Rust `Projection` enum (kebab-case
+ * serde). `"process-level"` is the default one-box-per-process view; `"gate-level"`
+ * dissolves each drilled combinational block into its gate/mux primitives.
+ */
+export type Projection = "process-level" | "gate-level";
+
 export interface SchPort {
   id: number;
   name: string;
@@ -11,11 +18,23 @@ export interface SchPort {
   /** Bit-range like "[31:0]" for a bus pin, absent for a scalar. */
   width?: string;
   /**
-   * Structural role of a synthesized FF/latch pin (#59) — a model fact from
-   * the harness (clock name / async-reset path / latch gating path), absent
-   * for plain data pins and all module-instance ports.
+   * Structural role of a synthesized FF/latch/memory/gate pin — a model fact
+   * from the harness (clock name / async-reset path / latch gating path /
+   * memory port), absent for plain data pins and all module-instance ports.
+   * `"sel"` (#157) marks a gate-level `Mux`'s select input, placed on the
+   * trapezoid's south wall to distinguish it from the west data branches.
    */
-  role?: "clk" | "reset" | "enable" | "addr" | "din" | "dout" | "write" | "read";
+  role?:
+    | "clk"
+    | "reset"
+    | "enable"
+    | "addr"
+    | "din"
+    | "dout"
+    | "write"
+    | "read"
+    | "sel"
+    | "inv";
   /**
    * Marks a bundle pin — a whole-interface connection (#106 consumer bundle
    * pin, #96 aggregate access ports). Drawn square instead of the directional
@@ -39,7 +58,11 @@ export interface SchNode {
    * "bundle" box for an instance, or a square frame pin when `modport` is set
    * (#125). `Memory` → a MEMORY array glyph (#112) with addr/din/dout/read/write
    * pins (`SchPort.role`), labelled with `memDepth` and an INIT tab from
-   * `initSource`.
+   * `initSource`. Under the gate-level projection (#157) a combinational block
+   * dissolves into gate primitives — `Mux` → trapezoid (select pin on the south
+   * wall, `role: "sel"`); `And`/`Or`/`Xor`/`Nand`/`Nor`/`Xnor`/`Not`/`Buf` →
+   * IEEE distinctive shapes; `Add`/`Sub`/`Mul`/`Cmp`/`Shift` → labelled datapath
+   * boxes (the operator rides in `label`).
    */
   kind: string;
   label: string;

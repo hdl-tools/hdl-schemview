@@ -54,3 +54,23 @@ export function saveExcluded(scopes: string[]): void {
     /* ignore persistence failure */
   }
 }
+
+// Gate-level schematic projection toggle (#157). Off by default, so the schematic
+// stays byte-identical to the process-level view until the user opts in.
+const KEY_GATE_LEVEL = "gateLevel";
+
+export function loadGateLevel(): boolean {
+  try {
+    return localStorage.getItem(KEY_GATE_LEVEL) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function saveGateLevel(on: boolean): void {
+  try {
+    localStorage.setItem(KEY_GATE_LEVEL, String(on));
+  } catch {
+    /* ignore persistence failure */
+  }
+}

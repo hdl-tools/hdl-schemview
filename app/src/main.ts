@@ -8,6 +8,7 @@ import {
   fitZoom,
   gatherBar,
   IFACE_CAP,
+  isGateKind,
   isLogicKind,
   layout,
   MEM_LABEL_PAD,
@@ -46,8 +47,10 @@ import { lineRangeForSpan } from "./source";
 import {
   formatExcluded,
   loadExcluded,
+  loadGateLevel,
   parseExcluded,
   saveExcluded,
+  saveGateLevel,
 } from "./prefs";
 import {
   defaultDisplayUnit,
@@ -115,7 +118,7 @@ const state = {
   graph: null as SchematicGraph | null,
   stack: [] as ScopeFrame[],
   selected: null as number | null,
-  source: new Map<number, string[]>(),
+  source: new Map<number, { lines: string[]; lineStarts: number[] }>(),
   // Signals pinned to the waveform pane, organized into collapsible groups (#182) with
   // one always-empty trailing group. Lanes append to the working group; reordered/removed
   // via the per-lane controls, regrouped via the name-cell menu. Reset on model reload.
@@ -405,10 +408,17 @@ async function load() {
   }
 }
 
+// The schematic granularity to request (#157): gate-level dissolves each drilled
+// combinational block into gates/muxes when the Settings toggle is on, else the
+// default process-level view. Read live so a toggle takes effect on the next draw.
+function currentProjection(): "process-level" | "gate-level" {
+  return loadGateLevel() ? "gate-level" : "process-level";
+}
+
 // A scope with a cached viewport is restored to it; a first-time scope is
 // zoom-to-fit and scrolled top-left (see renderSchematic).
 async function setScope(path: string, label: string, push = true) {
-  const graph = await api.scopeGraph(path);
+  const graph = await api.scopeGraph(path, undefined, currentProjection());
   state.graph = graph;
   if (push) state.stack.push({ path, label });
   renderBreadcrumb();
@@ -829,6 +839,16 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       else renderInterface(root, c, node, id);
       continue;
     }
+    // Gate-level primitives (#157): a mux trapezoid (select on the south wall)
+    // or an IEEE distinctive-shape / datapath gate glyph.
+    if (node?.kind === "Mux") {
+      renderMux(root, c, node, id);
+      continue;
+    }
+    if (node && isGateKind(node.kind)) {
+      renderGate(root, c, node, id);
+      continue;
+    }
 
     const portById = new Map<number, SchPort>();
     node?.ports.forEach((p) => portById.set(p.id, p));
@@ -1225,6 +1245,243 @@ function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
       lab.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
       wirePin(lab);
     }
+  }
+  parent.appendChild(g);
+}
+
+// Map a datapath gate (#157) to a compact operator glyph. Add/Sub/Mul read from
+// the kind; Cmp/Shift read the exact operator the harness kept on `op` (surfaced
+// as the box label), falling back to the raw label for anything unmapped.
+function gateSymbol(node: SchNode): string {
+  switch (node.kind) {
+    case "Add":
+      return "+";
+    case "Sub":
+      return "−"; // minus
+    case "Mul":
+      return "×"; // times
+    case "Shift":
+      return /right/i.test(node.label) ? "»" : "«";
+    case "Cmp": {
+      const m: Record<string, string> = {
+        LessThan: "<",
+        GreaterThan: ">",
+        LessThanEqual: "≤",
+        GreaterThanEqual: "≥",
+        Equality: "=",
+        Equals: "=",
+        CaseEquality: "≡",
+        Inequality: "≠",
+        NotEquals: "≠",
+      };
+      return m[node.label] ?? node.label;
+    }
+    default:
+      return node.label;
+  }
+}
+
+// A gate-level primitive (#157): a boolean gate drawn with its IEEE Std 91
+// distinctive shape (flat-back-D AND, curved-back OR, notched XOR, an output
+// bubble for the N-variants, a triangle ± bubble for Buf/Not) or a datapath box
+// (Add/Sub/Mul/Cmp/Shift) labelled with its operator. No pin triangles: the body
+// reaches the box walls (x=0 west, x=W east) where ELK anchored the ports, so the
+// wires connect straight to the shape — inputs to its left start, the output to
+// the east tip (past the bubble for an inverting gate). Layout already fixed the
+// box + ports (see gateChild in elk.ts).
+function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const midY = H / 2;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const sel = state.selected === id ? " sel" : "";
+  const wireBody = (el: SVGElement) => {
+    el.dataset.nodeId = String(id);
+    el.onclick = () => selectNode(id);
+    el.oncontextmenu = (e) => {
+      e.preventDefault();
+      crossProbe(id, e);
+    };
+    g.appendChild(el);
+  };
+
+  const kind = node.kind;
+  const datapath = !["And", "Or", "Xor", "Xnor", "Nand", "Nor", "Not", "Buf"].includes(kind);
+  const notch = kind === "Xor" || kind === "Xnor";
+  const curved = kind === "Or" || kind === "Nor" || kind === "Xor" || kind === "Xnor";
+  const bubble = kind === "Nand" || kind === "Nor" || kind === "Xnor" || kind === "Not";
+  const bubbleR = 3;
+  // A boolean gate reserves a west input-lead zone (LEAD) so each input has a short
+  // lead to the shape's actual left edge — and room for an inversion bubble to sit
+  // *outside* the shape, its right edge on that edge. A datapath box spans the wall.
+  const LEAD = 10;
+  const bodyL = datapath ? 0 : LEAD;
+  // The east tip: an inverting gate stops short so the bubble's right edge lands on
+  // the east wall (x=W); otherwise the tip itself is the wall.
+  const bodyR = bubble ? W - 2 * bubbleR : W;
+
+  // The shape's west edge x at a given input y — where an input lead terminates. A
+  // curved back (OR/XOR family) bulges right toward the middle (its concave arch);
+  // a flat back (AND/NOT/BUF) is a straight wall at bodyL; a datapath rect is at 0.
+  const edgeXAt = (py: number): number => {
+    if (datapath) return 0;
+    if (curved) return bodyL + 0.7 * (bodyR - bodyL) * (py / H) * (1 - py / H);
+    return bodyL;
+  };
+
+  if (datapath) {
+    // Add/Sub/Mul/Cmp/Shift: a rectangular datapath box (wall to wall) + operator.
+    const rect = document.createElementNS(SVGNS, "rect");
+    rect.setAttribute("class", "box gate" + sel);
+    rect.setAttribute("width", String(W));
+    rect.setAttribute("height", String(H));
+    rect.setAttribute("rx", "2");
+    wireBody(rect);
+    const t = document.createElementNS(SVGNS, "text");
+    t.setAttribute("class", "box-label" + sel);
+    t.setAttribute("x", String(W / 2));
+    t.setAttribute("y", String(midY + 4));
+    t.setAttribute("text-anchor", "middle");
+    t.style.pointerEvents = "none";
+    t.textContent = gateSymbol(node);
+    g.appendChild(t);
+  } else {
+    // A boolean gate distinctive shape.
+    const body = document.createElementNS(SVGNS, "path");
+    body.setAttribute("class", "box gate" + sel);
+    let d: string;
+    if (kind === "And" || kind === "Nand") {
+      const s = bodyR - bodyL;
+      d =
+        `M${bodyL},0 L${bodyL + s * 0.45},0 ` +
+        `C${bodyL + s * 0.82},0 ${bodyR},${H * 0.25} ${bodyR},${midY} ` +
+        `C${bodyR},${H * 0.75} ${bodyL + s * 0.82},${H} ${bodyL + s * 0.45},${H} L${bodyL},${H} Z`;
+    } else if (kind === "Not" || kind === "Buf") {
+      d = `M${bodyL},0 L${bodyL},${H} L${bodyR},${midY} Z`;
+    } else {
+      // Or / Nor / Xor / Xnor: concave back, curving to a point on the east. XOR/XNOR
+      // nudge the main back right of bodyL so the notch arc sits on bodyL (the edge
+      // inputs meet).
+      const bb = notch ? bodyL + 4 : bodyL;
+      const s = bodyR - bb;
+      d =
+        `M${bb},0 Q${bb + s * 0.55},0 ${bodyR},${midY} ` +
+        `Q${bb + s * 0.55},${H} ${bb},${H} ` +
+        `Q${bb + s * 0.35},${midY} ${bb},0 Z`;
+    }
+    body.setAttribute("d", d);
+    wireBody(body);
+    if (notch) {
+      // The XOR/XNOR double-back: a second concave arc at bodyL, where inputs meet.
+      const arc = document.createElementNS(SVGNS, "path");
+      arc.setAttribute("class", "gate-notch");
+      arc.setAttribute(
+        "d",
+        `M${bodyL},0 Q${bodyL + (bodyR - bodyL) * 0.35},${midY} ${bodyL},${H}`,
+      );
+      arc.style.pointerEvents = "none";
+      g.appendChild(arc);
+    }
+  }
+
+  if (bubble) {
+    // The inversion bubble at the output apex — its right edge on the east wall, so
+    // the output wire connects to the right of the circle.
+    const circ = document.createElementNS(SVGNS, "circle");
+    circ.setAttribute("class", "gate-bubble" + sel);
+    circ.setAttribute("cx", String(bodyR + bubbleR));
+    circ.setAttribute("cy", String(midY));
+    circ.setAttribute("r", String(bubbleR));
+    circ.style.pointerEvents = "none";
+    g.appendChild(circ);
+  }
+
+  // Input leads + inversion bubbles. Each west input gets a short lead from the wall
+  // (x=0, where its wire lands) to the shape's actual left edge, so no input floats.
+  // An inverted input (#157, folded `~operand`) puts a bubble *outside* the shape —
+  // right edge on the shape edge, so the lead stops at the bubble's left edge.
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const sp = portById.get(Number(String(p.id).slice(1)));
+    if (!sp || sp.side === "east") continue;
+    const py = p.y ?? 0;
+    const inverted = sp.role === "inv";
+    const ex = edgeXAt(py);
+    const stop = inverted ? ex - 2 * bubbleR : ex;
+    if (stop > 0.5) {
+      const lead = document.createElementNS(SVGNS, "line");
+      lead.setAttribute("class", "gate-lead");
+      lead.setAttribute("x1", "0");
+      lead.setAttribute("y1", String(py));
+      lead.setAttribute("x2", String(stop));
+      lead.setAttribute("y2", String(py));
+      lead.style.pointerEvents = "none";
+      g.appendChild(lead);
+    }
+    if (inverted) {
+      const circ = document.createElementNS(SVGNS, "circle");
+      circ.setAttribute("class", "gate-bubble" + sel);
+      // Datapath's rect starts at the wall, so its bubble sits just inside; a boolean
+      // gate seats it outside with the right edge on the shape's back.
+      circ.setAttribute("cx", String(datapath ? bubbleR : ex - bubbleR));
+      circ.setAttribute("cy", String(py));
+      circ.setAttribute("r", String(bubbleR));
+      circ.style.pointerEvents = "none";
+      g.appendChild(circ);
+    }
+  }
+  parent.appendChild(g);
+}
+
+// A gate-level multiplexer (#157): a trapezoid (west wall tall for the data
+// branches, east wall short for the result) with the select input on the south
+// wall — matching the model's MuxPort::Sel role, so a `?:` reads as a mux.
+function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
+  const W = c.width;
+  const H = c.height;
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+  const sel = state.selected === id ? " sel" : "";
+  const inset = Math.min(10, H * 0.22);
+
+  const body = document.createElementNS(SVGNS, "path");
+  body.setAttribute("class", "box mux" + sel);
+  body.setAttribute("d", `M0,0 L${W},${inset} L${W},${H - inset} L0,${H} Z`);
+  body.dataset.nodeId = String(id);
+  body.onclick = () => selectNode(id);
+  body.oncontextmenu = (e) => {
+    e.preventDefault();
+    crossProbe(id, e);
+  };
+  g.appendChild(body);
+
+  // Data branches (west wall) and the result (east wall) connect straight to the
+  // trapezoid — no pin triangles. Only the select input gets a marker: a "sel"
+  // label by its south-wall connection so it reads apart from the data branches.
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const pid = Number(String(p.id).slice(1));
+    const sp = portById.get(pid);
+    if (!sp || sp.role !== "sel") continue;
+    const px = p.x ?? 0;
+    const lab = document.createElementNS(SVGNS, "text");
+    lab.setAttribute("class", "pin-label");
+    lab.setAttribute("x", String(px));
+    lab.setAttribute("y", String(H - 4));
+    lab.setAttribute("text-anchor", "middle");
+    lab.dataset.nodeId = String(pid);
+    lab.onclick = () => selectNode(pid);
+    lab.oncontextmenu = (e) => {
+      e.preventDefault();
+      if (sp.path) crossProbePath(sp.path, e);
+      else crossProbe(id, e);
+    };
+    lab.textContent = "sel";
+    g.appendChild(lab);
   }
   parent.appendChild(g);
 }
@@ -1842,23 +2099,24 @@ async function renderSource(
   startOffset?: number,
   endOffset?: number,
 ) {
-  let lines = state.source.get(file);
-  if (!lines) {
+  let cached = state.source.get(file);
+  if (!cached) {
     const text = await api.sourceText(file);
-    // Normalize CRLF/CR to LF so a line is one newline byte — keeps computed byte
-    // offsets aligned with the model's source ranges (slang counts LF), regardless
-    // of the on-disk line endings on this platform.
-    lines = text.split(/\r\n|\r|\n/);
-    state.source.set(file, lines);
+    const lines = text.split(/\r\n|\r|\n/);
+    // Byte offset of each line start, read from the RAW text so a CRLF terminator
+    // counts as its true two bytes — matching slang's def_range offsets, which are
+    // raw file-byte offsets. Under an LF checkout this equals the old length+1 walk;
+    // under a CRLF checkout the old walk under-counted one byte per preceding line,
+    // drifting deep constructs onto the wrong line (source is ASCII, so a UTF-16
+    // index is the byte offset). Cached with the lines so the hit path stays aligned.
+    const lineStarts: number[] = [0];
+    const term = /\r\n|\r|\n/g;
+    let m: RegExpExecArray | null;
+    while ((m = term.exec(text)) !== null) lineStarts.push(m.index + m[0].length);
+    cached = { lines, lineStarts };
+    state.source.set(file, cached);
   }
-  // Byte offset at the start of each line (LF newline = 1 byte), for right-click
-  // → byte-offset resolution via probe_source.
-  const lineStarts = new Array<number>(lines.length);
-  let off = 0;
-  for (let i = 0; i < lines.length; i++) {
-    lineStarts[i] = off;
-    off += lines[i].length + 1;
-  }
+  const { lines, lineStarts } = cached;
   sourceCtx = { file, lineStarts };
 
   // Highlight the construct's whole span (#158): the probe carries the full
@@ -2828,7 +3086,7 @@ async function showInSchematic(anchor: NodeRef) {
     const scopePath = segs.slice(0, n).join(".");
     let graph: SchematicGraph | null = null;
     try {
-      graph = await api.scopeGraph(scopePath);
+      graph = await api.scopeGraph(scopePath, undefined, currentProjection());
     } catch {
       continue; // not a navigable scope — walk up
     }
@@ -2929,6 +3187,20 @@ function initSettings() {
   excluded.addEventListener("change", () =>
     saveExcluded(parseExcluded(excluded.value)),
   );
+
+  // Gate-level projection toggle (#157): applies live — persist, then re-render the
+  // current scope in place (push=false, no new breadcrumb frame) so the schematic
+  // re-fetches with the new projection. A no-op on a model with no gate primitives.
+  const gate = $("set-gate-level") as HTMLInputElement;
+  gate.checked = loadGateLevel();
+  gate.addEventListener("change", () => {
+    saveGateLevel(gate.checked);
+    const cur = state.stack[state.stack.length - 1];
+    if (cur) {
+      rememberCurrentView();
+      void setScope(cur.path, cur.label, false);
+    }
+  });
 }
 
 // Waveform zoom / pan / marker interaction. Listeners are delegated on #wave-list so
