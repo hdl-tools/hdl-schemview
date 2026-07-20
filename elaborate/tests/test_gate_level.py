@@ -105,6 +105,93 @@ def test_ternary_becomes_mux(tmp_path: Path) -> None:
     assert {n["name"] for n in _outputs(model, m["id"])} == {"y"}
 
 
+def _consts(model: dict) -> list[dict]:
+    return [n for n in model["nodes"] if n["kind"] == "Const"]
+
+
+def test_literal_operand_becomes_const_tie(tmp_path: Path) -> None:
+    """A hard-coded literal operand (`a & 8'hFF`, #199) surfaces as a `Const` tie
+    node carrying the value, wired into the gate alongside the real signal."""
+    model = _model(
+        tmp_path,
+        "  input logic [7:0] a, output logic [7:0] y);\n"
+        "  assign y = a & 8'hFF;",
+    )
+    g = _gates(model, "And")[0]
+    ins = _inputs(model, g["id"])
+    consts = [n for n in ins if n["kind"] == "Const"]
+    assert len(consts) == 1, [(n["kind"], n["name"]) for n in ins]
+    assert consts[0]["const"], "Const node carries the literal value"
+    assert consts[0]["def_range"] is not None
+    # The real signal operand is still wired.
+    assert any(n["name"] == "a" for n in ins)
+    assert _check_invariants(model) == []
+
+
+def test_parameter_operand_carries_value(tmp_path: Path) -> None:
+    """A parameter operand (`a & MASK`, #199) wires to its real `Param` node —
+    preserving cross-probe — now stamped with its resolved value."""
+    model = _model(
+        tmp_path,
+        "  input logic [7:0] a, output logic [7:0] y);\n"
+        "  localparam logic [7:0] MASK = 8'hAA;\n"
+        "  assign y = a & MASK;",
+    )
+    g = _gates(model, "And")[0]
+    ins = _inputs(model, g["id"])
+    params = [n for n in ins if n["kind"] == "Param"]
+    assert len(params) == 1, [(n["kind"], n["name"]) for n in ins]
+    assert params[0]["name"] == "MASK"
+    assert params[0]["const"], "Param node carries its resolved value"
+    assert any(n["name"] == "a" for n in ins)
+    assert _check_invariants(model) == []
+
+
+def test_x_default_mux_branch_ties_not_dropped(tmp_path: Path) -> None:
+    """A `sel ? a : 'x` don't-care branch (#199) ties as a Const instead of
+    vanishing, so the Mux keeps all three inputs. slang leaves `.constant` unset
+    for an `'x` literal, so the value comes from `.value`."""
+    model = _model(
+        tmp_path,
+        "  input logic sel, a, output logic y);\n"
+        "  assign y = sel ? a : 1'bx;",
+    )
+    mux = _gates(model, "Mux")[0]
+    ins = _inputs(model, mux["id"])
+    assert len(ins) == 3, [(n["kind"], n["name"]) for n in ins]
+    consts = [n for n in ins if n["kind"] == "Const"]
+    assert len(consts) == 1 and consts[0]["const"], "x-branch tied as a Const"
+
+
+def test_concat_operand_becomes_concat_box(tmp_path: Path) -> None:
+    """A concatenation data branch (`{a[31:2], 2'b00}`, #199) becomes a `Concat`
+    primitive gathering its elements, so the Mux keeps all three inputs (matches
+    picorv32's `mem_la_addr`)."""
+    model = _model(
+        tmp_path,
+        "  input logic [31:0] a, input logic sel, output logic [31:0] y);\n"
+        "  assign y = sel ? {a[31:2], 2'b00} : a;",
+    )
+    mux = _gates(model, "Mux")[0]
+    ins = _inputs(model, mux["id"])
+    assert len(ins) == 3, [(n["kind"], n["name"]) for n in ins]
+    assert any(n["kind"] == "Concat" for n in ins), "the concat branch is a Concat box"
+    # The Concat gathers its elements: the signal slice and the 2'b00 const tie.
+    concat = _gates(model, "Concat")[0]
+    assert any(n["kind"] == "Const" for n in _inputs(model, concat["id"])), "concat const"
+
+
+def test_const_operand_off_flag_stays_process_level(tmp_path: Path) -> None:
+    """With the flag off, a literal operand emits no `Const` node (byte-identical)."""
+    model = _model(
+        tmp_path,
+        "  input logic [7:0] a, output logic [7:0] y);\n"
+        "  assign y = a & 8'hFF;",
+        gate_level=False,
+    )
+    assert _consts(model) == []
+
+
 def test_not_over_gate_folds_to_nand(tmp_path: Path) -> None:
     """`~(a & b)` folds the bubble onto the gate: one Nand, no separate And+Not."""
     model = _model(
@@ -275,7 +362,7 @@ def test_gate_level_is_purely_additive_on_the_fixture() -> None:
     # Every original node survives unchanged; only synthetic primitives are added.
     assert base_paths <= gl_paths
     added = [n for n in gl["nodes"] if n["path"] not in base_paths]
-    assert added and all(n["kind"] in GATE_KINDS for n in added)
+    assert added and all(n["kind"] in GATE_KINDS | {"Const", "Concat"} for n in added)
     assert all(n["def_range"] is not None for n in added)
     assert _check_invariants(gl) == []
 

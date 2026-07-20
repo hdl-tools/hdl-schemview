@@ -1414,6 +1414,74 @@ fn gate_level_dissolves_logic_into_gate_network() {
     );
 }
 
+/// `assign y = a & 8'hFF;` — an `And` gate with a real signal `a` and a synthetic
+/// `Const` operand (#199). The literal must surface as a constant-source node wired
+/// into the gate input, exactly like an instance-port tie; the `Const` node itself
+/// is never rendered as its own box.
+const CONST_GATE_DOC: &str = r#"{
+    "schema_version": 1,
+    "design": "u",
+    "files": [{"id": 0, "path": "u.sv"}],
+    "nodes": [
+        {"id":0,"kind":"Instance","name":"u","path":"u","parent":null,
+         "children":[1,2,3],"symbol_key":"u"},
+        {"id":1,"kind":"Port","name":"a","path":"u.a","parent":0,"children":[],
+         "symbol_key":"u.a","dir":"in"},
+        {"id":2,"kind":"Port","name":"y","path":"u.y","parent":0,"children":[],
+         "symbol_key":"u.y","dir":"out"},
+        {"id":3,"kind":"Assign","name":"$assign3","path":"u.$assign3","parent":0,
+         "children":[4,5],"symbol_key":"u.$assign3"},
+        {"id":4,"kind":"And","name":"and","path":"u.$assign3.$and4","parent":3,
+         "children":[],"symbol_key":"u.$assign3.$and4"},
+        {"id":5,"kind":"Const","name":"const","path":"u.$assign3.$const5","parent":3,
+         "children":[],"symbol_key":"u.$assign3.$const5","const":"8'hff"}
+    ],
+    "edges": [
+        {"id":0,"port":4,"endpoint":1,"dir":"in"},
+        {"id":1,"port":4,"endpoint":5,"dir":"in"},
+        {"id":2,"port":4,"endpoint":2,"dir":"out"}
+    ]
+}"#;
+
+#[test]
+fn gate_const_operand_becomes_inline_tie_value() {
+    let d =
+        svxprobe_ingest::from_slice(CONST_GATE_DOC.as_bytes()).expect("const-gate model ingests");
+    let g = scope_graph_with(&d, "u", Projection::GateLevel).expect("scope graph");
+
+    let and = g
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::And)
+        .expect("And box");
+    // The literal rides inline on the gate's own west input pin (#199) — a tie
+    // value beside the gate, not a separate source node/wire.
+    assert!(
+        and.ports
+            .iter()
+            .any(|p| p.side == Side::West && p.constant.as_deref() == Some("8'hff")),
+        "and has an inline const input pin: {:?}",
+        and.ports
+            .iter()
+            .map(|p| (&p.name, &p.constant))
+            .collect::<Vec<_>>()
+    );
+    // The signal operand `a` is still present as a normal (non-const) pin.
+    assert!(
+        and.ports
+            .iter()
+            .any(|p| p.path == "u.a" && p.constant.is_none()),
+        "signal input a kept"
+    );
+    // No separate constant-source node, and the Const model node is never a box.
+    assert!(
+        !g.nodes
+            .iter()
+            .any(|n| n.constant.is_some() || n.kind == NodeKind::Const),
+        "no separate const source node/box"
+    );
+}
+
 /// `assign y = (a & b) | c;` — an `Or` root whose first input is an `And` node
 /// (gate-to-gate), the second a raw signal. Exercises the self-driver path: the
 /// inner `And` has no `out` edge, yet its result pin must reach the `Or`'s input.

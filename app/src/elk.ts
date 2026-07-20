@@ -74,6 +74,7 @@ const GATE_KINDS = new Set([
   "Mul",
   "Cmp",
   "Shift",
+  "Concat",
 ]);
 export const isGateKind = (k: string): boolean => GATE_KINDS.has(k);
 
@@ -263,6 +264,10 @@ function gateChild(n: SchNode): ElkChild {
   const w = Math.max(GATE_W, n.label.length * TITLE_CH + 16);
   const h = Math.max(GATE_H, 2 * GATE_TOP + (rows - 1) * GATE_PITCH);
   const span = Math.max(0, h - 2 * GATE_TOP);
+  // Reserve a west margin for inline const/param tie values (#199), so ELK keeps
+  // the neighbouring layer clear of the value text drawn left of the wall.
+  const constLen = west.reduce((m, p) => Math.max(m, p.constant?.length ?? 0), 0);
+  const leftMargin = constLen ? constLen * 5.6 + 6 : 0;
   const ports: ElkPort[] = [];
   west.forEach((p, i) =>
     ports.push({
@@ -289,7 +294,12 @@ function gateChild(n: SchNode): ElkChild {
     width: w,
     height: h,
     labels: [],
-    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    layoutOptions: {
+      "elk.portConstraints": "FIXED_POS",
+      ...(leftMargin
+        ? { "elk.margins": `[left=${leftMargin.toFixed(1)},top=0.0,right=0.0,bottom=0.0]` }
+        : {}),
+    },
     ports,
   };
 }
@@ -306,6 +316,9 @@ function muxChild(n: SchNode): ElkChild {
   const w = MUX_W;
   const h = Math.max(MUX_H, 2 * MUX_TOP + (rows - 1) * MUX_PITCH);
   const span = Math.max(0, h - 2 * MUX_TOP);
+  // West margin for inline const/param data-branch tie values (#199).
+  const constLen = data.reduce((m, p) => Math.max(m, p.constant?.length ?? 0), 0);
+  const leftMargin = constLen ? constLen * 5.6 + 6 : 0;
   const ports: ElkPort[] = [];
   data.forEach((p, i) =>
     ports.push({
@@ -341,7 +354,12 @@ function muxChild(n: SchNode): ElkChild {
     width: w,
     height: h,
     labels: [],
-    layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    layoutOptions: {
+      "elk.portConstraints": "FIXED_POS",
+      ...(leftMargin
+        ? { "elk.margins": `[left=${leftMargin.toFixed(1)},top=0.0,right=0.0,bottom=0.0]` }
+        : {}),
+    },
     ports,
   };
 }

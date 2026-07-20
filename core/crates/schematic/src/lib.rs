@@ -104,6 +104,12 @@ pub struct SchPort {
     /// unconnected rather than a rendering bug.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dangling: bool,
+    /// Literal/parameter value tied to this input (#199): a gate/mux/datapath
+    /// operand that is a hard-coded constant or a parameter. The frontend draws it
+    /// as a tie value inline beside the pin (so it is traceable at the gate),
+    /// instead of a separate source node. `None` for a net-driven pin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<String>,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -399,6 +405,7 @@ fn is_gate_kind(kind: NodeKind) -> bool {
             | NodeKind::Cmp
             | NodeKind::Shift
             | NodeKind::Mux
+            | NodeKind::Concat
     )
 }
 
@@ -646,6 +653,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 role: None,
                 bundle: false,
                 dangling,
+                constant: None,
             }
         })
         .collect();
@@ -665,6 +673,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 role: None,
                 bundle: true,
                 dangling: false,
+                constant: None,
             });
         }
         if let Some(side) = raw {
@@ -677,6 +686,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 role: None,
                 bundle: true,
                 dangling: false,
+                constant: None,
             });
         }
     }
@@ -720,6 +730,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
             role: None,
             bundle: true,
             dangling: false,
+            constant: None,
         });
     }
     let label = relative_to(&n.path, scope);
@@ -767,6 +778,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
             role: None,
             bundle: false,
             dangling: false,
+            constant: None,
         }],
         module: None,
         constant: Some(lit.to_string()),
@@ -807,6 +819,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
                 role,
                 bundle: false,
                 dangling: false,
+                constant: None,
             }
         })
         .collect();
@@ -858,6 +871,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
                 role,
                 bundle: false,
                 dangling: false,
+                constant: None,
             }
         })
         .collect();
@@ -919,6 +933,7 @@ fn make_memory_box(
                 role,
                 bundle: false,
                 dangling: false,
+                constant: None,
             }
         })
         .collect();
@@ -977,6 +992,8 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
                 role,
                 bundle: false,
                 dangling: false,
+                // A constant/parameter operand carries its value inline (#199).
+                constant: sig.and_then(|s| s.const_value.clone()),
             }
         })
         .collect();
@@ -992,6 +1009,7 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
         role: None,
         bundle: false,
         dangling: false,
+        constant: None,
     });
     Some(SchNode {
         id: gate,
@@ -1038,6 +1056,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
             role: None,
             bundle: false,
             dangling: false,
+            constant: None,
         }],
         module: None,
         constant: None,
@@ -1121,6 +1140,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
                 role: None,
                 bundle: false,
                 dangling: false,
+                constant: None,
             });
             view_pins.entry(mp).or_default().push((pin, sig));
             let key = key_of(sig);
@@ -1227,6 +1247,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
                 role: None,
                 bundle: true,
                 dangling: false,
+                constant: None,
             }],
             module: None,
             constant: None,
@@ -1704,6 +1725,10 @@ pub fn scope_graph_with(
             }
         }
     }
+
+    // Gate/mux/datapath operand constants (#199) render inline beside the pin (the
+    // value is carried on `SchPort.constant` by `make_gate_box`), so — unlike the
+    // instance-port tie-off above — no separate source node is synthesized.
 
     // Mark dangling output pins on synthesized logic boxes (#118) — an FF/comb/
     // assign output that nothing in this scope reads stays visible (dimmed by

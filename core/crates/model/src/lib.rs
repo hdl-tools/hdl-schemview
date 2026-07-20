@@ -103,6 +103,16 @@ pub enum NodeKind {
     /// Multiplexer — a `?:` conditional. Its select/data inputs are tagged on
     /// the edge via [`MuxPort`].
     Mux,
+    /// A synthetic constant-operand source (#199): a hard-coded literal feeding a
+    /// gate/mux/datapath input, carrying its value on [`Node::const_value`]. Emitted
+    /// only by the `--gate-level` pass; the schematic renders it as a tie value on
+    /// the input (like an instance-port constant tie), never as its own box.
+    Const,
+    /// A bit concatenation `{a, b, …}` (or replication `{n{a}}`) feeding a gate/mux
+    /// input (#199): a primitive box gathering its element expressions, so a mux data
+    /// branch that is a concat (`sel ? {x[31:2], 2'b00} : …`) renders with its input
+    /// instead of vanishing. Drawn as a `{ }` box.
+    Concat,
 }
 
 /// A point in a source file.
@@ -183,7 +193,9 @@ pub struct Node {
     /// otherwise.
     #[serde(default)]
     pub dir: Option<Dir>,
-    /// Literal value tied to a `Port` input (e.g. `32'd0`); `None` if net-driven.
+    /// Literal or resolved parameter value tied to an input (e.g. `32'd0`): a `Port`
+    /// input, a synthetic `Const` gate operand, or a `Param` referenced by a gate
+    /// (#199). `None` if net-driven.
     #[serde(rename = "const", default)]
     pub const_value: Option<String>,
     /// View name on a modport-specialized interface port (e.g. `mem` for

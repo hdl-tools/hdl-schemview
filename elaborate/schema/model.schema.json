@@ -117,7 +117,7 @@
         "id": { "type": "integer", "minimum": 0 },
         "kind": {
           "type": "string",
-          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport", "Memory", "And", "Or", "Xor", "Xnor", "Nand", "Nor", "Not", "Buf", "Add", "Sub", "Mul", "Cmp", "Shift", "Mux"]
+          "enum": ["Instance", "Net", "Port", "Var", "Param", "ModuleDef", "GenBlock", "FF", "Comb", "Latch", "Assign", "Interface", "Modport", "Memory", "And", "Or", "Xor", "Xnor", "Nand", "Nor", "Not", "Buf", "Add", "Sub", "Mul", "Cmp", "Shift", "Mux", "Const", "Concat"]
         },
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Canonical elaborated hierarchical path." },
@@ -134,7 +134,7 @@
         },
         "const": {
           "type": ["string", "null"],
-          "description": "Literal value tied to a Port input (e.g. \"32'd0\"); null if driven by a net."
+          "description": "Literal or resolved parameter value tied to an input (a Port input, or a gate operand via a Const/Param node, e.g. \"32'd0\"); null if driven by a net."
         },
         "modport": {
           "type": ["string", "null"],
