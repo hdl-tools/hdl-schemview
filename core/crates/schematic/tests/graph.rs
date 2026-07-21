@@ -1642,3 +1642,33 @@ fn dangling_gate_output_is_labelled_with_its_floating_net() {
         out.path
     );
 }
+
+// #206: a mux data branch that reads a memory-array element (`cpuregs[decoded_rs1]`)
+// wires its input to the whole `cpuregs` Memory node — without it the branch was
+// dropped and the mux rendered one input short.
+#[test]
+fn mux_reading_a_memory_element_wires_to_the_array() {
+    let d = design();
+    let g = scope_graph_with(&d, "picorv32_soc.g_lane[0].core", Projection::GateLevel)
+        .expect("gate-level graph");
+    // `cpuregs_rs1 = decoded_rs1 ? cpuregs[decoded_rs1] : 0` — the true branch reads the
+    // register-file array, dissolved into `.core` from its `$comb376` process.
+    let mux = g
+        .nodes
+        .iter()
+        .find(|n| n.path == "picorv32_soc.g_lane[0].core.$comb376.$mux1273")
+        .expect("cpuregs read mux");
+    let d1 = mux
+        .ports
+        .iter()
+        .find(|p| p.path.ends_with(".cpuregs"))
+        .expect("data input wired to the cpuregs array");
+    assert_eq!(d1.side, Side::West, "a data branch is a west input");
+    // The input is really wired to the cpuregs Memory box, not left dangling.
+    assert!(
+        g.edges
+            .iter()
+            .any(|e| e.source == d1.id || e.target == d1.id),
+        "the memory-read branch connects into the scope"
+    );
+}
