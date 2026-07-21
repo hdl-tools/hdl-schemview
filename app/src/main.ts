@@ -335,6 +335,10 @@ async function popOut(pane: DetachablePane) {
     if (pane === "waveform") {
       void w.once("tauri://destroyed", () => void api.unloadDesign(label));
     }
+    // Close the in-app pane now that it lives in its own window (#205): hide the tab
+    // and fall back to source/status. The toolbar Show button brings it back.
+    if (pane === "schematic") hideTab("schematic-pane", "source-pane");
+    else hideTab("wave-pane", "status-pane");
   } catch (e) {
     log("error", `detach failed: ${e}`);
   }
@@ -1908,6 +1912,16 @@ function activateTab(panelId: string) {
   });
   if (panelId === "schematic-pane") refreshSchematic();
   else if (panelId === "wave-pane") redrawTracks();
+}
+
+// Close an on-demand tab (#205): after a schematic/waveform pane is popped out, its
+// in-app tab is hidden and the group falls back to its always-present tab (source /
+// status). The toolbar Show button re-reveals it via activateTab — independent of the
+// pop-out window.
+function hideTab(panelId: string, fallbackPanelId: string) {
+  const btn = document.querySelector<HTMLButtonElement>(`.tab[data-panel="${panelId}"]`);
+  if (btn) btn.hidden = true;
+  activateTab(fallbackPanelId);
 }
 
 // Re-fit the schematic if it was last drawn while hidden (#99); otherwise just
