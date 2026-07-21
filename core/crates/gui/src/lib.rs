@@ -256,6 +256,13 @@ impl Session {
         for dir in incdirs {
             cmd.arg("-I").arg(dir);
         }
+        // Always emit the gate-level projection (#157), like the committed golden. It is
+        // additive — process-level rendering ignores the primitives — but the frontend's
+        // gate-level toggle switches the view at scope_graph time without re-elaborating,
+        // so the primitives must already be in the model. Without this, a designlist-
+        // loaded design shows combinational logic as opaque Comb/Assign blocks even with
+        // the toggle on, since there are no gates to dissolve.
+        cmd.arg("--gate-level");
         cmd.arg("-o").arg("-"); // model JSON on stdout; progress goes to stderr
         let out = cmd.output().context(
             "running svxprobe-elaborate (is the elaboration harness installed and on PATH?)",

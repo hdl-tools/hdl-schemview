@@ -167,7 +167,7 @@ native "Load trace…" picker (`tauri-plugin-dialog`, registered in `run()`).
 | Command | Args (all also take optional `session_id`) | Returns |
 | --- | --- | --- |
 | `load_design` | `model, trace, excluded[], srcRoot` | `String` (top scope) — inserts under `session_id` (default `main`) |
-| `elaborate_and_load` | `filelist, top, incdirs[], trace, excluded[], srcRoot` | `String` (top scope) — runs `svxprobe-elaborate` (on PATH) on a `.f` designlist, then loads |
+| `elaborate_and_load` | `filelist, top, incdirs[], trace, excluded[], srcRoot` | `String` (top scope) — runs `svxprobe-elaborate` (on PATH) on a `.f` designlist **with `--gate-level`** (like the committed golden), then loads. The flag is always passed: the projection is additive, but the frontend's gate-level toggle switches the view without re-elaborating, so the primitives must already be in the model (else a designlist design shows combinational logic as opaque Comb/Assign blocks even with the toggle on). |
 | `load_trace` | `trace` | `()` — swaps the session's trace, **reusing its already-ingested design** (#176): no model re-ingest, no designlist re-elaboration. Backs "Load trace…" (#170). Opens the trace before mutating, so a bad path leaves the session intact. |
 | `unload_design` | — | `()` — drops the session (#168); idempotent |
 | `scope_graph` | `scope`, `projection?` | `SchematicGraph` — `projection` (#157 PR4) is `"process-level"` (default, omit) or `"gate-level"`; forwarded to `Session::scope_graph_with` |
