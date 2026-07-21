@@ -1447,6 +1447,23 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
       g.appendChild(t);
     }
   }
+  // A dangling output (#202): the driven net has no in-scope reader, so no wire
+  // labels it. Float the net name just past the east tip, dimmed, and let it
+  // cross-probe to that net so the wire stays visible and searchable.
+  const out = node.ports.find((p) => p.side === "east");
+  if (out?.dangling && out.name) {
+    const lab = document.createElementNS(SVGNS, "text");
+    lab.setAttribute("class", "pin-label dangling");
+    lab.setAttribute("x", String(W + 3));
+    lab.setAttribute("y", String(midY + 3));
+    lab.setAttribute("text-anchor", "start");
+    lab.textContent = out.width ? `${out.name}${out.width}` : out.name;
+    lab.oncontextmenu = (e) => {
+      e.preventDefault();
+      if (out.path) crossProbePath(out.path, e);
+    };
+    g.appendChild(lab);
+  }
   parent.appendChild(g);
 }
 
@@ -1510,6 +1527,22 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
       else crossProbe(id, e);
     };
     lab.textContent = "sel";
+    g.appendChild(lab);
+  }
+  // A dangling output (#202): float the driven net's name past the east wall, dimmed,
+  // and cross-probe it, so a mux whose result nothing in scope reads stays searchable.
+  const out = node.ports.find((p) => p.side === "east");
+  if (out?.dangling && out.name) {
+    const lab = document.createElementNS(SVGNS, "text");
+    lab.setAttribute("class", "pin-label dangling");
+    lab.setAttribute("x", String(W + 3));
+    lab.setAttribute("y", String(H / 2 + 3));
+    lab.setAttribute("text-anchor", "start");
+    lab.textContent = out.width ? `${out.name}${out.width}` : out.name;
+    lab.oncontextmenu = (e) => {
+      e.preventDefault();
+      if (out.path) crossProbePath(out.path, e);
+    };
     g.appendChild(lab);
   }
   parent.appendChild(g);

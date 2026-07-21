@@ -1737,10 +1737,31 @@ pub fn scope_graph_with(
     let wired: std::collections::HashSet<NodeId> =
         edges.iter().flat_map(|e| [e.source, e.target]).collect();
     for node in &mut nodes {
-        if is_logic_box(design, node.id) || is_gate(design, node.id) {
-            for p in &mut node.ports {
-                if p.side == Side::East && !wired.contains(&p.id) {
-                    p.dangling = true;
+        let gate = is_gate(design, node.id);
+        if !(is_logic_box(design, node.id) || gate) {
+            continue;
+        }
+        // A gate's result pin is unnamed (keyed on the gate itself, so a wired output
+        // is labelled by its net wire). When the driven net has no in-scope reader the
+        // pin dangles with no wire to name it, so relabel it with that net (#202) — the
+        // floating wire then stays visible and cross-probeable, mirroring a dangling
+        // FF Q's in-box net label (#118). A logic box's output pin already carries its
+        // signal name/path, and a nested gate has no `out` edge, so both are left as-is.
+        let driven_net = gate
+            .then(|| {
+                design
+                    .edges_of(node.id)
+                    .into_iter()
+                    .find(|e| e.port == node.id && e.dir == Dir::Out)
+                    .and_then(|e| design.node(e.endpoint))
+            })
+            .flatten();
+        for p in &mut node.ports {
+            if p.side == Side::East && !wired.contains(&p.id) {
+                p.dangling = true;
+                if let Some(net) = driven_net {
+                    p.name = net.name.clone();
+                    p.path = net.path.clone();
                 }
             }
         }
