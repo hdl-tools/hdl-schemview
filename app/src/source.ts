@@ -30,6 +30,20 @@ function lineForOffset(lineStarts: number[], offset: number): number {
  * line boundary does not spill onto the next line. A degenerate/point span
  * (`endOffset <= startOffset`) collapses to the single start line.
  */
+/**
+ * Inclusive 0-based `[startLine, endLine]` line-index range for a construct spanning
+ * source lines `startLine1..=endLine1` (both 1-based, as slang reports them). Highlight
+ * is driven by line number rather than byte offset (#203) because line numbers are
+ * line-ending-independent — a byte-offset lookup drifts when the `def_range` offset
+ * basis (LF vs CRLF at elaboration) differs from the on-disk source shown in the pane.
+ * A missing/degenerate end collapses to the single start line.
+ */
+export function highlightLineRange(startLine1: number, endLine1?: number): [number, number] {
+  const start = Math.max(0, startLine1 - 1);
+  const end = Math.max(start, (endLine1 ?? startLine1) - 1);
+  return [start, end];
+}
+
 export function lineRangeForSpan(
   lineStarts: number[],
   startOffset: number,

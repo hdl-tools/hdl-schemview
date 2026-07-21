@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { lineRangeForSpan } from "./source";
+import { highlightLineRange, lineRangeForSpan } from "./source";
 
 // Four lines: "aaaa\nbb\ncccccc\nd" → per-line byte starts (LF = 1 byte).
 //   line0 "aaaa"   offsets 0..3, newline 4   → start 0
@@ -46,5 +46,23 @@ describe("lineRangeForSpan", () => {
 
   it("returns [0,0] for empty lineStarts", () => {
     expect(lineRangeForSpan([], 3, 9)).toEqual([0, 0]);
+  });
+});
+
+describe("highlightLineRange", () => {
+  it("maps 1-based lines to an inclusive 0-based span", () => {
+    expect(highlightLineRange(1249, 1290)).toEqual([1248, 1289]);
+  });
+
+  it("collapses to the single start line when no end is given", () => {
+    expect(highlightLineRange(42)).toEqual([41, 41]);
+  });
+
+  it("collapses when the end precedes the start", () => {
+    expect(highlightLineRange(42, 40)).toEqual([41, 41]);
+  });
+
+  it("clamps a first-line construct to 0", () => {
+    expect(highlightLineRange(1, 1)).toEqual([0, 0]);
   });
 });
