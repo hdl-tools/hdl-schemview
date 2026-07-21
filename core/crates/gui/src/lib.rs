@@ -186,6 +186,25 @@ fn tree_children(design: &Design, children: &[NodeId]) -> Vec<NodeId> {
     out
 }
 
+/// Choose the on-disk path for a model source file. An absolute path is used as-is;
+/// otherwise `src_root/path` is preferred, but when that is missing and the stored
+/// `path` exists (already relative to the process CWD — e.g. a designlist whose model
+/// records `../../fixtures/...`), the stored path wins. This stops a mismatched src
+/// root from double-applying `../..` into a non-existent path. When neither exists the
+/// joined path is kept, so the "source unavailable" error names the configured
+/// location. The existence check is injected so the decision is unit-testable.
+fn pick_source_path(src_root: &Path, path: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let joined = src_root.join(path);
+    if exists(&joined) || !exists(path) {
+        joined
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// A loaded design + trace: the state behind the GUI.
 pub struct Session {
     cross: CrossProbe,
@@ -481,8 +500,18 @@ impl Session {
             .find(|f| f.id == file)
             .map(|f| f.path.clone())
             .with_context(|| format!("unknown file id {file}"))?;
-        let full = self.src_root.join(&path);
+        let full = self.resolve_source(&path);
         std::fs::read_to_string(&full).with_context(|| format!("reading {}", full.display()))
+    }
+
+    /// Resolve a model file path against the source root, robustly. An absolute path is
+    /// used as-is; otherwise `src_root/path` is preferred, but when that does not exist
+    /// and the path resolves as stored (already relative to the process CWD — e.g. a
+    /// designlist whose model records `../../fixtures/...` — the stored path is used.
+    /// This stops a mismatched src root from double-applying `../..` into a path that
+    /// points nowhere (the `src_root/../../fixtures/...` "source unavailable" error).
+    fn resolve_source(&self, path: &str) -> PathBuf {
+        pick_source_path(&self.src_root, Path::new(path), |p| p.exists())
     }
 
     pub fn signal_values(&mut self, signal_ref: u32) -> Vec<ValueChange> {
@@ -601,5 +630,47 @@ impl Session {
         let design = self.cross.design();
         let type_ = design.node(node)?.type_.as_deref()?;
         design.enum_for_type(type_).map(|e| e.members.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_source_path;
+    use std::path::{Path, PathBuf};
+
+    // The bug (#204/#205 follow-up): a designlist model records `../../fixtures/x.sv`,
+    // already resolvable from the CWD, but a stale `src_root` double-applies `../..`.
+    // The stored path must win when the joined path misses.
+    #[test]
+    fn falls_back_to_stored_path_when_joined_is_missing() {
+        let src = Path::new("../..");
+        let p = Path::new("../../fixtures/rtl/x.sv");
+        // Only the stored path exists on disk.
+        let picked = pick_source_path(src, p, |c| c == p);
+        assert_eq!(picked, PathBuf::from("../../fixtures/rtl/x.sv"));
+    }
+
+    #[test]
+    fn prefers_joined_path_when_it_exists() {
+        let src = Path::new("/root");
+        let p = Path::new("fixtures/rtl/x.sv");
+        let joined = PathBuf::from("/root/fixtures/rtl/x.sv");
+        let picked = pick_source_path(src, p, |c| c == joined);
+        assert_eq!(picked, joined);
+    }
+
+    #[test]
+    fn keeps_joined_path_for_the_error_when_neither_exists() {
+        let src = Path::new("/root");
+        let p = Path::new("fixtures/rtl/x.sv");
+        let picked = pick_source_path(src, p, |_| false);
+        assert_eq!(picked, PathBuf::from("/root/fixtures/rtl/x.sv"));
+    }
+
+    #[test]
+    fn absolute_path_is_used_as_is() {
+        let abs = Path::new("/abs/rtl/x.sv");
+        let picked = pick_source_path(Path::new("/root"), abs, |_| false);
+        assert_eq!(picked, PathBuf::from("/abs/rtl/x.sv"));
     }
 }
