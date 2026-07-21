@@ -1,0 +1,22 @@
+# Enforce LF in the working tree on every platform (#203).
+#
+# The elaboration harness computes `def_range` byte offsets against the source as
+# read at elaboration time (LF). If autocrlf hands a contributor a CRLF working
+# tree, those offsets no longer match the on-disk bytes, and offset↔source mapping
+# (Show-in-source, source-click cross-probe) drifts — one byte per preceding line.
+# Pinning the source and committed model fixtures to LF keeps the two bases aligned
+# regardless of platform or core.autocrlf, and makes golden regeneration on Windows
+# deterministic (no manual `tr -d '\r'` before elaborating).
+
+# SystemVerilog / Verilog source.
+*.v    text eol=lf
+*.sv   text eol=lf
+*.svh  text eol=lf
+
+# Committed elaborated model goldens (byte offsets embedded; must match the LF source).
+fixtures/**/*.json text eol=lf
+
+# VCD traces are text (keep LF); FST/GHW are binary — never EOL-convert them.
+*.vcd  text eol=lf
+*.fst  binary
+*.ghw  binary
