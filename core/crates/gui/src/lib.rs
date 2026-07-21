@@ -39,6 +39,11 @@ pub struct SourceLoc {
     pub file: u32,
     pub path: String,
     pub line: u32,
+    /// Last line the construct spans (1-based, inclusive). The frontend highlights
+    /// `line..=end_line` by line number — line numbers are line-ending-independent,
+    /// so the highlight is correct whether the `def_range` byte offsets were computed
+    /// against an LF or CRLF checkout (#203).
+    pub end_line: u32,
     pub col: u32,
     pub offset: u32,
     pub end_offset: u32,
@@ -561,6 +566,7 @@ impl Session {
             file: r.file,
             path,
             line: r.start.line,
+            end_line: r.end.line,
             col: r.start.col,
             offset: r.start.offset,
             end_offset: r.end.offset,

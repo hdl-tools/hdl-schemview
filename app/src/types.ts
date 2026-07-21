@@ -119,6 +119,8 @@ export interface SourceLoc {
   file: number;
   path: string;
   line: number;
+  /** Last line the construct spans (1-based, inclusive); highlight is by line (#203). */
+  end_line: number;
   col: number;
   offset: number;
   end_offset: number;

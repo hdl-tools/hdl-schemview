@@ -43,7 +43,7 @@ import {
   type Selection,
 } from "./bus";
 import { formatLogEntry, type LogLevel } from "./log";
-import { lineRangeForSpan } from "./source";
+import { highlightLineRange } from "./source";
 import {
   formatExcluded,
   loadExcluded,
@@ -2142,12 +2142,7 @@ async function showInSource(resp: ProbeResponse) {
   // its own catch, so an unhandled `source_text` rejection otherwise vanishes.
   if (resp.source) {
     try {
-      await renderSource(
-        resp.source.file,
-        resp.source.line,
-        resp.source.offset,
-        resp.source.end_offset,
-      );
+      await renderSource(resp.source.file, resp.source.line, resp.source.end_line);
     } catch (e) {
       log("warn", `source unavailable: ${e}`);
     }
@@ -2155,22 +2150,15 @@ async function showInSource(resp: ProbeResponse) {
   renderPicker(resp);
 }
 
-async function renderSource(
-  file: number,
-  line: number,
-  startOffset?: number,
-  endOffset?: number,
-) {
+async function renderSource(file: number, line: number, endLine?: number) {
   let cached = state.source.get(file);
   if (!cached) {
     const text = await api.sourceText(file);
     const lines = text.split(/\r\n|\r|\n/);
-    // Byte offset of each line start, read from the RAW text so a CRLF terminator
-    // counts as its true two bytes — matching slang's def_range offsets, which are
-    // raw file-byte offsets. Under an LF checkout this equals the old length+1 walk;
-    // under a CRLF checkout the old walk under-counted one byte per preceding line,
-    // drifting deep constructs onto the wrong line (source is ASCII, so a UTF-16
-    // index is the byte offset). Cached with the lines so the hit path stays aligned.
+    // Byte offset of each line start, read from the RAW text (a CRLF terminator counts
+    // as its true two bytes). Only the source-click path (`offsetAt`) uses these now —
+    // the highlight below is line-based (#203), so it no longer depends on the offset
+    // basis matching slang's def_range.
     const lineStarts: number[] = [0];
     const term = /\r\n|\r|\n/g;
     let m: RegExpExecArray | null;
@@ -2181,14 +2169,12 @@ async function renderSource(
   const { lines, lineStarts } = cached;
   sourceCtx = { file, lineStarts };
 
-  // Highlight the construct's whole span (#158): the probe carries the full
-  // byte range (offset..end_offset) of the def, so light every line it covers,
-  // not just its header. Falls back to the single start line when no span is
-  // given. lineRangeForSpan yields inclusive 0-based [startLine, endLine].
-  const [hlStart, hlEnd] =
-    startOffset !== undefined && endOffset !== undefined
-      ? lineRangeForSpan(lineStarts, startOffset, endOffset)
-      : [line - 1, line - 1];
+  // Highlight the construct's whole span (#158) by LINE NUMBER (#203): the probe
+  // carries the def's first and last line, so light every line it covers. Line
+  // numbers are line-ending-independent, so the highlight lands correctly on both
+  // LF and CRLF checkouts — unlike a byte-offset lookup, which drifts when the
+  // def_range offset basis (set at elaboration) differs from the on-disk source.
+  const [hlStart, hlEnd] = highlightLineRange(line, endLine);
 
   const host = $("source");
   host.innerHTML = "";
