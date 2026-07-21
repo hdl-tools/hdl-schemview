@@ -1555,3 +1555,90 @@ fn gate_to_gate_wiring_connects_nested_primitives() {
     // And that inner output is not falsely marked dangling.
     assert!(!and_out.dangling, "wired gate output is not dangling");
 }
+
+fn is_gate_kind(k: NodeKind) -> bool {
+    use NodeKind::*;
+    matches!(
+        k,
+        And | Or
+            | Xor
+            | Xnor
+            | Nand
+            | Nor
+            | Not
+            | Buf
+            | Add
+            | Sub
+            | Mul
+            | Cmp
+            | Shift
+            | Mux
+            | Concat
+    )
+}
+
+// #202: a dangling gate output is only ever a *root* gate that drives a real net
+// nothing in scope reads (expected #118) — never a *nested* gate whose consumer edge
+// the signal-join failed to wire. This guards the signal-join against a regression
+// that would silently drop a gate-to-gate connection.
+#[test]
+fn no_gate_output_is_silently_unwired() {
+    let d = design();
+    for scope in ["picorv32_soc.g_lane[0].core", "picorv32_soc.g_lane[1].core"] {
+        let g = scope_graph_with(&d, scope, Projection::GateLevel).expect("gate-level graph");
+        let wired: std::collections::HashSet<NodeId> =
+            g.edges.iter().flat_map(|e| [e.source, e.target]).collect();
+        for n in g.nodes.iter().filter(|n| is_gate_kind(n.kind)) {
+            let Some(out) = n.ports.iter().find(|p| p.side == Side::East) else {
+                continue;
+            };
+            if wired.contains(&out.id) {
+                continue;
+            }
+            // Dangling → must be a root gate carrying its own model `out` edge.
+            let has_out_edge = d
+                .edges()
+                .iter()
+                .any(|e| e.port == n.id && e.dir == Dir::Out);
+            assert!(
+                has_out_edge,
+                "nested gate {} left unwired — a signal-join gap, not expected #118",
+                n.path
+            );
+        }
+    }
+}
+
+// #202: a root gate whose driven net has no in-scope reader dangles (correct #118),
+// but its output pin is relabelled with that net so the floating wire stays visible
+// and searchable — mirroring a dangling FF Q's in-box net label.
+#[test]
+fn dangling_gate_output_is_labelled_with_its_floating_net() {
+    let d = design();
+    let g = scope_graph_with(&d, "picorv32_soc.g_lane[0].core", Projection::GateLevel)
+        .expect("gate-level graph");
+    // `wire mem_busy = |{…}` is assigned but never read → its reduction-or dangles.
+    let or = g
+        .nodes
+        .iter()
+        .find(|n| n.path == "picorv32_soc.g_lane[0].core.$assign202.$or812")
+        .expect("mem_busy reduction-or gate");
+    let out = or
+        .ports
+        .iter()
+        .find(|p| p.side == Side::East)
+        .expect("gate output pin");
+    assert!(
+        out.dangling,
+        "mem_busy has no reader, so the output dangles"
+    );
+    assert_eq!(
+        out.name, "mem_busy",
+        "dangling output labelled with its net"
+    );
+    assert!(
+        out.path.ends_with(".mem_busy"),
+        "output pin carries the net path so it cross-probes: {}",
+        out.path
+    );
+}
