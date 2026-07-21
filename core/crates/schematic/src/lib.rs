@@ -1666,6 +1666,33 @@ pub fn scope_graph_with(
                 drivers.entry(b).or_default().push((pins.pin(b, b), None));
             }
         }
+        // A Memory box drives its own array node (#206): a gate/mux reading the whole
+        // array (`cpuregs[decoded_rs1]`) loads key = the memory. Unlike a `Dout` edge
+        // (which drives a specific read target), that read has no output pin, so give
+        // the box a read-out pin here and offer it as the driver — the wire then reaches
+        // the memory glyph. Added only when something loads the array, so a memory with
+        // no whole-array gate read is unchanged.
+        for &b in &boxes {
+            if is_kind(design, b, NodeKind::Memory) && loads.contains_key(&b) {
+                let pid = pins.pin(b, b);
+                if let Some(node) = nodes.iter_mut().find(|n| n.id == b) {
+                    if !node.ports.iter().any(|p| p.id == pid) {
+                        node.ports.push(SchPort {
+                            id: pid,
+                            name: design.node(b).map(|n| n.name.clone()).unwrap_or_default(),
+                            side: Side::East,
+                            path: design.node(b).map(|n| n.path.clone()).unwrap_or_default(),
+                            width: None,
+                            role: Some(PinRole::Dout),
+                            bundle: false,
+                            dangling: false,
+                            constant: None,
+                        });
+                    }
+                }
+                drivers.entry(b).or_default().push((pid, None));
+            }
+        }
         // BTreeSet for a deterministic wire order across runs.
         let signals: std::collections::BTreeSet<NodeId> =
             drivers.keys().chain(loads.keys()).copied().collect();

@@ -1120,11 +1120,16 @@ class Elaborator:
                 seen.add((gate_id, sid, "in", None, None, mux_port))
             return
         val = endpoint[1]
-        sid = self._pick_node(val, ("Net", "Var", "Port"))
+        # `Memory` is accepted alongside scalar signals (#206): a gate/mux operand that
+        # reads an array element (`cpuregs[decoded_rs1]`) resolves via `_leaf_signal` to
+        # the whole array node, so the input wires to the memory — the index being the
+        # same fidelity simplification as a peeled bit-select. Without it the branch was
+        # dropped, leaving those muxes one input short.
+        sid = self._pick_node(val, ("Net", "Var", "Port", "Memory"))
         if (
             sid is not None
             and sid != gate_id
-            and self.nodes[sid]["kind"] in ("Net", "Var", "Port")
+            and self.nodes[sid]["kind"] in ("Net", "Var", "Port", "Memory")
         ):
             seen.add((gate_id, sid, "in", None, None, mux_port))
 
