@@ -75,6 +75,13 @@ CI guards both: `ci.yml` re-elaborates the golden and diffs it (deterministic),
 and `nightly.yml` regenerates the traces with Verilator and checks structural
 equivalence.
 
+> **Line endings (#203).** The golden's `def_range` byte offsets are computed
+> against LF source. A repo-wide `.gitattributes` pins `*.v`/`*.sv`/`*.svh` and
+> `fixtures/**/*.json` to `eol=lf`, so every checkout (including Windows) has an LF
+> working tree that matches those offsets — regenerate the golden directly, with no
+> manual `tr -d '\r'` step. If you have a pre-`.gitattributes` CRLF checkout, run
+> `git add --renormalize .` once.
+
 ## Tier-2: `ibex_soc`
 
 See [`ibex_soc/README.md`](../fixtures/ibex_soc/README.md). Fetched, not
