@@ -80,6 +80,7 @@ wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 | `app/src/wave.ts` (+ `wave.test.ts`) | Waveform geometry (time-window mapping, zoom/pan, segments, value-at-time, ruler ticks) + per-trace/ruler canvas drawing. `WaveTrace.path` (#170) carries the lane's canonical model node path so a pane can re-resolve the lane against a different trace (a `signal_ref` is trace-specific; the model path is the portable key). |
 | `app/src/log.ts` (+ `log.test.ts`) | Pure helpers for the status/log pane (#100): `formatTime` (`HH:MM:SS`) + `formatLogEntry` (level + message → renderable entry). |
 | `app/src/prefs.ts` (+ `prefs.test.ts`) | Settings preferences (#17): DOM-free `parseExcluded`/`formatExcluded`/`coerceExcluded` (excluded-scopes editor round-trip + default fallback) + thin localStorage wrappers (`loadExcluded`/`saveExcluded`; key `excludedScopes`). Theme stays under the existing `theme` key. |
+| `app/src/schempick.ts` (+ `schempick.test.ts`) | Pure logic for the schematic pane's signal-tracing palette (#219, the `a`-key pop-up): `filterSignals` (case-insensitive name substring over a scope's `SignalEntry[]`, blank query → all) + `isTextEntryTag` (whether focus is in an input/textarea/select/contentEditable, so the bare `a` hotkey doesn't fire while typing) + `moveIndex` (clamped, no-wrap keyboard-nav index, floors at 0 for an empty list). DOM-free like `log.ts`/`prefs.ts`; `main.ts` owns the `#schem-palette` overlay wiring. |
 | `app/src/bus.ts` (+ `bus.test.ts`) | The single cross-pane coordination path (#18). Right-click/tree handlers `publish` a `Selection` (a resolved `ProbeResponse` + which panes to reveal, or a scope path to drill); one `subscribe(handleSelection)` in `main.ts` drives the panes. Transport is Tauri app-global `emit`/`listen` inside the webview (so it also reaches detached windows, #18 PR2), a module-local fan-out in browser/tests — one channel, two transports, chosen by `__TAURI_INTERNALS__` presence. Pure builders `crossProbeSelection`/`scopeSelection` (both take an optional `dest` window label, #169) — plus `paneModeOf` (read `?pane=` mode) and `ownsSelection` (which window drives which pane, keyed on window id + selection `dest`, #18 PR2 / #169 / #170) — are unit-tested; the payload carries model lookups, never geometry. `ownsSelection` is now purely id/dest-keyed for the pane views: `source` → main only, while `schematic` (#169) and `waveform` (#170) share one branch — an addressed selection drives exactly the window whose `self` label equals `dest` (main is addressable as `"main"`), a broadcast drives only main's own pane, and pop-outs never follow a broadcast. |
 | `app/src/style.css` | Theme vars. Dark default; light via `:root[data-theme="light"]`, persisted in `localStorage`. |
 
@@ -89,7 +90,23 @@ waveform** (stacks the signal as a new lane) / **Show in source**. The waveform 
 carries its own **signal picker** (#171, `Ctrl/⌘+B`) — a scope tree over that scope's
 signals (`hierarchy_tree` + `scope_signals`, both on the pane's `session_id`), so a pane
 picks its own lanes instead of waiting for another window to address them at it; a
-signal absent from the pane's trace is **dimmed and inert**, not pruned. The pane
+signal absent from the pane's trace is **dimmed and inert**, not pruned. The
+**schematic pane** carries the analogue (#171 → #219): pressing **`a`** over a live
+schematic opens a lightweight `#schem-palette` search pop-up (`Esc` closes) scoped to
+the schematic's *current* scope (`schematicScope()` = the top nav frame), wired once
+per window (`setupSchemPalette` from `init` + the `initDetached("schematic")` branch).
+It reuses `api.scopeSignals(scope, sid)` + the shared `.snode` row styling and
+type-to-filter (`filterSignals`, arrow/Enter to navigate); selecting a signal
+**publishes an addressed `["waveform"]` cross-probe to the main window** (the same
+`crossProbeSelection(resp, ["waveform"], selfLabel, "main")` bus path as the right-click
+"Append to waveform") — going through the bus rather than a local `addToWaveform` is
+what lets a **detached schematic pop-out** (which has no waveform pane) still land the
+trace in main. Selecting also **focuses the signal in the schematic** itself
+(`focusSignalInSchematic` = `selectWire` + `scrollIntoView({block:"nearest"})`, a no-op
+when already visible), so picking a signal in a large scope jumps to where it's drawn.
+Live-update: both `setScope` **and** the `showInSchematic` cross-probe drill (which
+bypasses `setScope`) call `refreshSchemPalette()`, guarded by a `paletteGen` token so a
+slow `scopeSignals` for an old scope can't clobber a newer one. The pane
 organizes its lanes into **collapsible groups** (#182, `state.groups: WaveGroup[]`,
 each `WaveGroup { name, collapsed, waves }`) — there are no loose lanes. Groups are
 user-authored containers: **a group emptied by a move/remove is preserved, not pruned**
