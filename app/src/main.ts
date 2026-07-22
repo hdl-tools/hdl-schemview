@@ -43,6 +43,7 @@ import {
   type Selection,
 } from "./bus";
 import { formatLogEntry, type LogLevel } from "./log";
+import { filterSignals, isTextEntryTag, moveIndex } from "./schempick";
 import { highlightLineRange } from "./source";
 import {
   formatExcluded,
@@ -428,6 +429,7 @@ async function setScope(path: string, label: string, push = true) {
   renderBreadcrumb();
   highlightTree(path);
   await renderSchematic(graph, viewCache.get(path));
+  refreshSchemPalette(); // #219: keep an open palette in step with the new scope
 }
 
 // Snapshot the current schematic viewport so it can be restored later.
@@ -624,6 +626,195 @@ async function pickSignal(path: string) {
     return;
   }
   renderSignalList(pickerSigs); // refresh the "added" marks
+}
+
+// -- schematic signal-tracing palette (#219) --------------------------------
+//
+// Press `a` over the schematic to open a search palette scoped to the schematic's
+// current scope — the analogue of the waveform pane's picker (#171), but keyed to
+// what the schematic is *showing* rather than a tree the user drives. Selecting a
+// signal traces it the same way the right-click "Append to waveform" does: publish a
+// cross-probe to the bus addressed at a waveform pane. Going through the bus (not a
+// local addToWaveform) is what makes it work from a detached schematic pop-out too,
+// which has no waveform pane of its own — the trace lands in the main window.
+
+let paletteSigs: SignalEntry[] = []; // the current scope's signals (unfiltered)
+let paletteRows: SignalEntry[] = []; // the rendered (filtered) subset
+let paletteActive = 0; // keyboard-highlighted index into paletteRows
+// Monotonic token so a slow scopeSignals response for an old scope can't overwrite a
+// newer one (rapid drilling while the palette is open) — only the latest load renders.
+let paletteGen = 0;
+
+// The scope the schematic is currently showing: the top nav frame, or the design
+// top before any drill. Null before a design loads.
+function schematicScope(): string | null {
+  return state.stack[state.stack.length - 1]?.path ?? state.top;
+}
+
+// Wire the `a` hotkey + palette controls. Called once per window (main and each
+// detached schematic pop-out), like setupPicker for the waveform picker.
+function setupSchemPalette() {
+  const input = $("schem-palette-input") as HTMLInputElement;
+  document.addEventListener("keydown", (e) => {
+    // Esc closes an open palette from anywhere, incl. its own focused input.
+    if (e.key === "Escape" && !$("schem-palette").hidden) {
+      closeSchemPalette();
+      return;
+    }
+    // Bare `a` (no modifiers) opens it — only over a live schematic pane, never while
+    // typing (so it doesn't hijack `a` in the load form or the palette's own search box).
+    if (e.key.toLowerCase() !== "a" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)
+      return;
+    if (!$("schematic-pane").classList.contains("active")) return;
+    // `instanceof` (not a cast): a schematic click target is often an SVGElement, which
+    // has no `isContentEditable` — the guard must read it only off a real HTMLElement.
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    if (t && isTextEntryTag(t.tagName, t.isContentEditable)) return;
+    e.preventDefault();
+    void openSchemPalette();
+  });
+  // Click anywhere outside an open palette dismisses it (as the context menu does), so
+  // panning/selecting the schematic underneath doesn't leave it floating.
+  document.addEventListener("click", (e) => {
+    if ($("schem-palette").hidden) return;
+    if (e.target instanceof Node && !$("schem-palette").contains(e.target))
+      closeSchemPalette();
+  });
+  input.addEventListener("input", () => {
+    paletteActive = 0;
+    renderPaletteList();
+  });
+  input.addEventListener("keydown", onPaletteNav);
+}
+
+// Arrow keys move the highlight, Enter traces the highlighted signal.
+function onPaletteNav(e: KeyboardEvent) {
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    paletteActive = moveIndex(paletteActive, 1, paletteRows.length);
+    renderPaletteList();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    paletteActive = moveIndex(paletteActive, -1, paletteRows.length);
+    renderPaletteList();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    const s = paletteRows[paletteActive];
+    if (s?.in_trace) void pickPaletteSignal(s.path);
+  }
+}
+
+async function openSchemPalette() {
+  const scope = schematicScope();
+  if (!scope) return; // nothing loaded yet
+  $("schem-palette").hidden = false;
+  const input = $("schem-palette-input") as HTMLInputElement;
+  input.value = "";
+  paletteActive = 0;
+  await loadPaletteSignals(scope);
+  input.focus();
+}
+
+function closeSchemPalette() {
+  $("schem-palette").hidden = true;
+}
+
+// Fetch the scope's signals into the palette (same source as the waveform picker).
+// Guarded by paletteGen so a stale response (an earlier scope) can't clobber a newer.
+async function loadPaletteSignals(scope: string) {
+  const gen = ++paletteGen;
+  let sigs: SignalEntry[];
+  try {
+    sigs = await api.scopeSignals(scope, sid);
+  } catch (e) {
+    log("error", `scope signals failed: ${e}`);
+    sigs = [];
+  }
+  if (gen !== paletteGen) return; // superseded by a newer load
+  paletteSigs = sigs;
+  renderPaletteList();
+}
+
+// Live update (#219): when the schematic scope changes while the palette is open,
+// refetch its signals so the list matches the newly rendered scope in place.
+function refreshSchemPalette() {
+  if ($("schem-palette").hidden) return;
+  const scope = schematicScope();
+  if (scope) void loadPaletteSignals(scope);
+}
+
+function renderPaletteList() {
+  paletteRows = filterSignals(paletteSigs, ($("schem-palette-input") as HTMLInputElement).value);
+  if (paletteActive >= paletteRows.length) paletteActive = Math.max(0, paletteRows.length - 1);
+  const host = $("schem-palette-list");
+  host.innerHTML = "";
+  if (!paletteRows.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = paletteSigs.length ? "(no match)" : "(no signals in this scope)";
+    host.appendChild(empty);
+    return;
+  }
+  // Already-pinned lanes (main's own pane), keyed by model path — a re-pick is a
+  // silent no-op, so mark it rather than let it look broken (as the picker does).
+  const added = new Set(laneList().map((w) => w.path).filter(Boolean));
+  const input = $("schem-palette-input");
+  input.removeAttribute("aria-activedescendant");
+  paletteRows.forEach((s, i) => {
+    const row = document.createElement("div");
+    row.className = "snode";
+    row.id = `schem-opt-${i}`;
+    row.setAttribute("role", "option");
+    if (!s.in_trace) row.classList.add("dim");
+    if (added.has(s.path)) row.classList.add("added");
+    if (i === paletteActive) {
+      row.classList.add("active");
+      row.setAttribute("aria-selected", "true");
+      input.setAttribute("aria-activedescendant", row.id); // expose the highlight to AT
+    }
+    const name = document.createElement("span");
+    name.className = "sname";
+    name.textContent = s.name;
+    row.appendChild(name);
+    if (s.width) {
+      const w = document.createElement("span");
+      w.className = "swidth";
+      w.textContent = s.width;
+      row.appendChild(w);
+    }
+    row.title = s.in_trace ? s.path : `${s.path} — not in this trace`;
+    if (s.in_trace) row.onclick = () => void pickPaletteSignal(s.path);
+    host.appendChild(row);
+  });
+  // Keep the keyboard-highlighted row visible as the user arrows through a long list.
+  host.querySelector<HTMLElement>(".snode.active")?.scrollIntoView({ block: "nearest" });
+}
+
+// Trace the picked signal: resolve it, then publish an addressed cross-probe to the
+// main window's waveform — the same bus path as the right-click menu (appendWaveItem),
+// so it works from a detached schematic window too. Then close the palette.
+async function pickPaletteSignal(path: string) {
+  let resp: ProbeResponse | null;
+  try {
+    resp = await api.probeNode(path, null, sid);
+  } catch (e) {
+    log("error", `probe failed: ${e}`);
+    return;
+  }
+  if (resp) void publish(crossProbeSelection(resp, ["waveform"], selfLabel, "main"));
+  // Also focus the signal in this schematic: highlight its net and, if it's currently
+  // off-screen, scroll it into view (block/inline "nearest" is a no-op when visible).
+  focusSignalInSchematic(path);
+  closeSchemPalette();
+}
+
+// Highlight the signal's net in the current schematic (reusing the wire-selection the
+// right-click / cross-probe paths use) and bring it into view only when it isn't
+// already — so picking a signal in a large scope jumps to where it's drawn (#219).
+function focusSignalInSchematic(path: string) {
+  selectWire(path);
+  const el = $("schematic").querySelector<SVGGraphicsElement>(".wire.sel");
+  el?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 // Drill the schematic into `path`: the breadcrumb becomes the scope's ancestor
@@ -3176,6 +3367,7 @@ async function showInSchematic(anchor: NodeRef) {
     // Keep the current zoom level (don't zoom-to-fit), so the item is shown at the
     // zoom the user is already working at; scroll it into view below.
     await renderSchematic(graph, { k: zoom.k, scrollLeft: 0, scrollTop: 0 });
+    refreshSchemPalette(); // #219: this drill bypasses setScope — keep an open palette in step
     // Highlight the anchor within the opened scope (a box by id, a net by path)
     // and centre it; when we drilled into the anchor itself there is nothing to
     // highlight. Selection is single-object, so pick the channel that matches:
@@ -3414,6 +3606,7 @@ async function initDetached(pane: DetachablePane) {
   await subscribe(handleSelection);
   if (pane === "schematic") {
     setupZoom();
+    setupSchemPalette(); // #219 — the `a`-key signal palette, per-window
     activateTab("schematic-pane");
     // Seed this independent pane on the scope main was viewing when it popped out
     // (#169); thereafter it navigates only via its own local drill.
@@ -3613,6 +3806,7 @@ async function init() {
   loadColSplit(); // #139
   setupColSplitter(); // #139
   setupPicker(); // #171 — main's waveform pane gets a signal picker like every pop-out
+  setupSchemPalette(); // #219 — main's schematic pane gets the `a`-key signal palette
   // Tab groups (#99): a tab click activates its panel; the toolbar buttons reveal +
   // focus the on-demand schematic / waveform views.
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) =>

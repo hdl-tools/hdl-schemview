@@ -209,17 +209,29 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 #wave-picker[hidden] { display:none; }
 #wave-picker-tree { flex:1 1 50%; min-height:0; }  /* .tree supplies overflow/padding */
 #wave-picker-sigs { flex:1 1 50%; min-height:0; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; border-top:1px solid var(--border); }
-#wave-picker-sigs .snode { display:flex; align-items:baseline; gap:4px; padding:1px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg); }
-#wave-picker-sigs .snode:hover { background:var(--hl); }
+/* The signal-row styling is shared with the schematic palette (#219, #schem-palette-list). */
+#wave-picker-sigs .snode, #schem-palette-list .snode { display:flex; align-items:baseline; gap:4px; padding:1px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg); }
+#wave-picker-sigs .snode:hover, #schem-palette-list .snode:hover { background:var(--hl); }
 /* Already a lane in this pane — the click is a no-op, so say so rather than let it
    look broken. */
-#wave-picker-sigs .snode.added .sname { text-decoration:underline; }
+#wave-picker-sigs .snode.added .sname, #schem-palette-list .snode.added .sname { text-decoration:underline; }
 /* Not in this pane's trace (#171): the model has the signal, the trace doesn't. Shown
    dimmed and inert rather than pruned — the same honesty as a dangling pin (#118). */
-#wave-picker-sigs .snode.dim { color:var(--muted); cursor:default; }
-#wave-picker-sigs .snode.dim:hover { background:none; }
-#wave-picker-sigs .swidth { color:var(--sublabel); font-size:11px; }
-#wave-picker-sigs .empty { padding:4px; color:var(--muted); font-size:11px; }
+#wave-picker-sigs .snode.dim, #schem-palette-list .snode.dim { color:var(--muted); cursor:default; }
+#wave-picker-sigs .snode.dim:hover, #schem-palette-list .snode.dim:hover { background:none; }
+#wave-picker-sigs .swidth, #schem-palette-list .swidth { color:var(--sublabel); font-size:11px; }
+#wave-picker-sigs .empty, #schem-palette-list .empty { padding:4px; color:var(--muted); font-size:11px; }
+/* A signal row highlighted by keyboard navigation in the palette (#219). */
+#schem-palette-list .snode.active { background:var(--accent); color:#fff; }
+#schem-palette-list .snode.active .swidth { color:#fff; }
+
+/* Signal-tracing palette (#219): the `a`-key pop-up over the schematic. Anchored to
+   #schematic-pane (made a positioning context below), floating near the top-centre. */
+#schematic-pane { position:relative; }
+#schem-palette { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:40; width:min(360px, 82%); display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,0.4); overflow:hidden; }
+#schem-palette[hidden] { display:none; }
+#schem-palette-input { border:none; border-bottom:1px solid var(--border); background:transparent; color:var(--fg); padding:6px 10px; font-size:13px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; outline:none; }
+#schem-palette-list { max-height:240px; overflow:auto; padding:4px 2px; font-size:12px; user-select:none; -webkit-user-select:none; }
 /* The name/value column widths are user-resizable (#84): driven by CSS vars set on
    drag, falling back to the minmax defaults when unset.
    align-content:start packs the lanes at the top (#180): the default (stretch) would

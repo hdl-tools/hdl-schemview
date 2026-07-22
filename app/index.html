@@ -55,6 +55,25 @@
         </section>
         <section id="schematic-pane" class="pane tab-panel">
           <div id="schematic"></div>
+          <!-- Signal-tracing palette (#219): press `a` over the schematic to search the
+               current scope's signals and trace one (append to waveform). Hidden until
+               opened; Esc closes. The analogue of the waveform pane's picker (#171),
+               keyed to the schematic's active scope. -->
+          <div id="schem-palette" hidden>
+            <input
+              id="schem-palette-input"
+              type="text"
+              placeholder="Trace a signal in this scope…  (Esc to close)"
+              aria-label="Search signals in the schematic's current scope"
+              role="combobox"
+              aria-expanded="true"
+              aria-controls="schem-palette-list"
+              aria-autocomplete="list"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div id="schem-palette-list" role="listbox" aria-label="Signals in scope"></div>
+          </div>
         </section>
         <!-- Preferences (#17): the first surface of the Phase 6 config system.
              Folds in the theme toggle and makes the excluded-scopes list editable. -->
