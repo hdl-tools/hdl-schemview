@@ -964,6 +964,22 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         t.onclick = () => selectNode(pid);
         t.oncontextmenu = probePin;
         g.appendChild(t);
+      } else if (sp?.dangling && sp.name) {
+        // A logic box's pins are bare stubs (the wire carries the name), so the
+        // label is skipped above — but a *dangling* pin has no wire, so its driven
+        // net would be invisible (#216, e.g. `dbg_ascii_state`, a debug output
+        // nothing reads). Float the net name just past the wall, dimmed and
+        // cross-probeable, mirroring the gate/FF dangling labels (#202).
+        const t = document.createElementNS(SVGNS, "text");
+        t.setAttribute("class", "pin-label dangling");
+        t.setAttribute("x", String(west ? edgeX - LABEL_PAD : edgeX + LABEL_PAD));
+        t.setAttribute("y", String(py + 3));
+        t.setAttribute("text-anchor", west ? "end" : "start");
+        t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
+        t.dataset.nodeId = String(pid);
+        t.onclick = () => selectNode(pid);
+        t.oncontextmenu = probePin;
+        g.appendChild(t);
       }
     }
     root.appendChild(g);
