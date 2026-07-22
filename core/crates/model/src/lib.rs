@@ -153,6 +153,29 @@ pub struct Range {
     pub end: Location,
 }
 
+/// One HLS provenance correspondence (#159): a span of generated RTL and the
+/// high-level C/C++ span it came from. The bidirectional line-region link behind
+/// C↔RTL source cross-probing — a lookup, never a heuristic. Populated by the
+/// harness from the provenance comments HLS tools embed in generated RTL.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SourceMapEntry {
+    /// Span in a generated (SystemVerilog) file.
+    pub generated: Range,
+    /// Span in the high-level (C/C++) source file.
+    pub source: Range,
+}
+
 /// One source file referenced by ranges.
 #[derive(
     Debug,
@@ -168,6 +191,12 @@ pub struct Range {
 pub struct FileEntry {
     pub id: u32,
     pub path: String,
+    /// Source language (#159): `"systemverilog"` for elaborated RTL, `"c"`/`"cpp"` for a
+    /// high-level source referenced only by HLS provenance comments. `None` defaults to
+    /// SystemVerilog. Lets the resolver route a cross-language probe and the frontend
+    /// pick which pane renders the file.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 /// A node in the elaborated hierarchy.
@@ -397,6 +426,10 @@ pub struct Document {
     /// non-literal members are omitted by the harness.
     #[serde(default)]
     pub enums: HashMap<String, EnumDef>,
+    /// HLS C/C++ ↔ RTL provenance map (#159). Empty when the design carries no
+    /// provenance comments (the default, so non-HLS output is unaffected).
+    #[serde(default)]
+    pub source_map: Vec<SourceMapEntry>,
 }
 
 /// An enum type's bit width and its value→name members.
@@ -472,6 +505,12 @@ pub struct Design {
     src_index: HashMap<u32, Lapper<usize, NodeId>>,
     /// Node id → indices into `doc.edges` incident on that node (port or endpoint).
     conn_index: HashMap<NodeId, Vec<u32>>,
+    /// Per-(generated RTL file) interval tree over `source_map[*].generated` offsets →
+    /// `source_map` index. Answers "which C span does this RTL offset map to?" (#159).
+    gen_map_index: HashMap<u32, Lapper<usize, usize>>,
+    /// Per-(C/C++ file) interval tree over `source_map[*].source` offsets → `source_map`
+    /// index. Answers "which RTL span does this C offset map to?" (#159).
+    src_map_index: HashMap<u32, Lapper<usize, usize>>,
     pub wave_index: WaveIndex,
 }
 
@@ -511,11 +550,38 @@ impl Design {
             }
         }
 
+        // HLS provenance indices (#159): one interval tree per file over each side of
+        // the source_map, mapping an offset → the source_map entry index. Symmetric to
+        // src_index, so a C↔RTL probe is the same interval lookup.
+        let mut gen_ivs: HashMap<u32, Vec<Interval<usize, usize>>> = HashMap::new();
+        let mut src_ivs: HashMap<u32, Vec<Interval<usize, usize>>> = HashMap::new();
+        for (i, m) in doc.source_map.iter().enumerate() {
+            for (side, dest) in [(&m.generated, &mut gen_ivs), (&m.source, &mut src_ivs)] {
+                let (lo, hi) = (side.start.offset as usize, side.end.offset as usize);
+                let stop = if hi > lo { hi } else { lo + 1 };
+                dest.entry(side.file).or_default().push(Interval {
+                    start: lo,
+                    stop,
+                    val: i,
+                });
+            }
+        }
+        let gen_map_index = gen_ivs
+            .into_iter()
+            .map(|(f, ivs)| (f, Lapper::new(ivs)))
+            .collect();
+        let src_map_index = src_ivs
+            .into_iter()
+            .map(|(f, ivs)| (f, Lapper::new(ivs)))
+            .collect();
+
         Design {
             doc,
             path_index,
             src_index,
             conn_index,
+            gen_map_index,
+            src_map_index,
             wave_index: WaveIndex::default(),
         }
     }
@@ -559,6 +625,55 @@ impl Design {
             Some(lap) => lap.find(offset, offset + 1).map(|iv| iv.val).collect(),
             None => Vec::new(),
         }
+    }
+
+    /// Nodes whose def/inst range overlaps `[lo, hi)` in `file`. Like
+    /// [`nodes_at_source`](Self::nodes_at_source) but over a span — used to resolve a
+    /// whole mapped line-region (#159) to the node(s) it contains, since an HLS
+    /// provenance span covers a code line, not a single byte.
+    pub fn nodes_in_source_range(&self, file: u32, lo: usize, hi: usize) -> Vec<NodeId> {
+        match self.src_index.get(&file) {
+            Some(lap) => lap.find(lo, hi.max(lo + 1)).map(|iv| iv.val).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The narrowest C/C++ span an RTL `offset` in a generated `file` maps to (#159),
+    /// via the HLS provenance map. `None` when no provenance covers the offset.
+    pub fn mapped_from_gen(&self, file: u32, offset: usize) -> Option<&Range> {
+        self.narrowest_map(&self.gen_map_index, file, offset)
+            .map(|m| &m.source)
+    }
+
+    /// The narrowest generated-RTL span a C/C++ `offset` in `file` maps to (#159), via
+    /// the HLS provenance map. `None` when no provenance covers the offset. This is what
+    /// turns a C-source click into an RTL node lookup.
+    pub fn mapped_from_src(&self, file: u32, offset: usize) -> Option<&Range> {
+        self.narrowest_map(&self.src_map_index, file, offset)
+            .map(|m| &m.generated)
+    }
+
+    /// The `source_map` entry with the narrowest covering interval in `index` for
+    /// `(file, offset)`. Narrowest wins so a fine-grained provenance line beats an
+    /// enclosing coarse one, mirroring `from_source`'s innermost-node rule.
+    fn narrowest_map(
+        &self,
+        index: &HashMap<u32, Lapper<usize, usize>>,
+        file: u32,
+        offset: usize,
+    ) -> Option<&SourceMapEntry> {
+        let lap = index.get(&file)?;
+        lap.find(offset, offset + 1)
+            .map(|iv| &self.doc.source_map[iv.val])
+            .min_by_key(|m| {
+                // width of the covering side that lives in `file`
+                let r = if m.generated.file == file {
+                    &m.generated
+                } else {
+                    &m.source
+                };
+                r.end.offset.saturating_sub(r.start.offset)
+            })
     }
 
     pub fn path_count(&self) -> usize {
@@ -642,6 +757,7 @@ mod tests {
             files: vec![FileEntry {
                 id: 0,
                 path: "t.sv".into(),
+                language: None,
             }],
             nodes: vec![
                 node(0, "t", NodeKind::Instance, Some(rng(0, 0, 10))),
@@ -649,6 +765,7 @@ mod tests {
             ],
             edges: vec![],
             enums: HashMap::new(),
+            source_map: Vec::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.nodes_at_path("t.a"), &[1]);
@@ -661,6 +778,46 @@ mod tests {
     }
 
     #[test]
+    fn hls_source_map_lookup_both_directions() {
+        // file 0 = generated RTL, file 1 = C source. One provenance entry links
+        // RTL bytes 4..8 to C bytes 20..24.
+        let doc = Document {
+            schema_version: 1,
+            design: "t".into(),
+            generator: Generator::default(),
+            files: vec![
+                FileEntry {
+                    id: 0,
+                    path: "t.sv".into(),
+                    language: Some("systemverilog".into()),
+                },
+                FileEntry {
+                    id: 1,
+                    path: "t.cpp".into(),
+                    language: Some("cpp".into()),
+                },
+            ],
+            nodes: vec![node(0, "t", NodeKind::Instance, Some(rng(0, 0, 10)))],
+            edges: vec![],
+            enums: HashMap::new(),
+            source_map: vec![SourceMapEntry {
+                generated: rng(0, 4, 8),
+                source: rng(1, 20, 24),
+            }],
+        };
+        let d = Design::from_document(doc);
+        // RTL offset 5 → C span 20..24
+        assert_eq!(d.mapped_from_gen(0, 5).map(|r| r.start.offset), Some(20));
+        // C offset 22 → RTL span 4..8
+        assert_eq!(d.mapped_from_src(1, 22).map(|r| r.start.offset), Some(4));
+        // Offsets outside any provenance span map to nothing.
+        assert!(d.mapped_from_gen(0, 9).is_none());
+        assert!(d.mapped_from_src(1, 30).is_none());
+        // Wrong-file lookups don't cross wires.
+        assert!(d.mapped_from_gen(1, 22).is_none());
+    }
+
+    #[test]
     fn conn_index_links_both_endpoints() {
         let doc = Document {
             schema_version: 1,
@@ -669,6 +826,7 @@ mod tests {
             files: vec![FileEntry {
                 id: 0,
                 path: "t.sv".into(),
+                language: None,
             }],
             nodes: vec![
                 node(0, "t", NodeKind::Instance, None),
@@ -685,6 +843,7 @@ mod tests {
                 mux_port: None,
             }],
             enums: HashMap::new(),
+            source_map: Vec::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.edges().len(), 1);
@@ -736,6 +895,7 @@ mod tests {
             nodes: vec![node(0, "t", NodeKind::Instance, None), bus, valid, mp],
             edges: vec![],
             enums: HashMap::new(),
+            source_map: Vec::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.modport_member_nodes(3, "valid"), &[2]);
@@ -771,6 +931,7 @@ mod tests {
             nodes: vec![node(0, "t.s", NodeKind::Var, None)],
             edges: vec![],
             enums,
+            source_map: Vec::new(),
         };
         let d = Design::from_document(doc);
         let e = d.enum_for_type("p::e_t").expect("enum present");

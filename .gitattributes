@@ -13,6 +13,15 @@
 *.sv   text eol=lf
 *.svh  text eol=lf
 
+# HLS C/C++ source (#159): its line offsets feed the C↔RTL provenance map, so the
+# working tree must be LF to stay aligned with the offsets baked into the golden.
+*.c    text eol=lf
+*.cc   text eol=lf
+*.cpp  text eol=lf
+*.cxx  text eol=lf
+*.h    text eol=lf
+*.hpp  text eol=lf
+
 # Committed elaborated model goldens (byte offsets embedded; must match the LF source).
 fixtures/**/*.json text eol=lf
 

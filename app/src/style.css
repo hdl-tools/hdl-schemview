@@ -122,11 +122,15 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #schematic svg { display:block; }
 /* Source absorbs the column's spare height and scrolls internally (min-height:0 via
    .pane), so a long file never grows the column and pushes the waveform off-screen. */
-#source-pane { flex:1; }
-#source { flex:1; overflow:auto; font-family:ui-monospace, monospace; font-size:12px; }
-#source .line { padding:0 8px; white-space:pre; }
-#source .line .ln { color:var(--muted); display:inline-block; width:42px; text-align:right; margin-right:8px; user-select:none; }
-#source .line.hl { background:var(--hl); }
+/* The RTL "Source" pane and the C/C++ source pane (#159) share identical line-list
+   styling — the class-level `.line` rules apply to both #source and #csrc. */
+#source-pane, #csrc-pane { flex:1; }
+#source, #csrc { flex:1; overflow:auto; font-family:ui-monospace, monospace; font-size:12px; }
+#source .line, #csrc .line { padding:0 8px; white-space:pre; }
+#source .line .ln, #csrc .line .ln { color:var(--muted); display:inline-block; width:42px; text-align:right; margin-right:8px; user-select:none; }
+#source .line.hl, #csrc .line.hl { background:var(--hl); }
+/* The C-file picker in the C/C++ tab's aux area (#159). */
+#csrc-file { background:var(--panel, #1b1b1b); color:inherit; border:1px solid var(--border, #333); border-radius:4px; font-size:12px; padding:1px 4px; }
 /* Full-width bottom drawer (#98): the status ↔ waveform tab group (#99). Its height
    is the --bottom-h grid track, dragged via #row-splitter, so the drawer stays
    visible regardless of the content above. #wave-pane / #status-pane are its tabs. */

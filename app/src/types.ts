@@ -157,8 +157,25 @@ export interface WaveLink {
 export interface ProbeResponse {
   anchor: NodeRef;
   source: SourceLoc | null;
+  /**
+   * The cross-language counterpart location (#159): the C/C++ span that `source`'s
+   * generated-RTL span maps to via the HLS provenance map, when one exists. Lets the
+   * frontend highlight both the RTL and C panes from one probe. Absent otherwise.
+   */
+  mapped_source?: SourceLoc | null;
   wave: WaveLink;
   alternatives: NodeRef[];
+}
+
+/**
+ * One source file in the loaded design (#159). Mirrors svxprobe-gui's `SourceFile`.
+ * `language` is `"systemverilog"` for RTL, `"c"`/`"cpp"` for HLS C/C++ sources
+ * (absent ⇒ SystemVerilog). The frontend reveals a C/C++ pane when a non-SV file exists.
+ */
+export interface SourceFile {
+  id: number;
+  path: string;
+  language?: string | null;
 }
 /**
  * One node of the lazy instance-hierarchy tree (#92). `children` is populated

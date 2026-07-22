@@ -1,0 +1,579 @@
+{
+  "schema_version": 1,
+  "design": "mac",
+  "generator": {
+    "tool": "pyslang",
+    "version": "11.0.0"
+  },
+  "files": [
+    {
+      "id": 0,
+      "path": "fixtures/hls_min/foo.sv",
+      "language": "systemverilog"
+    },
+    {
+      "id": 1,
+      "path": "fixtures/hls_min/foo.cpp",
+      "language": "cpp"
+    }
+  ],
+  "nodes": [
+    {
+      "id": 0,
+      "kind": "Instance",
+      "name": "mac",
+      "path": "mac",
+      "parent": null,
+      "children": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "symbol_key": "mac",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 4,
+          "col": 1,
+          "offset": 217
+        },
+        "end": {
+          "line": 13,
+          "col": 10,
+          "offset": 418
+        }
+      },
+      "inst_range": null,
+      "type": null,
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 1,
+      "kind": "Port",
+      "name": "a",
+      "path": "mac.a",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.a",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 5,
+          "col": 17,
+          "offset": 245
+        },
+        "end": {
+          "line": 5,
+          "col": 18,
+          "offset": 246
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": "in",
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 2,
+      "kind": "Net",
+      "name": "a",
+      "path": "mac.a",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.a",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 5,
+          "col": 17,
+          "offset": 245
+        },
+        "end": {
+          "line": 5,
+          "col": 18,
+          "offset": 246
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 3,
+      "kind": "Port",
+      "name": "b",
+      "path": "mac.b",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.b",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 6,
+          "col": 17,
+          "offset": 264
+        },
+        "end": {
+          "line": 6,
+          "col": 18,
+          "offset": 265
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": "in",
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 4,
+      "kind": "Net",
+      "name": "b",
+      "path": "mac.b",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.b",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 6,
+          "col": 17,
+          "offset": 264
+        },
+        "end": {
+          "line": 6,
+          "col": 18,
+          "offset": 265
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 5,
+      "kind": "Port",
+      "name": "c",
+      "path": "mac.c",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.c",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 7,
+          "col": 17,
+          "offset": 283
+        },
+        "end": {
+          "line": 7,
+          "col": 18,
+          "offset": 284
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": "in",
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 6,
+      "kind": "Net",
+      "name": "c",
+      "path": "mac.c",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.c",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 7,
+          "col": 17,
+          "offset": 283
+        },
+        "end": {
+          "line": 7,
+          "col": 18,
+          "offset": 284
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 7,
+      "kind": "Port",
+      "name": "sum",
+      "path": "mac.sum",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.sum",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 8,
+          "col": 17,
+          "offset": 302
+        },
+        "end": {
+          "line": 8,
+          "col": 20,
+          "offset": 305
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": "out",
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 8,
+      "kind": "Net",
+      "name": "sum",
+      "path": "mac.sum",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.sum",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 8,
+          "col": 17,
+          "offset": 302
+        },
+        "end": {
+          "line": 8,
+          "col": 20,
+          "offset": 305
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 9,
+      "kind": "Net",
+      "name": "prod",
+      "path": "mac.prod",
+      "parent": 0,
+      "children": [],
+      "symbol_key": "mac.prod",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 10,
+          "col": 15,
+          "offset": 323
+        },
+        "end": {
+          "line": 10,
+          "col": 19,
+          "offset": 327
+        }
+      },
+      "inst_range": null,
+      "type": "logic[31:0]",
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 10,
+      "kind": "Assign",
+      "name": "assign",
+      "path": "mac.$assign10",
+      "parent": 0,
+      "children": [
+        12
+      ],
+      "symbol_key": "mac.$assign10",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 11,
+          "col": 10,
+          "offset": 338
+        },
+        "end": {
+          "line": 11,
+          "col": 22,
+          "offset": 350
+        }
+      },
+      "inst_range": null,
+      "type": null,
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 11,
+      "kind": "Assign",
+      "name": "assign",
+      "path": "mac.$assign11",
+      "parent": 0,
+      "children": [
+        13
+      ],
+      "symbol_key": "mac.$assign11",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 12,
+          "col": 10,
+          "offset": 378
+        },
+        "end": {
+          "line": 12,
+          "col": 25,
+          "offset": 393
+        }
+      },
+      "inst_range": null,
+      "type": null,
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": []
+    },
+    {
+      "id": 12,
+      "kind": "Mul",
+      "name": "mul",
+      "path": "mac.$assign10.$mul12",
+      "parent": 10,
+      "children": [],
+      "symbol_key": "mac.$assign10.$mul12",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 11,
+          "col": 17,
+          "offset": 345
+        },
+        "end": {
+          "line": 11,
+          "col": 22,
+          "offset": 350
+        }
+      },
+      "inst_range": null,
+      "type": null,
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": [],
+      "op": "Multiply"
+    },
+    {
+      "id": 13,
+      "kind": "Add",
+      "name": "add",
+      "path": "mac.$assign11.$add13",
+      "parent": 11,
+      "children": [],
+      "symbol_key": "mac.$assign11.$add13",
+      "def_range": {
+        "file": 0,
+        "start": {
+          "line": 12,
+          "col": 17,
+          "offset": 385
+        },
+        "end": {
+          "line": 12,
+          "col": 25,
+          "offset": 393
+        }
+      },
+      "inst_range": null,
+      "type": null,
+      "dir": null,
+      "const": null,
+      "modport": null,
+      "drivers": [],
+      "loads": [],
+      "op": "Add"
+    }
+  ],
+  "edges": [
+    {
+      "id": 0,
+      "port": 10,
+      "endpoint": 2,
+      "dir": "in"
+    },
+    {
+      "id": 1,
+      "port": 10,
+      "endpoint": 4,
+      "dir": "in"
+    },
+    {
+      "id": 2,
+      "port": 10,
+      "endpoint": 9,
+      "dir": "out"
+    },
+    {
+      "id": 3,
+      "port": 11,
+      "endpoint": 6,
+      "dir": "in"
+    },
+    {
+      "id": 4,
+      "port": 11,
+      "endpoint": 8,
+      "dir": "out"
+    },
+    {
+      "id": 5,
+      "port": 11,
+      "endpoint": 9,
+      "dir": "in"
+    },
+    {
+      "id": 6,
+      "port": 12,
+      "endpoint": 2,
+      "dir": "in"
+    },
+    {
+      "id": 7,
+      "port": 12,
+      "endpoint": 4,
+      "dir": "in"
+    },
+    {
+      "id": 8,
+      "port": 12,
+      "endpoint": 9,
+      "dir": "out"
+    },
+    {
+      "id": 9,
+      "port": 13,
+      "endpoint": 6,
+      "dir": "in"
+    },
+    {
+      "id": 10,
+      "port": 13,
+      "endpoint": 8,
+      "dir": "out"
+    },
+    {
+      "id": 11,
+      "port": 13,
+      "endpoint": 9,
+      "dir": "in"
+    }
+  ],
+  "enums": {},
+  "source_map": [
+    {
+      "generated": {
+        "file": 0,
+        "start": {
+          "line": 11,
+          "col": 1,
+          "offset": 329
+        },
+        "end": {
+          "line": 11,
+          "col": 1,
+          "offset": 369
+        }
+      },
+      "source": {
+        "file": 1,
+        "start": {
+          "line": 5,
+          "col": 1,
+          "offset": 225
+        },
+        "end": {
+          "line": 5,
+          "col": 1,
+          "offset": 245
+        }
+      }
+    },
+    {
+      "generated": {
+        "file": 0,
+        "start": {
+          "line": 12,
+          "col": 1,
+          "offset": 369
+        },
+        "end": {
+          "line": 12,
+          "col": 1,
+          "offset": 409
+        }
+      },
+      "source": {
+        "file": 1,
+        "start": {
+          "line": 6,
+          "col": 1,
+          "offset": 245
+        },
+        "end": {
+          "line": 6,
+          "col": 1,
+          "offset": 267
+        }
+      }
+    }
+  ]
+}

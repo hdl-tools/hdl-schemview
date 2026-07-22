@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use svxprobe_gui::{
-    ProbeResponse, Projection, Session, SignalEntry, StartupArgs, StartupError, TreeNode,
+    ProbeResponse, Projection, Session, SignalEntry, SourceFile, StartupArgs, StartupError,
+    TreeNode,
 };
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
@@ -243,6 +244,16 @@ fn source_text(state: State<AppState>, session_id: Option<String>, file: u32) ->
     })
 }
 
+/// Every source file in the design, with its language (#159). The frontend reveals a
+/// C/C++ source pane when this reports a non-SystemVerilog file (an HLS flow).
+#[tauri::command]
+fn source_files(
+    state: State<AppState>,
+    session_id: Option<String>,
+) -> CmdResult<Vec<SourceFile>> {
+    with_session(&state, session_id, |s| Ok(s.source_files()))
+}
+
 #[tauri::command]
 fn trace_timescale(
     state: State<AppState>,
@@ -320,6 +331,7 @@ pub fn run() {
             probe_source,
             signal_values,
             source_text,
+            source_files,
             trace_timescale,
             startup_args,
         ])

@@ -352,10 +352,12 @@ pub fn generate(cfg: &SynthConfig) -> Synth {
         files: vec![FileEntry {
             id: 0,
             path: "synth.sv".to_string(),
+            language: None,
         }],
         nodes: b.nodes,
         edges: b.edges,
         enums: std::collections::HashMap::new(),
+        source_map: Vec::new(),
     };
 
     Synth {
