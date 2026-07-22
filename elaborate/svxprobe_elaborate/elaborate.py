@@ -1133,19 +1133,21 @@ class Elaborator:
         ):
             seen.add((gate_id, sid, "in", None, None, mux_port))
 
-    def _gate_assignments(self, sym: Any) -> list[tuple[Any, Any]]:
-        """Every ``(lhs, rhs)`` this block drives, for gate decomposition. `lhs` is
-        an l-value expression, or ``("path", str)`` for a net-declaration
-        initializer (whose target is not in the expression tree, #110)."""
+    def _block_assignments(self, sym: Any) -> list[tuple[Any, Any, Any]]:
+        """Every ``(node, lhs, rhs)`` this block drives, for gate decomposition.
+        `node` is the pyslang Assignment expression (``None`` for a net-declaration
+        initializer, #110), used to exclude assignments a `case` pre-pass already
+        lowered (see `_lower_cases`); `lhs` is an l-value expression, or ``("path",
+        str)`` for the net-init target (which is not in the expression tree)."""
         tp = getattr(sym, "target_path", None)
         if tp is not None:
-            return [(("path", tp), getattr(sym, "assignment", None))]
+            return [(None, ("path", tp), getattr(sym, "assignment", None))]
         root = getattr(sym, "assignment", None) or sym
-        out: list[tuple[Any, Any]] = []
+        out: list[tuple[Any, Any, Any]] = []
 
         def cb(n: Any) -> None:
             if "Assignment" in _kind_name(n):
-                out.append((getattr(n, "left", None), getattr(n, "right", None)))
+                out.append((n, getattr(n, "left", None), getattr(n, "right", None)))
 
         try:
             root.visit(cb)
@@ -1156,28 +1158,238 @@ class Elaborator:
     def _gate_block(self, logic_id: int, sym: Any, role: str, seen: set) -> None:
         """Decompose one logic block's driven expressions into a gate/mux network
         feeding the block's assigned signals. Runs *in addition* to `_logic_edges`;
-        the root primitive of each RHS wires out to that assignment's l-value."""
-        for lhs, rhs in self._gate_assignments(sym):
+        the root primitive of each RHS wires out to that assignment's l-value.
+
+        A `case`/`casez`/`casex` statement is first lowered structurally into a
+        priority-mux chain (#207, `_lower_cases`); the branch assignments it consumes
+        are then skipped by the flat pass below so they are not double-wired."""
+        consumed: set = set()
+        body = getattr(sym, "body", None)
+        if body is not None:
+            self._lower_cases(body, logic_id, seen, consumed)
+        for node, lhs, rhs in self._block_assignments(sym):
+            key = self._assign_key(node)
+            if key is not None and key in consumed:
+                continue
             out = self._emit_expr(rhs, logic_id, seen)
             if out is None or out[0] != "node":
                 # A bare signal / constant RHS (`assign y = x;`) has no gate — the
                 # direct wire is already carried by the process-level edges.
                 continue
-            root_id = out[1]
-            if isinstance(lhs, tuple) and lhs and lhs[0] == "path":
-                targets = {lhs[1]}
-            elif lhs is not None:
-                targets = self._lvalue_bases(lhs)
+            self._wire_out(out[1], lhs, seen)
+
+    def _wire_out(self, root_id: int, lhs: Any, seen: set) -> None:
+        """Wire a root primitive `root_id` out to the l-value `lhs` (an expression,
+        or ``("path", str)`` for a net-init target)."""
+        if isinstance(lhs, tuple) and lhs and lhs[0] == "path":
+            targets = {lhs[1]}
+        elif lhs is not None:
+            targets = self._lvalue_bases(lhs)
+        else:
+            targets = set()
+        for lp in sorted(targets):
+            sid = self._pick_node(lp, ("Net", "Var", "Port"))
+            if (
+                sid is not None
+                and sid != root_id
+                and self.nodes[sid]["kind"] in ("Net", "Var", "Port")
+            ):
+                seen.add((root_id, sid, "out", None, None, None))
+
+    # -- case -> priority-mux lowering (#207) ---------------------------------
+    #
+    # The flat `_block_assignments` visit throws away the enclosing `case`
+    # structure, so a branch like `alu_out = alu_add_sub;` arrives as a bare-signal
+    # RHS and emits no gate — leaving the read signal's producer readerless. This
+    # pass walks the block's top-level statements in order, tracks each l-value's
+    # most-recent prior assignment (the case fall-through default), and rewrites
+    # every `case` into a right-leaning Mux chain (ADR 0005; reuses the existing
+    # `Mux` kind + `mux_port` sel/d0/d1 roles, so no schema change). Scope is `case`
+    # only — `if`/`else` statements stay flat (tracked as a separate follow-up).
+
+    def _flatten_stmts(self, stmt: Any) -> list[Any]:
+        """The block's top-level statements in source order, peeling the structural
+        wrappers (`Timed` timing controls, `Block` begin/end, `List`) — mirrors the
+        peeling in `_gating_condition_refs`. Does *not* descend into `if`/`case`
+        branches (their bodies are handled by the lowering itself)."""
+        out: list[Any] = []
+
+        def rec(s: Any) -> None:
+            if s is None:
+                return
+            k = self._stmt_kind(s)
+            if k == "Timed":
+                rec(getattr(s, "stmt", None))
+            elif k == "Block":
+                rec(getattr(s, "body", None))
+            elif k == "List":
+                for it in getattr(s, "list", None) or []:
+                    rec(it)
             else:
-                targets = set()
-            for lp in sorted(targets):
-                sid = self._pick_node(lp, ("Net", "Var", "Port"))
-                if (
-                    sid is not None
-                    and sid != root_id
-                    and self.nodes[sid]["kind"] in ("Net", "Var", "Port")
-                ):
-                    seen.add((root_id, sid, "out", None, None, None))
+                out.append(s)
+
+        rec(stmt)
+        return out
+
+    def _assign_key(self, assign: Any) -> Optional[tuple]:
+        """A stable identity for an assignment expression — its source-range byte
+        offsets — so a `case` pre-pass can tell the flat pass which branch
+        assignments it already lowered. Keyed on source (not ``id()``): pyslang
+        re-wraps a node on each traversal, so wrapper ``id()`` is unstable across the
+        two passes (its reuse is even hash-seed dependent). ``consumed`` is per-block,
+        so identical offsets across replicated scopes (e.g. `g_lane[0/1]`) never
+        cross-contaminate."""
+        if assign is None:
+            return None
+        try:
+            sr = assign.sourceRange
+            return (sr.start.offset, sr.end.offset)
+        except Exception:
+            return None
+
+    def _mark_consumed(self, assign: Any, consumed: set) -> None:
+        """Record that a `case` branch/default assignment was lowered, so the flat
+        pass skips it (see `_assign_key`)."""
+        key = self._assign_key(assign)
+        if key is not None:
+            consumed.add(key)
+
+    def _lower_cases(
+        self, body: Any, logic_id: int, seen: set, consumed: set
+    ) -> None:
+        """Lower each top-level `case` in `body` into a Mux chain, recording the
+        `id()` of every assignment node it consumes so the flat pass skips them."""
+        # lhs path -> (assignment node, rhs expr) of the most-recent prior write,
+        # used as a case's fall-through default (e.g. picorv32's `alu_out = 'bx;`).
+        prior: dict[str, tuple[Any, Any]] = {}
+        for s in self._flatten_stmts(body):
+            k = self._stmt_kind(s)
+            if k == "ExpressionStatement":
+                assign = getattr(s, "expr", None)
+                if assign is not None and "Assignment" in _kind_name(assign):
+                    rhs = getattr(assign, "right", None)
+                    for lp in self._lvalue_bases(getattr(assign, "left", None)):
+                        prior[lp] = (assign, rhs)
+            elif k == "Case":
+                self._emit_case_stmt(s, logic_id, seen, prior, consumed)
+
+    def _emit_case_stmt(
+        self, case: Any, logic_id: int, seen: set, prior: dict, consumed: set
+    ) -> None:
+        """Lower one `case` statement: build a priority-mux chain per assigned
+        l-value and wire its root out to that l-value."""
+        case_expr = getattr(case, "expr", None)
+        const_idiom = self._is_case_true(case_expr)
+        # Per-l-value branches in source (priority) order: [(labels, rhs), ...].
+        per_lhs: dict[str, list[tuple[list, Any]]] = {}
+        order: list[str] = []
+        for grp in getattr(case, "items", None) or []:
+            labels = list(getattr(grp, "expressions", None) or [])
+            st = getattr(grp, "stmt", None)
+            assign = getattr(st, "expr", None) if st is not None else None
+            if assign is None or "Assignment" not in _kind_name(assign):
+                continue
+            self._mark_consumed(assign, consumed)
+            rhs = getattr(assign, "right", None)
+            for lp in self._lvalue_bases(getattr(assign, "left", None)):
+                if lp not in per_lhs:
+                    per_lhs[lp] = []
+                    order.append(lp)
+                per_lhs[lp].append((labels, rhs))
+        # A `default:` branch, if present, overrides the prior-assignment default.
+        default_rhs: dict[str, Any] = {}
+        dstmt = getattr(case, "defaultCase", None)
+        if dstmt is not None:
+            dassign = getattr(dstmt, "expr", None)
+            if dassign is not None and "Assignment" in _kind_name(dassign):
+                self._mark_consumed(dassign, consumed)
+                for lp in self._lvalue_bases(getattr(dassign, "left", None)):
+                    default_rhs[lp] = getattr(dassign, "right", None)
+        for lp in order:
+            drhs = default_rhs.get(lp)
+            if drhs is None and lp in prior:
+                pnode, drhs = prior.pop(lp)
+                self._mark_consumed(pnode, consumed)
+            default_ep = (
+                self._emit_expr(drhs, logic_id, seen) if drhs is not None else None
+            )
+            root = self._emit_case_chain(
+                per_lhs[lp], case_expr, const_idiom, default_ep, logic_id, seen
+            )
+            if root is not None:
+                # `_wire_out` accepts a ("path", str) l-value directly.
+                self._wire_out(root, ("path", lp), seen)
+
+    def _emit_case_chain(
+        self,
+        branches: list[tuple[list, Any]],
+        case_expr: Any,
+        const_idiom: bool,
+        default_ep: Optional[tuple],
+        logic_id: int,
+        seen: set,
+    ) -> Optional[int]:
+        """Fold `branches` (priority order) into a right-leaning 2:1 Mux chain over
+        `default_ep`: each `_add_gate("Mux", ...)` gets the item predicate as `sel`,
+        the branch value as `d1`, and the rest-of-chain (next item, then the default)
+        as `d0`. Returns the outermost Mux id, or None if nothing was emitted."""
+        acc = default_ep
+        for labels, rhs in reversed(branches):
+            nid = self._add_gate("Mux", rhs, logic_id, "Conditional")
+            sel = self._case_select(case_expr, const_idiom, labels, logic_id, seen)
+            self._wire_input(nid, sel, seen, "sel")
+            self._wire_input(nid, self._emit_expr(rhs, logic_id, seen), seen, "d1")
+            self._wire_input(nid, acc, seen, "d0")
+            acc = ("node", nid)
+        return acc[1] if acc is not None and acc[0] == "node" else None
+
+    def _case_select(
+        self,
+        case_expr: Any,
+        const_idiom: bool,
+        labels: list,
+        logic_id: int,
+        seen: set,
+    ) -> Optional[tuple]:
+        """The Mux select for one case item. `case (1'b1)` uses each item predicate
+        directly (the label *is* the boolean); a general `case (expr)` compares the
+        controlling expr to each label with an equality `Cmp`. A comma-list item
+        (`2'b00, 2'b01:`) ORs its per-label conditions."""
+        conds: list[tuple] = []
+        for lbl in labels:
+            if const_idiom:
+                ep = self._emit_expr(lbl, logic_id, seen)
+            else:
+                ep = self._emit_cmp_eq(case_expr, lbl, logic_id, seen)
+            if ep is not None:
+                conds.append(ep)
+        if not conds:
+            return None
+        if len(conds) == 1:
+            return conds[0]
+        nid = self._add_gate("Or", labels[0], logic_id, "BinaryOr")
+        for c in conds:
+            self._wire_input(nid, c, seen)
+        return ("node", nid)
+
+    def _emit_cmp_eq(
+        self, case_expr: Any, label: Any, logic_id: int, seen: set
+    ) -> tuple:
+        """An equality `Cmp` comparing the case controlling expr to a match label."""
+        nid = self._add_gate("Cmp", label, logic_id, "Equality")
+        self._wire_input(nid, self._emit_expr(case_expr, logic_id, seen), seen)
+        self._wire_input(nid, self._emit_expr(label, logic_id, seen), seen)
+        return ("node", nid)
+
+    def _is_case_true(self, expr: Any) -> bool:
+        """True for the `case (1'b1)` one-hot idiom — controlling expr is the literal
+        `1'b1`, so each item label is itself the branch predicate (no comparator)."""
+        e = expr
+        while e is not None and (
+            "Conversion" in _kind_name(e) or "Cast" in _kind_name(e)
+        ):
+            e = getattr(e, "operand", None)
+        return self._literal_value(e) == "1'b1"
 
     def _members(self, sym: Any):
         body = getattr(sym, "body", None)

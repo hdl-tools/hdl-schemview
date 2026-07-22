@@ -129,6 +129,10 @@ extending the existing `_add_logic` `$ff{nid}` scheme.
   callers pass the default, so behavior is neutral until the toggle flips.
 - The matcher gate (≥95%) is unaffected — the projection is schematic-only; no wave signals
   change.
+- **Follow-up (#207):** `case`/`casez`/`casex` statements lower into priority-`Mux` chains
+  (a one-hot `case (1'b1)` uses each item predicate as the select; a general `case (expr)`
+  uses equality-`Cmp` selects), reusing the `Mux` kind + `mux_port` roles — additive, no
+  schema change. §1's `if`/`else` → `Mux` remains a tracked follow-up (#215).
 
 ## Out of scope (unchanged from ADR 0004)
 
