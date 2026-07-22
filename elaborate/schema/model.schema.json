@@ -27,7 +27,11 @@
         "additionalProperties": false,
         "properties": {
           "id": { "type": "integer", "minimum": 0 },
-          "path": { "type": "string" }
+          "path": { "type": "string" },
+          "language": {
+            "type": ["string", "null"],
+            "description": "Source language of this file (#159): \"systemverilog\" for elaborated RTL, or \"c\"/\"cpp\" for a high-level source referenced only by HLS provenance comments. Absent/null defaults to systemverilog. Lets the frontend pick a pane and the resolver route a cross-language probe."
+          }
         }
       }
     },
@@ -57,6 +61,19 @@
       "type": "object",
       "description": "Normalized enum table keyed by canonical type string (matching a node's `type`): the value->name members for FSM/enum state display. Enums with non-literal members are omitted.",
       "additionalProperties": { "$ref": "#/$defs/enumDef" }
+    },
+    "source_map": {
+      "type": "array",
+      "description": "HLS C/C++ <-> RTL provenance map (#159): a bidirectional, line-region correspondence linking a span of generated RTL to the high-level C/C++ span it came from. Populated by the harness's --hls-map pass from the line-annotated provenance comments HLS tools write into the generated RTL. The single source of truth for C<->RTL source cross-probing (a lookup, not a heuristic). Absent/empty when no provenance comments are found.",
+      "items": {
+        "type": "object",
+        "required": ["generated", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "generated": { "$ref": "#/$defs/range", "description": "Span in a generated (systemverilog) file." },
+          "source": { "$ref": "#/$defs/range", "description": "Span in the high-level (c/cpp) source file." }
+        }
+      }
     }
   },
   "$defs": {

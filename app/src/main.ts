@@ -25,10 +25,13 @@ import type {
   SchNode,
   SchPort,
   SignalEntry,
+  SourceFile,
+  SourceLoc,
   StartupArgs,
   TraceTimescale,
   WaveLink,
 } from "./types";
+import { cSourceFiles, isCLanguage } from "./csrc";
 import { createTree, scopeFrames, type ScopeFrame, type TreeHandle } from "./tree";
 import {
   crossProbeSelection,
@@ -160,6 +163,14 @@ let labelItems: { el: SVGTextElement; segs: [Pt, Pt][] }[] = [];
 // model's source ranges), so a right-click resolves to a file byte offset for
 // `probe_source` (#19). Rebuilt by renderSource.
 let sourceCtx: { file: number; lineStarts: number[] } | null = null;
+
+// The C/C++ source pane's current click context (#159), analogous to sourceCtx but for
+// the #csrc pane, so a right-click there resolves to a C-file byte offset for probe_source.
+let csrcCtx: { file: number; lineStarts: number[] } | null = null;
+// Per-file language (from source_files, #159), so a probe's SourceLoc can be routed to
+// the RTL pane or the C pane by its file's language. The C sources drive the picker.
+const fileLangs = new Map<number, string | null | undefined>();
+let cSources: SourceFile[] = [];
 
 const context = () => (state.stack.length ? state.stack[state.stack.length - 1].path : null);
 
@@ -405,6 +416,7 @@ async function load() {
     state.top = top;
     await initHierarchy(top);
     await initPicker();
+    await initCSources(); // reveal the C/C++ source pane for an HLS design (#159)
     await setScope(top, top);
   } catch (e) {
     log("error", `load failed: ${e}`);
@@ -2357,21 +2369,48 @@ async function appendResolved(resp: ProbeResponse) {
 // list any ambiguous alternatives. Waveform display is now an explicit, additive
 // action (the menu's "Append to waveform"), so it is no longer touched here.
 async function showInSource(resp: ProbeResponse) {
-  activateTab("source-pane"); // reveal + focus the source tab (#99)
-  // Surface a source read failure (missing .sv, wrong src-root) in the status log
-  // instead of leaving the pane silently empty — the menu path calls this without
-  // its own catch, so an unhandled `source_text` rejection otherwise vanishes.
-  if (resp.source) {
+  // Route each location to the pane matching its file language (#159): the RTL node's
+  // location → the Source pane, its mapped C/C++ counterpart → the C source pane. The
+  // backend puts the RTL loc in `source` and its C counterpart in `mapped_source`, but
+  // resolve by language so the routing can't invert. Surface a read failure (missing
+  // file, wrong src-root) in the status log rather than leaving a pane silently empty.
+  const locs = [resp.source, resp.mapped_source].filter(Boolean) as SourceLoc[];
+  const rtl = locs.find((l) => !isCLanguage(fileLangs.get(l.file)));
+  const c = locs.find((l) => isCLanguage(fileLangs.get(l.file)));
+  if (rtl) {
+    activateTab("source-pane"); // RTL is primary; reveal + focus it (#99)
     try {
-      await renderSource(resp.source.file, resp.source.line, resp.source.end_line);
+      await renderSourceInto(RTL_PANE, rtl.file, rtl.line, rtl.end_line);
     } catch (e) {
       log("warn", `source unavailable: ${e}`);
     }
   }
+  if (c) {
+    revealCTab();
+    try {
+      await renderSourceInto(CSRC_PANE, c.file, c.line, c.end_line);
+      syncCFileSelect(c.file);
+    } catch (e) {
+      log("warn", `C source unavailable: ${e}`);
+    }
+    if (!rtl) activateTab("csrc-pane"); // a C-only probe → show the C pane
+  }
   renderPicker(resp);
 }
 
-async function renderSource(file: number, line: number, endLine?: number) {
+// One source pane (RTL "Source" or "C/C++ source"): its host element id and where to
+// stash the click context. Both render the same line-list; only the target differs (#159).
+interface SourcePane {
+  hostId: string;
+  setCtx: (ctx: { file: number; lineStarts: number[] }) => void;
+}
+const RTL_PANE: SourcePane = { hostId: "source", setCtx: (c) => (sourceCtx = c) };
+const CSRC_PANE: SourcePane = { hostId: "csrc", setCtx: (c) => (csrcCtx = c) };
+
+// Render a source file's lines into `pane`, highlighting `line..=endLine`. File ids are
+// unique design-wide, so the `state.source` cache holds both RTL and C files with no
+// collision; only the host + click-context differ between the two panes.
+async function renderSourceInto(pane: SourcePane, file: number, line: number, endLine?: number) {
   let cached = state.source.get(file);
   if (!cached) {
     const text = await api.sourceText(file);
@@ -2388,7 +2427,7 @@ async function renderSource(file: number, line: number, endLine?: number) {
     state.source.set(file, cached);
   }
   const { lines, lineStarts } = cached;
-  sourceCtx = { file, lineStarts };
+  pane.setCtx({ file, lineStarts });
 
   // Highlight the construct's whole span (#158) by LINE NUMBER (#203): the probe
   // carries the def's first and last line, so light every line it covers. Line
@@ -2397,7 +2436,7 @@ async function renderSource(file: number, line: number, endLine?: number) {
   // def_range offset basis (set at elaboration) differs from the on-disk source.
   const [hlStart, hlEnd] = highlightLineRange(line, endLine);
 
-  const host = $("source");
+  const host = $(pane.hostId);
   host.innerHTML = "";
   lines.forEach((text, i) => {
     const div = document.createElement("div");
@@ -3211,8 +3250,12 @@ function renderPicker(resp: ProbeResponse) {
 
 // Resolve a screen point in the source pane to a file byte offset, using the
 // caret position under the cursor plus the line's precomputed start offset.
-function sourceOffsetAt(x: number, y: number): number | null {
-  if (!sourceCtx) return null;
+function sourceOffsetAt(
+  ctx: { lineStarts: number[] } | null,
+  x: number,
+  y: number,
+): number | null {
+  if (!ctx) return null;
   const doc = document as Document & {
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
@@ -3230,7 +3273,7 @@ function sourceOffsetAt(x: number, y: number): number | null {
   const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
   const lineDiv = el?.closest<HTMLElement>(".line");
   if (!lineDiv?.dataset.lineIndex) return null;
-  const start = sourceCtx.lineStarts[Number(lineDiv.dataset.lineIndex)];
+  const start = ctx.lineStarts[Number(lineDiv.dataset.lineIndex)];
   // A click on the line-number gutter resolves to the start of the line's code.
   return el?.closest(".ln") ? start : start + col;
 }
@@ -3330,7 +3373,7 @@ function onSourceClick(ev: MouseEvent) {
 // object has no trace signal).
 async function onSourceContextMenu(ev: MouseEvent) {
   ev.preventDefault();
-  const offset = sourceOffsetAt(ev.clientX, ev.clientY);
+  const offset = sourceOffsetAt(sourceCtx, ev.clientX, ev.clientY);
   if (offset == null || !sourceCtx) return;
   const resp = await api.probeSource(sourceCtx.file, offset, context());
   if (!resp) return; // nothing resolvable at this position
@@ -3342,6 +3385,86 @@ async function onSourceContextMenu(ev: MouseEvent) {
     },
     await appendWaveItem(resp),
   ]);
+}
+
+// -- C/C++ source pane (#159) ----------------------------------------------
+
+// Left-click a C line to trace it to the RTL: probe through the provenance map and
+// reveal the mapped generated-RTL line (and sync the C highlight). Skipped during a
+// text drag-selection so tracing doesn't fight a copy.
+async function onCSourceClick(ev: MouseEvent) {
+  if (!window.getSelection()?.isCollapsed) return;
+  const offset = sourceOffsetAt(csrcCtx, ev.clientX, ev.clientY);
+  if (offset == null || !csrcCtx) return;
+  const resp = await api.probeSource(csrcCtx.file, offset, context());
+  if (resp) await showInSource(resp);
+}
+
+// Right-click a C line: same cross-probe menu as the RTL pane (Show in schematic /
+// Append to waveform), resolved through the provenance map to the RTL node.
+async function onCSourceContextMenu(ev: MouseEvent) {
+  ev.preventDefault();
+  const offset = sourceOffsetAt(csrcCtx, ev.clientX, ev.clientY);
+  if (offset == null || !csrcCtx) return;
+  const resp = await api.probeSource(csrcCtx.file, offset, context());
+  if (!resp) return;
+  openContextMenu(ev.clientX, ev.clientY, [
+    {
+      label: "Show in schematic",
+      enabled: true,
+      onClick: () => void publish(crossProbeSelection(resp, ["schematic"])),
+    },
+    await appendWaveItem(resp),
+  ]);
+}
+
+// Un-hide the C/C++ source tab button (kept hidden until an HLS design is loaded, #159).
+function revealCTab() {
+  const btn = document.querySelector<HTMLButtonElement>('.tab[data-panel="csrc-pane"]');
+  if (btn) btn.hidden = false;
+}
+
+// Point the C-file picker at `file` without firing its change handler.
+function syncCFileSelect(file: number) {
+  const sel = document.getElementById("csrc-file") as HTMLSelectElement | null;
+  if (sel && sel.value !== String(file)) sel.value = String(file);
+}
+
+// After a load, discover the design's source files and set up the C/C++ pane (#159):
+// record each file's language for probe routing, and — when the design references any
+// C/C++ source (an HLS flow) — reveal the C tab, fill its file picker, and render the
+// first C source. A pure-RTL design hides the tab and leaves the pane empty.
+async function initCSources(sid?: string) {
+  fileLangs.clear();
+  cSources = [];
+  const btn = document.querySelector<HTMLButtonElement>('.tab[data-panel="csrc-pane"]');
+  if (btn) btn.hidden = true;
+  let files: SourceFile[] = [];
+  try {
+    files = await api.sourceFiles(sid);
+  } catch (e) {
+    log("warn", `source files unavailable: ${e}`);
+    return;
+  }
+  for (const f of files) fileLangs.set(f.id, f.language);
+  cSources = cSourceFiles(files);
+  const sel = document.getElementById("csrc-file") as HTMLSelectElement | null;
+  if (sel) {
+    sel.innerHTML = "";
+    for (const f of cSources) {
+      const opt = document.createElement("option");
+      opt.value = String(f.id);
+      opt.textContent = f.path.split("/").pop() || f.path;
+      sel.appendChild(opt);
+    }
+  }
+  if (cSources.length === 0) return; // pure-RTL design: no C pane
+  revealCTab();
+  try {
+    await renderSourceInto(CSRC_PANE, cSources[0].id, 1);
+  } catch (e) {
+    log("warn", `C source unavailable: ${e}`);
+  }
 }
 
 // Navigate the schematic to show `anchor`: drill into it if it is itself a scope,
@@ -3828,6 +3951,15 @@ async function init() {
   // Source left-click re-highlight (#163) + right-click menu (#19), and dismissals.
   $("source").addEventListener("click", onSourceClick);
   $("source").addEventListener("contextmenu", onSourceContextMenu);
+  // C/C++ source pane (#159): left-click traces a C line to RTL; right-click cross-probes.
+  $("csrc").addEventListener("click", (e) => void onCSourceClick(e));
+  $("csrc").addEventListener("contextmenu", (e) => void onCSourceContextMenu(e));
+  ($("csrc-file") as HTMLSelectElement).addEventListener("change", (e) => {
+    const file = Number((e.target as HTMLSelectElement).value);
+    void renderSourceInto(CSRC_PANE, file, 1).catch((err) =>
+      log("warn", `C source unavailable: ${err}`),
+    );
+  });
   document.addEventListener("click", closeContextMenu);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeContextMenu();

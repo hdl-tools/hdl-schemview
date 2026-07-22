@@ -30,6 +30,39 @@ from pyslang.syntax import SyntaxTree
 
 SCHEMA_VERSION = 1
 
+# Default HLS provenance-comment pattern (#159). HLS tools (Vitis, Intel, Bambu,
+# LegUp, ...) write the originating C/C++ file:line into the generated RTL as a
+# line comment, e.g. `assign x = a + b;  // foo.cpp:42` or `// Operation 5
+# [foo.cpp:42]`. This finds a `<path>.<ext>:<line>` reference anywhere after a `//`.
+# Override with --hls-comment-re for a vendor-specific form.
+HLS_COMMENT_RE = r"//.*?(?P<file>[\w./\\-]+\.(?:c|cc|cpp|cxx|h|hpp)):(?P<line>\d+)"
+
+# C/C++ source extensions → the `language` tag stored on their file-table entry.
+_C_LANGS = {
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+}
+
+
+def _lang_of(path: str) -> str:
+    """The `language` tag for a C/C++ source path (defaults to cpp)."""
+    _, ext = os.path.splitext(path)
+    return _C_LANGS.get(ext.lower(), "cpp")
+
+
+def _line_starts(data: bytes) -> list[int]:
+    """Byte offset of the start of each line (0-based line index → offset). LF-based,
+    matching the golden's offset basis (RTL/goldens are pinned LF via .gitattributes)."""
+    starts = [0]
+    for i, b in enumerate(data):
+        if b == 0x0A:  # '\n'
+            starts.append(i + 1)
+    return starts
+
 # slang SymbolKind name -> Node-model kind. Anything not in this map is not a
 # spine node (parameters, genvars, modports, procedural blocks, imports, ...);
 # we still descend through scopes that can contain spine nodes.
@@ -147,11 +180,21 @@ class Elaborator:
         top: Optional[str] = None,
         include_dirs: Optional[list[str]] = None,
         gate_level: bool = False,
+        hls_map: bool = False,
+        hls_comment_re: Optional[str] = None,
     ) -> None:
         # Opt-in gate-level projection (#157, ADR 0005): decompose process/assign
         # RHS expressions into gate/mux primitive nodes *in addition* to the
         # process-level logic nodes. Off by default ⇒ output byte-identical.
         self.gate_level = gate_level
+        # Opt-in HLS C/C++ ↔ RTL provenance map (#159): scan the generated RTL's
+        # line-annotated comments for the originating C source and emit a source_map.
+        # Off by default ⇒ output byte-identical (no `language`, no `source_map`).
+        self.hls_map = hls_map
+        self.hls_re = re.compile(hls_comment_re or HLS_COMMENT_RE)
+        # Emitted C↔RTL correspondences and a cache of each scanned file's line-starts.
+        self.source_map: list[dict[str, Any]] = []
+        self._line_start_cache: dict[str, Optional[list[int]]] = {}
         opts = CompilationOptions()
         if top:
             opts.topModules = {top}
@@ -189,7 +232,7 @@ class Elaborator:
         self._inferred_latch_locs: set[tuple[Any, int]] = set()
 
     # -- source-range helpers ------------------------------------------------
-    def _file_id(self, path: str) -> int:
+    def _file_id(self, path: str, language: Optional[str] = None) -> int:
         # Store paths with forward slashes so the golden is byte-identical across
         # OSes (slang yields the platform separator); a no-op on POSIX.
         path = path.replace("\\", "/")
@@ -197,7 +240,14 @@ class Elaborator:
         if fid is None:
             fid = len(self.files)
             self._file_ids[path] = fid
-            self.files.append({"id": fid, "path": path})
+            entry: dict[str, Any] = {"id": fid, "path": path}
+            # `language` is only ever set by the opt-in HLS pass (#159); the default
+            # elaboration path never passes it, so default output stays byte-identical.
+            if language is not None:
+                entry["language"] = language
+            self.files.append(entry)
+        elif language is not None:
+            self.files[fid].setdefault("language", language)
         return fid
 
     def _loc(self, sl: Any) -> dict[str, int]:
@@ -227,6 +277,74 @@ class Elaborator:
         except Exception:
             return None
         return {"file": self._file_id(self.sm.getFileName(sl)), "start": loc, "end": loc}
+
+    # -- HLS provenance (#159) ----------------------------------------------
+    def _read_line_starts(self, disk_path: str) -> Optional[list[int]]:
+        """Line-start offsets for a file on disk, cached; None if unreadable."""
+        if disk_path not in self._line_start_cache:
+            try:
+                with open(disk_path, "rb") as fh:
+                    self._line_start_cache[disk_path] = _line_starts(fh.read())
+            except OSError:
+                self._line_start_cache[disk_path] = None
+        return self._line_start_cache[disk_path]
+
+    @staticmethod
+    def _line_range(file_id: int, starts: list[int], line_1based: int) -> Optional[dict[str, Any]]:
+        """A whole-line source range (col 1..end) for a 1-based line number."""
+        idx = line_1based - 1
+        if idx < 0 or idx >= len(starts):
+            return None
+        start_off = starts[idx]
+        end_off = starts[idx + 1] if idx + 1 < len(starts) else start_off
+        return {
+            "file": file_id,
+            "start": {"line": line_1based, "col": 1, "offset": start_off},
+            "end": {"line": line_1based, "col": 1, "offset": end_off},
+        }
+
+    def _scan_hls_provenance(self) -> None:
+        """Scan the generated RTL for HLS provenance comments and build the source_map.
+
+        Line-based over each already-registered RTL file's raw text (independent of
+        pyslang trivia). Each `<c-file>:<line>` comment links that RTL line to the C
+        line — the authoritative C↔RTL correspondence, a lookup not a heuristic. Tags
+        RTL files `systemverilog` and each referenced C file by extension.
+        """
+        rtl_files = list(self.files)  # snapshot: only RTL entries exist pre-scan
+        for entry in rtl_files:
+            entry["language"] = "systemverilog"
+            rtl_path = entry["path"]
+            data: Optional[bytes]
+            try:
+                with open(rtl_path, "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                continue  # best-effort: an unreadable source just yields no map
+            starts = _line_starts(data)
+            self._line_start_cache[rtl_path] = starts
+            rtl_dir = os.path.dirname(rtl_path)
+            for line_idx, start in enumerate(starts):
+                end = starts[line_idx + 1] if line_idx + 1 < len(starts) else len(data)
+                text = data[start:end].decode("utf-8", "replace")
+                m = self.hls_re.search(text)
+                if not m:
+                    continue
+                c_ref, c_line = m.group("file"), int(m.group("line"))
+                # Resolve the comment's C path against the RTL file's directory (the
+                # basis HLS tools write relative to), keeping it in the same relative
+                # basis as the RTL paths so src_root resolves both.
+                c_disk = c_ref if os.path.isabs(c_ref) else os.path.normpath(
+                    os.path.join(rtl_dir, c_ref)
+                )
+                c_starts = self._read_line_starts(c_disk)
+                if c_starts is None:
+                    continue  # C source not on disk → can't build a real range
+                gen = self._line_range(entry["id"], starts, line_idx + 1)
+                c_id = self._file_id(c_disk, language=_lang_of(c_ref))
+                src = self._line_range(c_id, c_starts, c_line)
+                if gen is not None and src is not None:
+                    self.source_map.append({"generated": gen, "source": src})
 
     def _range_from_expr(self, expr: Any) -> Optional[dict[str, Any]]:
         """`def_range` for a gate-level primitive: the *sub-expression's* own
@@ -1674,7 +1792,11 @@ class Elaborator:
             self._walk(top, None)
         edges = self._edges()
         self._apply_inits()
-        return {
+        # HLS C↔RTL provenance (#159): opt-in, so the default output is byte-identical.
+        # Runs after the walk so every RTL file is registered before it tags languages.
+        if self.hls_map:
+            self._scan_hls_provenance()
+        model: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "design": root.topInstances[0].name if root.topInstances else "",
             "generator": {"tool": "pyslang", "version": pyslang.__version__},
@@ -1683,6 +1805,11 @@ class Elaborator:
             "edges": edges,
             "enums": self.enums,
         }
+        # Only emit source_map when the pass ran and found correspondences, so a
+        # flag-off (or empty-result) run stays byte-identical to the pre-#159 output.
+        if self.source_map:
+            model["source_map"] = self.source_map
+        return model
 
 
 def _resolve(base: str, path: str) -> str:
@@ -1747,8 +1874,17 @@ def build_model(
     top: Optional[str] = None,
     include_dirs: Optional[list[str]] = None,
     gate_level: bool = False,
+    hls_map: bool = False,
+    hls_comment_re: Optional[str] = None,
 ) -> dict[str, Any]:
-    return Elaborator(files, top, include_dirs, gate_level=gate_level).build()
+    return Elaborator(
+        files,
+        top,
+        include_dirs,
+        gate_level=gate_level,
+        hls_map=hls_map,
+        hls_comment_re=hls_comment_re,
+    ).build()
 
 
 def _error_report(el: Elaborator) -> Optional[str]:
@@ -1793,6 +1929,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         "assign expressions into gate/mux primitive nodes (#157). Off by default; "
         "the default output is unchanged.",
     )
+    ap.add_argument(
+        "--hls-map",
+        action="store_true",
+        help="Also emit the HLS C/C++ <-> RTL provenance map (#159): scan the "
+        "generated RTL's line-annotated comments for the originating C source and "
+        "emit a source_map. Off by default; the default output is unchanged.",
+    )
+    ap.add_argument(
+        "--hls-comment-re",
+        metavar="REGEX",
+        help="Override the HLS provenance-comment pattern (needs named groups "
+        "'file' and 'line'). Only used with --hls-map.",
+    )
     args = ap.parse_args(argv)
 
     files: list[str] = list(args.files)
@@ -1804,7 +1953,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not files:
         ap.error("no source files given (pass files and/or -f FILELIST)")
 
-    el = Elaborator(files, args.top, include_dirs, gate_level=args.gate_level)
+    el = Elaborator(
+        files,
+        args.top,
+        include_dirs,
+        gate_level=args.gate_level,
+        hls_map=args.hls_map,
+        hls_comment_re=args.hls_comment_re,
+    )
     model = el.build()
     # Compile errors always render to stderr for visibility, but only an empty
     # design (nothing elaborated) fails the run: slang flags pedantic errors

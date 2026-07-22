@@ -197,6 +197,7 @@ native "Load trace…" picker (`tauri-plugin-dialog`, registered in `run()`).
 | `probe_source` | `file` (id), `offset, context?` | `ProbeResponse \| null` |
 | `signal_values` | `signalRef` | `ValueChange[]` |
 | `source_text` | `file` (id) | `String` |
+| `source_files` | — | `SourceFile[]` (#159) — every source file + `language`; the frontend reveals the **C/C++ source pane** when a non-SystemVerilog file exists (an HLS design) |
 | `trace_timescale` | — | `TraceTimescale \| null` (factor + normalized unit) |
 | `startup_args` | — (no `session_id`) | `StartupArgs \| null` (#136) — CLI launch args (`-f/-top/-I/-trace/-src-root`) parsed by the shell before the window opened; the frontend prefills the load form + auto-loads |
 
@@ -219,6 +220,7 @@ a missing filelist/trace → stderr + exit 1; no args → normal GUI boot.
 - `Node { id, name, path, parent, children, kind, symbol_key, def_range, inst_range, type_, dir, const_value, modport, drivers, loads }` — `modport` records the view name on a modport-specialized interface port (e.g. `mem`). Such a port carries directional `Port` children (one per modport member, direction from slang's `ModportPort`); each pin's `path` is the *underlying member's* canonical path (the pin is a view of that signal), wired to it by an edge. Bare interface instances stay member-pin-less.
 - `Design { doc, path_index, src_index, conn_index, wave_index }`.
 - `Document.enums: HashMap<String, EnumDef>` — normalized enum table keyed by canonical type string (matches `Node.type_`); `EnumDef { width, members: Vec<EnumMember{name, value}> }`. Looked up via `Design::enum_for_type` and surfaced on `WaveLink.enum_map` for FSM state-name display.
+- **HLS C/C++ ↔ RTL source tracing (#159, ADR 0006):** `FileEntry.language` tags each source file (`"systemverilog"` / `"c"` / `"cpp"`; `None` ⇒ SV) and `Document.source_map: Vec<SourceMapEntry { generated: Range, source: Range }>` is the bidirectional line-region provenance map — both **additive, `schema_version` stays 1**, both emitted only by the harness's opt-in `--hls-map` pass (which regex-scans the generated RTL's `// foo.cpp:N` provenance comments), so default output is byte-identical. `Design` builds `gen_map_index`/`src_map_index` (per-file `Lapper`s, symmetric to `src_index`); `mapped_from_gen`/`mapped_from_src` are the C↔RTL lookups. `CrossProbe::from_source` redirects a C-file offset through `src_to_gen` to the generated-RTL span and resolves the **narrowest node it overlaps** (`resolve_source_range`/`nodes_in_source_range`), so a C click yields a normal node-anchored `ProbeResponse` — the C pane inherits the schematic/waveform cross-probe. `ProbeResponse.mapped_source` carries the C counterpart of the RTL anchor's span (via `mapped_from_gen`), so one probe highlights both panes. Frontend: `source_files()` → the on-demand **C/C++ source tab** (`#csrc`, reuses `renderSourceInto`); `csrc.ts` `isCLanguage`/`cSourceFiles` route each `SourceLoc` to the RTL (`#source`) or C (`#csrc`) pane by language; a C-line left-click traces to RTL, right-click cross-probes. Fixture: `fixtures/hls_min/`. C is **display-only** — never parsed; the correspondence is always the tool's own provenance, never inferred.
 - `Node.members: Option<Vec<ModportMember{name, dir}>>` — per-modport membership + directions on `Modport` nodes (descriptive metadata; the modport stays a view). A member's own node resolves via `Design::modport_member_nodes` (`<parent interface path>.<name>` path lookup).
 - `Node.reset` / `Node.enable: Option<String>` (#59) — canonical paths of an inferred FF's async-reset signal and an inferred latch's gating (enable) signal. Structural facts from the harness: the reset is the timing-control edge whose signal the process body *also reads* (and `type_` then names the true clock); the enable is the sole signal read by the body's top-level conditional. Ambiguity ⇒ absent — never a name guess (a sync reset is structurally untaggable and stays untagged).
 
@@ -252,10 +254,17 @@ uv run svxprobe-elaborate --top <top> -f <filelist.f> -o <out.json>
 # expressions into gate/mux primitive nodes. Additive + off by default, so the
 # default output above stays byte-identical:
 uv run svxprobe-elaborate --top <top> -f <filelist.f> --gate-level -o <out.json>
+# Opt-in HLS C/C++ ↔ RTL provenance map (#159, ADR 0006) — scans the generated RTL's
+# line-annotated comments (e.g. `// foo.cpp:42`) for the originating C source and emits a
+# `source_map`. Additive + off by default (no `language`, no `source_map` ⇒ byte-identical).
+# `--hls-comment-re REGEX` (named groups `file`+`line`) overrides the comment pattern:
+uv run svxprobe-elaborate --top <top> -f <filelist.f> --hls-map -o <out.json>
 ```
 
 Fixtures: `fixtures/picorv32_soc/` (committed golden + VCD/FST). PR-gate tests run
-against them — **no Verilator regeneration needed** for normal work. See
+against them — **no Verilator regeneration needed** for normal work. The tiny
+`fixtures/hls_min/` (#159) is a synthetic HLS design (`foo.cpp` + generated-style `foo.sv`
+with `// foo.cpp:N` provenance comments + `--hls-map` golden) exercising C↔RTL tracing. See
 `docs/fixtures.md` for the two-tier policy and pinned tool versions.
 
 **CI:** `ci.yml` — Rust (fmt, clippy, test, match gate on FST+VCD) + Python (lint,

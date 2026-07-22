@@ -278,6 +278,17 @@ fn validate(doc: &Document) -> Result<()> {
             e.id
         );
     }
+    // HLS provenance map (#159): every mapped range must reference a real file, or the
+    // C↔RTL lookup would index a phantom file. A pure integrity check — the mapping
+    // itself is the harness's authoritative output, never second-guessed here.
+    let file_ids: std::collections::HashSet<u32> = doc.files.iter().map(|f| f.id).collect();
+    for (i, m) in doc.source_map.iter().enumerate() {
+        anyhow::ensure!(
+            file_ids.contains(&m.generated.file) && file_ids.contains(&m.source.file),
+            "source_map[{}] references an unknown file id",
+            i
+        );
+    }
     check_name_uniqueness(doc)?;
     Ok(())
 }
@@ -430,6 +441,54 @@ mod tests {
         assert!(from_slice(GATE_DOC.as_bytes()).is_ok());
     }
 
+    // HLS provenance map (#159): a document may carry a source_map linking generated
+    // RTL spans to C/C++ spans, with C files tagged `language`. Ingest indexes it and
+    // rejects a map entry that references a non-existent file id.
+    const HLS_DOC: &str = r#"{
+        "schema_version": 1,
+        "design": "t",
+        "files": [
+            {"id": 0, "path": "t.sv", "language": "systemverilog"},
+            {"id": 1, "path": "t.cpp", "language": "cpp"}
+        ],
+        "nodes": [
+            {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+             "children":[1],"symbol_key":"t",
+             "def_range":{"file":0,"start":{"line":1,"col":1,"offset":4},
+                          "end":{"line":1,"col":1,"offset":8}}},
+            {"id":1,"kind":"Var","name":"a","path":"t.a","parent":0,
+             "children":[],"symbol_key":"t.a","type":"logic"}
+        ],
+        "source_map": [
+            {"generated":{"file":0,"start":{"line":1,"col":1,"offset":4},
+                          "end":{"line":1,"col":1,"offset":8}},
+             "source":{"file":1,"start":{"line":2,"col":1,"offset":20},
+                       "end":{"line":2,"col":1,"offset":24}}}
+        ]
+    }"#;
+
+    #[test]
+    fn accepts_and_indexes_hls_source_map() {
+        let d = from_slice(HLS_DOC.as_bytes()).unwrap();
+        assert_eq!(d.doc.source_map.len(), 1);
+        assert_eq!(
+            d.doc.files[1].language.as_deref(),
+            Some("cpp"),
+            "C file tagged with its language"
+        );
+        // The provenance indices resolve both directions: RTL offset 5 → the C file
+        // (id 1); C offset 22 → the generated RTL file (id 0).
+        assert_eq!(d.mapped_from_gen(0, 5).map(|r| r.file), Some(1));
+        assert_eq!(d.mapped_from_src(1, 22).map(|r| r.file), Some(0));
+    }
+
+    #[test]
+    fn rejects_source_map_unknown_file() {
+        // The C side references file id 9, which isn't in the files table.
+        let bad = HLS_DOC.replace("\"source\":{\"file\":1", "\"source\":{\"file\":9");
+        assert!(from_slice(bad.as_bytes()).is_err());
+    }
+
     #[test]
     fn rejects_same_name_distinct_objects() {
         // Two sibling Vars with the same name but different paths: the name no
@@ -500,6 +559,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn hls_golden_maps_c_to_rtl_node() {
+        // The committed HLS fixture (#159): its golden carries a source_map linking
+        // generated-RTL spans to C spans. Loading it, a C offset must resolve through
+        // the provenance map to a real RTL node (an `Assign`), not just the module —
+        // the whole point of C→RTL tracing.
+        use svxprobe_model::NodeKind;
+        let golden = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/hls_min/golden/hierarchy.json");
+        let d = from_slice(&std::fs::read(golden).unwrap()).unwrap();
+
+        assert!(!d.doc.source_map.is_empty(), "golden carries a source_map");
+        // The C file is tagged; the RTL file is systemverilog.
+        let cpp = d
+            .doc
+            .files
+            .iter()
+            .find(|f| f.language.as_deref() == Some("cpp"))
+            .expect("a cpp file is registered");
+
+        // Take a real correspondence and walk it C → RTL.
+        let entry = &d.doc.source_map[0];
+        assert_eq!(entry.source.file, cpp.id, "map's C side is the cpp file");
+        let c_off = entry.source.start.offset as usize;
+        let rtl = d
+            .mapped_from_src(cpp.id, c_off)
+            .expect("C offset maps to an RTL span");
+        // The mapped RTL span contains a synthesized Assign node (line-granular
+        // provenance covers the whole assign line).
+        let nodes =
+            d.nodes_in_source_range(rtl.file, rtl.start.offset as usize, rtl.end.offset as usize);
+        assert!(
+            nodes
+                .iter()
+                .any(|&id| d.node(id).map(|n| n.kind) == Some(NodeKind::Assign)),
+            "C line resolves to an Assign node in the generated RTL"
+        );
+        // And the reverse: that RTL span maps back to the C file.
+        let back = d
+            .mapped_from_gen(rtl.file, rtl.start.offset as usize)
+            .expect("RTL span maps back to C");
+        assert_eq!(back.file, cpp.id, "RTL → C round-trips to the cpp file");
     }
 
     #[test]

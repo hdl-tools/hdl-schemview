@@ -11,6 +11,7 @@ import type {
   Projection,
   SchematicGraph,
   SignalEntry,
+  SourceFile,
   StartupArgs,
   TraceTimescale,
   TreeNode,
@@ -76,6 +77,9 @@ export const api = {
     invoke<ValueChange[]>("signal_values", { sessionId, signalRef }),
   sourceText: (file: number, sessionId?: string) =>
     invoke<string>("source_text", { sessionId, file }),
+  // Every source file + language, so the frontend can reveal a C/C++ pane (#159).
+  sourceFiles: (sessionId?: string) =>
+    invoke<SourceFile[]>("source_files", { sessionId }),
   traceTimescale: (sessionId?: string) =>
     invoke<TraceTimescale | null>("trace_timescale", { sessionId }),
   startupArgs: () => invoke<StartupArgs | null>("startup_args", {}),

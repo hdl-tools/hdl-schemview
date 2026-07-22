@@ -233,10 +233,30 @@ impl CrossProbe {
     /// innermost (narrowest-range) nodes, so enclosing scopes drop out; ties are
     /// the genuine generate ambiguity, surfaced as `alternatives`.
     pub fn from_source(&self, file: u32, offset: usize) -> Option<Resolution> {
-        let cands = self.design.nodes_at_source(file, offset);
+        // HLS C↔RTL tracing (#159): a click in a C/C++ source has no node of its own —
+        // redirect through the provenance map to the generated-RTL span, then resolve
+        // the node(s) that span *contains*, so a C click yields a normal node-anchored
+        // selection (and the C pane inherits the schematic/waveform cross-probe for
+        // free). A provenance span covers a whole RTL line, so resolve over the range
+        // (a point at the line start would only ever land on the enclosing module).
+        // Only fires when a provenance entry covers the offset, so RTL clicks are
+        // unaffected.
+        if let Some(rtl) = self.design.mapped_from_src(file, offset) {
+            let (rtl_file, lo, hi) = (rtl.file, rtl.start.offset as usize, rtl.end.offset as usize);
+            return self.resolve_source_range(rtl_file, lo, hi);
+        }
+        self.resolve_source_range(file, offset, offset + 1)
+    }
+
+    /// Resolve the innermost node(s) whose def/inst range overlaps `[lo, hi)` in `file`.
+    /// Generalizes the point resolution so a mapped provenance line-region (#159) picks
+    /// the narrowest node it contains, not just the enclosing scope. A one-byte span
+    /// reproduces the exact point behaviour.
+    fn resolve_source_range(&self, file: u32, lo: usize, hi: usize) -> Option<Resolution> {
+        let cands = self.design.nodes_in_source_range(file, lo, hi);
         let widths: Vec<(NodeId, usize)> = cands
             .iter()
-            .filter_map(|&id| self.covering_width(id, file, offset).map(|w| (id, w)))
+            .filter_map(|&id| self.overlapping_width(id, file, lo, hi).map(|w| (id, w)))
             .collect();
         let min_w = widths.iter().map(|&(_, w)| w).min()?;
         let inner: Vec<NodeId> = widths
@@ -318,16 +338,17 @@ impl CrossProbe {
 
     // -- internals ----------------------------------------------------------
 
-    /// Width of the narrowest def/inst range that covers `offset`; degenerate
-    /// zero-width points are deprioritized (treated as max).
-    fn covering_width(&self, id: NodeId, file: u32, offset: usize) -> Option<usize> {
+    /// Width of the narrowest def/inst range that overlaps `[lo, hi)`; degenerate
+    /// zero-width points are deprioritized (treated as max). A one-byte span
+    /// `[off, off+1)` reproduces the old point-covering behaviour exactly.
+    fn overlapping_width(&self, id: NodeId, file: u32, lo: usize, hi: usize) -> Option<usize> {
         let n = self.design.node(id)?;
         [n.def_range, n.inst_range]
             .into_iter()
             .flatten()
             .filter(|r| {
-                let (lo, hi) = (r.start.offset as usize, r.end.offset as usize);
-                r.file == file && lo <= offset && offset < hi.max(lo + 1)
+                let (r_lo, r_hi) = (r.start.offset as usize, r.end.offset as usize);
+                r.file == file && r_lo < hi && lo < r_hi.max(r_lo + 1)
             })
             .map(|r| {
                 let w = r.end.offset.saturating_sub(r.start.offset) as usize;

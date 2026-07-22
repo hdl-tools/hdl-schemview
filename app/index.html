@@ -38,9 +38,14 @@
       <section id="content" class="tab-group">
         <div class="tabbar" role="tablist">
           <button class="tab active" data-panel="source-pane" role="tab" aria-selected="true">Source</button>
+          <button class="tab" data-panel="csrc-pane" role="tab" aria-selected="false" hidden>C/C++ source</button>
           <button class="tab" data-panel="schematic-pane" role="tab" aria-selected="false" hidden>Schematic</button>
           <button class="tab" data-panel="settings-pane" role="tab" aria-selected="false">Settings</button>
           <span class="tab-aux" data-panel="source-pane"><span id="source-path"></span></span>
+          <!-- C/C++ source pane (#159): a file picker to switch between the HLS C sources. -->
+          <span class="tab-aux" data-panel="csrc-pane" hidden>
+            <select id="csrc-file" title="C/C++ source file" aria-label="C/C++ source file"></select>
+          </span>
           <span class="tab-aux" data-panel="schematic-pane" hidden>
             <span id="zoombar" title="Zoom (Ctrl/⌘ + scroll over the schematic)">
               <button id="zoom-out" aria-label="Zoom out">−</button>
@@ -52,6 +57,12 @@
         </div>
         <section id="source-pane" class="pane tab-panel active">
           <div id="source"></div>
+        </section>
+        <!-- C/C++ source pane (#159): shows the HLS high-level source. Reuses the
+             same line-list rendering as the RTL pane; clicking a line cross-probes
+             through the provenance map to the generated RTL (and schematic/waveform). -->
+        <section id="csrc-pane" class="pane tab-panel">
+          <div id="csrc" class="source"></div>
         </section>
         <section id="schematic-pane" class="pane tab-panel">
           <div id="schematic"></div>

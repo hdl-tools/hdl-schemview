@@ -67,8 +67,25 @@ pub struct WaveLink {
 pub struct ProbeResponse {
     pub anchor: NodeRef,
     pub source: Option<SourceLoc>,
+    /// The cross-language counterpart location (#159): the C/C++ span that `source`'s
+    /// generated-RTL span maps to via the HLS provenance map, when one exists. Lets the
+    /// frontend highlight both the RTL and C panes from one probe. `None` when the design
+    /// has no provenance map or the anchor's span isn't covered by it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mapped_source: Option<SourceLoc>,
     pub wave: WaveLink,
     pub alternatives: Vec<NodeRef>,
+}
+
+/// One source file in the loaded design (#159), for the frontend to enumerate and open
+/// — in particular the C/C++ files an HLS design references, so it can reveal a C
+/// source pane. `language` mirrors `FileEntry::language` (`None` ⇒ SystemVerilog).
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceFile {
+    pub id: u32,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// One node of the lazy instance-hierarchy tree (#92): a structural scope with
@@ -511,6 +528,23 @@ impl Session {
         std::fs::read_to_string(&full).with_context(|| format!("reading {}", full.display()))
     }
 
+    /// Every source file in the loaded design, with its language (#159). The frontend
+    /// uses this to reveal a C/C++ source pane when the design references non-SV files
+    /// (an HLS flow) and to populate that pane's file picker.
+    pub fn source_files(&self) -> Vec<SourceFile> {
+        self.cross
+            .design()
+            .doc
+            .files
+            .iter()
+            .map(|f| SourceFile {
+                id: f.id,
+                path: f.path.clone(),
+                language: f.language.clone(),
+            })
+            .collect()
+    }
+
     /// Resolve a model file path against the source root, robustly. An absolute path is
     /// used as-is; otherwise `src_root/path` is preferred, but when that does not exist
     /// and the path resolves as stored (already relative to the process CWD — e.g. a
@@ -578,12 +612,44 @@ impl Session {
     }
 
     fn response(&self, r: Resolution) -> ProbeResponse {
+        let source = self.source_loc(&r.selection);
+        // The C/C++ counterpart of the (RTL) anchor's span, via the provenance map (#159).
+        let mapped_source = source.as_ref().and_then(|s| self.mapped_source_loc(s));
         ProbeResponse {
             anchor: self.node_ref(r.selection.anchor),
-            source: self.source_loc(&r.selection),
+            source,
+            mapped_source,
             wave: self.wave_link(&r.selection),
             alternatives: r.alternatives.iter().map(|&id| self.node_ref(id)).collect(),
         }
+    }
+
+    /// The C/C++ `SourceLoc` a generated-RTL `SourceLoc` maps to, via the HLS provenance
+    /// map (#159). A pure lookup off the model spine — `None` when the design carries no
+    /// provenance or the RTL span isn't covered.
+    fn mapped_source_loc(&self, rtl: &SourceLoc) -> Option<SourceLoc> {
+        let r = *self
+            .cross
+            .design()
+            .mapped_from_gen(rtl.file, rtl.offset as usize)?;
+        let path = self
+            .cross
+            .design()
+            .doc
+            .files
+            .iter()
+            .find(|f| f.id == r.file)
+            .map(|f| f.path.clone())
+            .unwrap_or_default();
+        Some(SourceLoc {
+            file: r.file,
+            path,
+            line: r.start.line,
+            end_line: r.end.line,
+            col: r.start.col,
+            offset: r.start.offset,
+            end_offset: r.end.offset,
+        })
     }
 
     fn source_loc(&self, sel: &Selection) -> Option<SourceLoc> {
