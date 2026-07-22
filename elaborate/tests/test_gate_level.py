@@ -310,6 +310,121 @@ def test_gates_are_children_of_the_logic_block(tmp_path: Path) -> None:
     assert g["id"] in parent["children"]
 
 
+# --- case -> mux tree lowering (#207) -----------------------------------------
+
+
+def _root_mux_for(model: dict, sig_name: str) -> dict:
+    """The Mux whose output drives the signal named `sig_name` (the chain root)."""
+    for m in _gates(model, "Mux"):
+        if any(n["name"] == sig_name for n in _outputs(model, m["id"])):
+            return m
+    raise AssertionError(f"no root Mux drives {sig_name}: "
+                         f"{[n['kind'] for n in model['nodes']]}")
+
+
+def test_onehot_case_becomes_priority_mux_chain(tmp_path: Path) -> None:
+    """A `case (1'b1)` priority encoder lowers to a right-leaning Mux chain: each
+    item predicate is the Mux select directly (no comparator), the branch value is
+    D1, and the fall-through (next item, then the `'bx` default) is D0."""
+    model = _model(
+        tmp_path,
+        "  input logic s0, s1, a, b, output logic y);\n"
+        "  always_comb begin\n"
+        "    y = 1'bx;\n"
+        "    case (1'b1)\n"
+        "      s0: y = a;\n"
+        "      s1: y = b;\n"
+        "    endcase\n"
+        "  end",
+    )
+    assert len(_gates(model, "Mux")) == 2, [n["kind"] for n in model["nodes"]]
+    by = _by_id(model)
+    root = _root_mux_for(model, "y")
+    # Outer mux: sel = first predicate, D1 = its value, D0 = the inner mux.
+    assert by[_mux_edge(model, root["id"], "sel")["endpoint"]]["name"] == "s0"
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["name"] == "a"
+    inner = by[_mux_edge(model, root["id"], "d0")["endpoint"]]
+    assert inner["kind"] == "Mux"
+    assert by[_mux_edge(model, inner["id"], "sel")["endpoint"]]["name"] == "s1"
+    assert by[_mux_edge(model, inner["id"], "d1")["endpoint"]]["name"] == "b"
+    # The `y = 1'bx;` default ties as a Const on the innermost D0 (not dropped).
+    assert by[_mux_edge(model, inner["id"], "d0")["endpoint"]]["kind"] == "Const"
+    assert _check_invariants(model) == []
+
+
+def test_case_branch_read_wires_its_producer(tmp_path: Path) -> None:
+    """The #207 regression: a signal read *only* inside a case branch is now wired
+    into the Mux (D1), so its producer is no longer a readerless dangling output —
+    exactly picorv32's `alu_out = alu_add_sub;`."""
+    model = _model(
+        tmp_path,
+        "  input logic s, a, b, c, output logic y);\n"
+        "  logic prod;\n"
+        "  assign prod = a & b;\n"
+        "  always_comb begin\n"
+        "    y = c;\n"
+        "    case (1'b1)\n"
+        "      s: y = prod;\n"
+        "    endcase\n"
+        "  end",
+    )
+    by = _by_id(model)
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["name"] == "prod"
+    # The prior `y = c;` becomes the fall-through default.
+    assert by[_mux_edge(model, root["id"], "d0")["endpoint"]]["name"] == "c"
+    # `prod`'s And producer drives it, so `prod` now has both a driver and a reader.
+    prod = next(n for n in model["nodes"] if n["name"] == "prod")
+    assert any(e["endpoint"] == prod["id"] and e["dir"] == "out"
+               and by[e["port"]]["kind"] == "And" for e in model["edges"])
+    assert _check_invariants(model) == []
+
+
+def test_general_case_uses_equality_selects(tmp_path: Path) -> None:
+    """A general `case (expr)` (controlling expr is not `1'b1`) selects each branch
+    by an equality `Cmp` of the controlling expr against the item label."""
+    model = _model(
+        tmp_path,
+        "  input logic [1:0] op, input logic a, b, output logic z);\n"
+        "  always_comb begin\n"
+        "    z = 1'b0;\n"
+        "    case (op)\n"
+        "      2'b00: z = a;\n"
+        "      2'b01: z = b;\n"
+        "    endcase\n"
+        "  end",
+    )
+    by = _by_id(model)
+    root = _root_mux_for(model, "z")
+    sel = by[_mux_edge(model, root["id"], "sel")["endpoint"]]
+    assert sel["kind"] == "Cmp" and sel["op"] == "Equality"
+    # The comparator reads the controlling expression `op`.
+    assert any(n["name"] == "op" for n in _inputs(model, sel["id"]))
+    assert _check_invariants(model) == []
+
+
+def test_multi_label_case_item_ors_its_selects(tmp_path: Path) -> None:
+    """A comma-list case item (`2'b00, 2'b01:`) ORs the per-label equality selects
+    into the Mux select — the branch matches if *any* label matches."""
+    model = _model(
+        tmp_path,
+        "  input logic [1:0] op, input logic a, output logic z);\n"
+        "  always_comb begin\n"
+        "    z = 1'b0;\n"
+        "    case (op)\n"
+        "      2'b00, 2'b01: z = a;\n"
+        "    endcase\n"
+        "  end",
+    )
+    by = _by_id(model)
+    root = _root_mux_for(model, "z")
+    sel = by[_mux_edge(model, root["id"], "sel")["endpoint"]]
+    assert sel["kind"] == "Or"
+    cmps = [n for n in _inputs(model, sel["id"]) if n["kind"] == "Cmp"]
+    assert len(cmps) == 2, [(n["kind"], n["name"]) for n in _inputs(model, sel["id"])]
+    assert _check_invariants(model) == []
+
+
 # --- the byte-identical guarantee: flag OFF changes nothing --------------------
 
 REPO = Path(__file__).resolve().parents[2]

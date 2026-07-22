@@ -1656,7 +1656,7 @@ fn mux_reading_a_memory_element_wires_to_the_array() {
     let mux = g
         .nodes
         .iter()
-        .find(|n| n.path == "picorv32_soc.g_lane[0].core.$comb376.$mux1273")
+        .find(|n| n.path == "picorv32_soc.g_lane[0].core.$comb376.$mux1305")
         .expect("cpuregs read mux");
     let d1 = mux
         .ports
