@@ -100,10 +100,88 @@ describe("tokenizeLines (SystemVerilog)", () => {
     expect(rows[1]).toEqual([]);
   });
 
-  it("skips SystemVerilog keywords for a non-SV language but still lexes strings", () => {
-    const [row] = tokenizeLines('char *s = "hi"; // c', "cpp");
+  it("claims no keywords for an unregistered language but still lexes strings", () => {
+    const [row] = tokenizeLines('char *s = "hi"; // x', "python");
     expect(row.some((t) => t.cls === "keyword" || t.cls === "type")).toBe(false);
     expect(row.some((t) => t.text === '"hi"' && t.cls === "string")).toBe(true);
-    expect(row.some((t) => t.text === "// c" && t.cls === "comment")).toBe(true);
+    expect(row.some((t) => t.text === "// x" && t.cls === "comment")).toBe(true);
+  });
+});
+
+describe("tokenizeLines (C/C++, #224)", () => {
+  it("classifies C keywords and types", () => {
+    const [row] = tokenizeLines("static int count = 0;", "c");
+    expect(row.find((t) => t.text === "static")?.cls).toBe("keyword");
+    expect(row.find((t) => t.text === "int")?.cls).toBe("type");
+  });
+
+  it("classifies C++ keywords across the C/C++ language tags", () => {
+    const [row] = tokenizeLines("class Foo : public Bar {", "cpp");
+    expect(row.find((t) => t.text === "class")?.cls).toBe("keyword");
+    expect(row.find((t) => t.text === "public")?.cls).toBe("keyword");
+    expect(
+      tokenizeLines("namespace n {", "hpp")[0].find((t) => t.text === "namespace")?.cls,
+    ).toBe("keyword");
+  });
+
+  it("classifies # preprocessor directives", () => {
+    const [inc] = tokenizeLines("#include <stdio.h>", "c");
+    expect(inc.some((t) => t.text === "#include" && t.cls === "directive")).toBe(true);
+    const [def] = tokenizeLines("#define W 8", "cpp");
+    expect(def.some((t) => t.text === "#define" && t.cls === "directive")).toBe(true);
+  });
+
+  it("does not treat a SystemVerilog backtick directive as a C directive", () => {
+    const [row] = tokenizeLines("`define W 8", "c");
+    expect(row.some((t) => t.cls === "directive")).toBe(false);
+  });
+
+  it("classifies char literals, including escapes", () => {
+    expect(
+      tokenizeLines("char c = 'a';", "c")[0].some((t) => t.text === "'a'" && t.cls === "string"),
+    ).toBe(true);
+    expect(
+      tokenizeLines("char n = '\\n';", "c")[0].some(
+        (t) => t.text === "'\\n'" && t.cls === "string",
+      ),
+    ).toBe(true);
+  });
+
+  it("classifies hex, binary, float, exponent and suffixed numbers", () => {
+    for (const n of ["0x1F", "0b1010", "42u", "1.5f", "1e10"]) {
+      const [row] = tokenizeLines(`x = ${n};`, "c");
+      expect(row.some((t) => t.text === n && t.cls === "number")).toBe(true);
+    }
+  });
+
+  it("does not classify $ident as a system task in C", () => {
+    const [row] = tokenizeLines("int $weird = 1;", "c");
+    expect(row.some((t) => t.cls === "systask")).toBe(false);
+  });
+
+  it("shares comment and string handling with SystemVerilog", () => {
+    const [row] = tokenizeLines('s = "a//b"; /* x */', "cpp");
+    expect(row.some((t) => t.text === '"a//b"' && t.cls === "string")).toBe(true);
+    expect(row.some((t) => t.text === "/* x */" && t.cls === "comment")).toBe(true);
+  });
+
+  it("does not treat a SystemVerilog sized literal as a number in C", () => {
+    // `32'hFF` is not C; the leading 32 lexes, the tick does not start a literal.
+    const [row] = tokenizeLines("x = 32'hFF;", "c");
+    expect(row.some((t) => t.text === "32'hFF")).toBe(false);
+    expect(row.some((t) => t.text === "32" && t.cls === "number")).toBe(true);
+  });
+
+  it("round-trips C source (no chars added or dropped)", () => {
+    const src = [
+      "#include <stdint.h>",
+      "// add two",
+      "int add(int a, int b) { /* sum",
+      "   spanning */",
+      "  char c = 'x';",
+      "  return a + b; // done",
+      "}",
+    ].join("\n");
+    expect(roundTrips(src, "c")).toBe(true);
   });
 });

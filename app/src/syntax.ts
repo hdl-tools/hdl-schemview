@@ -7,6 +7,8 @@
 // `sourceOffsetAt` (via srcoffset.ts `lineColumn`) relies on it to keep the byte-offset
 // cross-probe correct now that a line renders as many nodes instead of one text node.
 
+import { isCLanguage } from "./csrc";
+
 export type TokenClass =
   | "keyword"
   | "type"
@@ -26,6 +28,16 @@ export interface Token {
 interface Grammar {
   keywords: Set<string>;
   types: Set<string>;
+  /** Sigil introducing a directive: "`" for SystemVerilog, "#" for the C preprocessor. */
+  directiveSigil: string | null;
+  /** `$display`-style system tasks (SystemVerilog only). */
+  systask: boolean;
+  /** Single-quoted char literals ('a'), C/C++ only — SV spends ' on sized literals. */
+  charLiteral: boolean;
+  /** A bare ' can open a sized numeric literal ('d5) — SystemVerilog only. */
+  tickNumber: boolean;
+  /** Numeric-literal matcher, anchored at ^. */
+  num: RegExp;
 }
 
 const SV_TYPES = new Set([
@@ -45,23 +57,79 @@ const SV_KEYWORDS = new Set([
   "priority", "break", "continue",
 ]);
 
-const SV_GRAMMAR: Grammar = { keywords: SV_KEYWORDS, types: SV_TYPES };
+// C/C++ (#224). One grammar serves both: C++ keywords are a superset, and the harness's
+// language tags (c/cpp/cc/cxx/h/hpp) don't reliably distinguish a C header from a C++ one.
+const C_TYPES = new Set([
+  "void", "char", "short", "int", "long", "float", "double", "signed", "unsigned",
+  "bool", "size_t", "ssize_t", "wchar_t", "char16_t", "char32_t", "auto",
+  "int8_t", "int16_t", "int32_t", "int64_t",
+  "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+  "intptr_t", "uintptr_t", "ptrdiff_t", "nullptr_t",
+]);
+
+const C_KEYWORDS = new Set([
+  "if", "else", "for", "while", "do", "switch", "case", "default", "break",
+  "continue", "return", "goto", "sizeof", "typedef", "struct", "union", "enum",
+  "static", "extern", "register", "volatile", "const", "inline", "restrict",
+  "class", "public", "private", "protected", "virtual", "override", "final",
+  "namespace", "using", "template", "typename", "new", "delete", "this",
+  "operator", "friend", "explicit", "mutable", "constexpr", "consteval",
+  "noexcept", "throw", "try", "catch", "nullptr", "true", "false",
+  "static_cast", "dynamic_cast", "const_cast", "reinterpret_cast", "decltype",
+]);
+
+// SystemVerilog: sized literal (32'hFF, 'd5) before a plain decimal so it isn't split.
+const SV_NUM = /^(?:\d[\d_]*)?'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_]+|^\d[\d_]*(?:\.\d[\d_]*)?/;
+// C/C++: hex and binary before decimal, else 0x1F would lex as 0 then x1F.
+const C_NUM =
+  /^0[xX][0-9a-fA-F]+[uUlL]*|^0[bB][01]+[uUlL]*|^\d+(?:\.\d*)?(?:[eE][+-]?\d+)?[uUlLfF]*/;
+
+const SV_GRAMMAR: Grammar = {
+  keywords: SV_KEYWORDS,
+  types: SV_TYPES,
+  directiveSigil: "`",
+  systask: true,
+  charLiteral: false,
+  tickNumber: true,
+  num: SV_NUM,
+};
+
+const C_GRAMMAR: Grammar = {
+  keywords: C_KEYWORDS,
+  types: C_TYPES,
+  directiveSigil: "#",
+  systask: false,
+  charLiteral: true,
+  tickNumber: false,
+  num: C_NUM,
+};
+
 // A language with no registered grammar still lexes comments/strings/numbers/operators
-// (correct for C/C++ too) but claims no keywords — #224 registers the real C/C++ grammar.
-const PLAIN_GRAMMAR: Grammar = { keywords: new Set<string>(), types: new Set<string>() };
+// but claims no keywords — a safe default rather than mis-coloring an unknown language.
+const PLAIN_GRAMMAR: Grammar = {
+  keywords: new Set<string>(),
+  types: new Set<string>(),
+  directiveSigil: null,
+  systask: false,
+  charLiteral: false,
+  tickNumber: false,
+  num: C_NUM,
+};
 
-const GRAMMARS: Record<string, Grammar> = { systemverilog: SV_GRAMMAR };
+const SV_LANGUAGES = new Set(["systemverilog", "verilog", "sv", "v"]);
 
+// `isCLanguage` is reused from csrc.ts rather than re-listing the C tags, so the pane a
+// file renders in and the grammar it highlights with can never disagree.
 function grammarFor(lang: string | null | undefined): Grammar {
   if (lang == null) return SV_GRAMMAR; // absent language ⇒ SystemVerilog (SourceFile convention)
-  return GRAMMARS[lang.toLowerCase()] ?? PLAIN_GRAMMAR;
+  if (SV_LANGUAGES.has(lang.toLowerCase())) return SV_GRAMMAR;
+  if (isCLanguage(lang)) return C_GRAMMAR;
+  return PLAIN_GRAMMAR;
 }
 
 const WORD = /[A-Za-z_]/;
 const WORDCH = /\w/;
 const OP = new Set("=+-*/%<>!&|^~?:".split(""));
-// Sized literal (32'hFF, 'd5) is tried before a plain decimal so 32'hFF isn't split.
-const NUM = /^(?:\d[\d_]*)?'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_]+|^\d[\d_]*(?:\.\d[\d_]*)?/;
 
 function scanLine(
   line: string,
@@ -133,7 +201,8 @@ function scanLine(
       plainStart = i;
       continue;
     }
-    if (c === "`" && WORD.test(next)) {
+    // `define (SystemVerilog) / #include (C preprocessor), per grammar.
+    if (g.directiveSigil && c === g.directiveSigil && WORD.test(next)) {
       flushPlain(i);
       let j = i + 1;
       while (j < line.length && WORDCH.test(line[j])) j++;
@@ -142,7 +211,7 @@ function scanLine(
       plainStart = i;
       continue;
     }
-    if (c === "$" && WORD.test(next)) {
+    if (g.systask && c === "$" && WORD.test(next)) {
       flushPlain(i);
       let j = i + 1;
       while (j < line.length && WORDCH.test(line[j])) j++;
@@ -151,8 +220,29 @@ function scanLine(
       plainStart = i;
       continue;
     }
-    if (/[0-9]/.test(c) || (c === "'" && /[sSbBoOdDhH]/.test(next))) {
-      const m = NUM.exec(line.slice(i));
+    // C/C++ char literal ('a', '\n'). Checked before the numeric branch, which in
+    // SystemVerilog is what a leading ' means instead.
+    if (g.charLiteral && c === "'") {
+      flushPlain(i);
+      let j = i + 1;
+      while (j < line.length) {
+        if (line[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (line[j] === "'") {
+          j++;
+          break;
+        }
+        j++;
+      }
+      tokens.push({ text: line.slice(i, j), cls: "string" });
+      i = j;
+      plainStart = i;
+      continue;
+    }
+    if (/[0-9]/.test(c) || (g.tickNumber && c === "'" && /[sSbBoOdDhH]/.test(next))) {
+      const m = g.num.exec(line.slice(i));
       if (m) {
         flushPlain(i);
         tokens.push({ text: m[0], cls: "number" });
