@@ -34,6 +34,9 @@ export const api = {
     excluded: string[],
     srcRoot: string,
     sessionId?: string,
+    // Declared C/C++ sources / search roots (#222). Empty ⇒ the harness skips the
+    // HLS provenance pass entirely, so a pure-RTL designlist is unaffected.
+    hlsSrc: string[] = [],
   ) =>
     invoke<string>("elaborate_and_load", {
       sessionId,
@@ -43,6 +46,7 @@ export const api = {
       trace,
       excluded,
       srcRoot,
+      hlsSrc,
     }),
   // Swap a session's trace, keeping its design (#176) — far cheaper than a full
   // loadDesign/elaborateAndLoad, which re-ingests (or re-elaborates) an unchanged design.

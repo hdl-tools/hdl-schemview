@@ -97,10 +97,15 @@ async fn elaborate_and_load(
     trace: String,
     excluded: Vec<String>,
     src_root: String,
+    hls_src: Option<Vec<String>>,
 ) -> CmdResult<String> {
-    let session =
-        Session::elaborate_and_load(&filelist, &top, &incdirs, &trace, excluded, &src_root)
-            .map_err(|e| e.to_string())?;
+    // Optional so an omitted arg means "no C sources declared" (#222) — the same
+    // shape as session_id, keeping existing callers working unchanged.
+    let hls_src = hls_src.unwrap_or_default();
+    let session = Session::elaborate_and_load(
+        &filelist, &top, &incdirs, &trace, excluded, &src_root, &hls_src,
+    )
+    .map_err(|e| e.to_string())?;
     store_session(&state, session_id, session)
 }
 

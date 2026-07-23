@@ -182,6 +182,7 @@ class Elaborator:
         gate_level: bool = False,
         hls_map: bool = False,
         hls_comment_re: Optional[str] = None,
+        hls_src: Optional[list[str]] = None,
     ) -> None:
         # Opt-in gate-level projection (#157, ADR 0005): decompose process/assign
         # RHS expressions into gate/mux primitive nodes *in addition* to the
@@ -192,6 +193,15 @@ class Elaborator:
         # Off by default ⇒ output byte-identical (no `language`, no `source_map`).
         self.hls_map = hls_map
         self.hls_re = re.compile(hls_comment_re or HLS_COMMENT_RE)
+        # Explicitly declared C/C++ sources (#222). A *file* is a declared source,
+        # registered eagerly so a header no comment mentions is still browsable; a
+        # *directory* is a search root for resolving provenance-comment paths (not
+        # auto-registered — a src/ tree would pull in files nobody asked for). C is
+        # never parsed (ADR 0006), so these are search paths, not compiler includes.
+        self.hls_src_files: list[str] = []
+        self.hls_src_roots: list[str] = []
+        for _p in hls_src or []:
+            (self.hls_src_roots if os.path.isdir(_p) else self.hls_src_files).append(_p)
         # Emitted C↔RTL correspondences and a cache of each scanned file's line-starts.
         self.source_map: list[dict[str, Any]] = []
         self._line_start_cache: dict[str, Optional[list[int]]] = {}
@@ -331,12 +341,7 @@ class Elaborator:
                 if not m:
                     continue
                 c_ref, c_line = m.group("file"), int(m.group("line"))
-                # Resolve the comment's C path against the RTL file's directory (the
-                # basis HLS tools write relative to), keeping it in the same relative
-                # basis as the RTL paths so src_root resolves both.
-                c_disk = c_ref if os.path.isabs(c_ref) else os.path.normpath(
-                    os.path.join(rtl_dir, c_ref)
-                )
+                c_disk = self._resolve_c_ref(c_ref, rtl_dir)
                 c_starts = self._read_line_starts(c_disk)
                 if c_starts is None:
                     continue  # C source not on disk → can't build a real range
@@ -345,6 +350,57 @@ class Elaborator:
                 src = self._line_range(c_id, c_starts, c_line)
                 if gen is not None and src is not None:
                     self.source_map.append({"generated": gen, "source": src})
+
+    def _resolve_c_ref(self, c_ref: str, rtl_dir: str) -> str:
+        """Resolve a provenance comment's C path to a path on disk (#222).
+
+        Ordered, deterministic and declaration-driven — never a name guess:
+
+        1. an absolute ref that exists on disk;
+        2. each declared search root, in declaration order;
+        3. a declared source whose basename matches — only when *exactly one* does
+           (several ⇒ genuinely ambiguous, so warn and fall through rather than
+           silently pick one);
+        4. the RTL file's own directory — the pre-#222 behavior, so a design that
+           declares nothing resolves exactly as it did before.
+
+        Rung 1 falling through when the path does not exist is what rescues a
+        vendor-mangled absolute path baked in on the build machine.
+        """
+        if os.path.isabs(c_ref):
+            if os.path.exists(c_ref):
+                return c_ref
+        else:
+            for root in self.hls_src_roots:
+                cand = os.path.normpath(os.path.join(root, c_ref))
+                if os.path.exists(cand):
+                    return cand
+        base = os.path.basename(c_ref)
+        matches = [p for p in self.hls_src_files if os.path.basename(p) == base]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            print(
+                f"svxprobe-elaborate: ambiguous C source basename {base!r} "
+                f"({len(matches)} declared sources match); not resolving by basename",
+                file=sys.stderr,
+            )
+        # Keep the original basis so `src_root` resolves RTL and C the same way.
+        if os.path.isabs(c_ref):
+            return c_ref
+        return os.path.normpath(os.path.join(rtl_dir, c_ref))
+
+    def _register_declared_c_sources(self) -> None:
+        """Register every explicitly declared C/C++ source file (#222).
+
+        The files table is otherwise populated purely as a side effect of range
+        registration, so a header that no provenance comment mentions never appears
+        at all. Registering it here makes it browsable in the C pane even when it has
+        no RTL correspondence. Runs *after* `_scan_hls_provenance`, whose RTL snapshot
+        would otherwise tag these files `systemverilog`.
+        """
+        for path in self.hls_src_files:
+            self._file_id(path, language=_lang_of(path))
 
     def _range_from_expr(self, expr: Any) -> Optional[dict[str, Any]]:
         """`def_range` for a gate-level primitive: the *sub-expression's* own
@@ -1796,6 +1852,7 @@ class Elaborator:
         # Runs after the walk so every RTL file is registered before it tags languages.
         if self.hls_map:
             self._scan_hls_provenance()
+            self._register_declared_c_sources()
         model: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "design": root.topInstances[0].name if root.topInstances else "",
@@ -1876,6 +1933,7 @@ def build_model(
     gate_level: bool = False,
     hls_map: bool = False,
     hls_comment_re: Optional[str] = None,
+    hls_src: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     return Elaborator(
         files,
@@ -1884,6 +1942,7 @@ def build_model(
         gate_level=gate_level,
         hls_map=hls_map,
         hls_comment_re=hls_comment_re,
+        hls_src=hls_src,
     ).build()
 
 
@@ -1942,6 +2001,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Override the HLS provenance-comment pattern (needs named groups "
         "'file' and 'line'). Only used with --hls-map.",
     )
+    ap.add_argument(
+        "--hls-src",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Declare a C/C++ source FILE or a search-root DIRECTORY (#222). A file "
+        "is registered even if no provenance comment references it, so an unmapped "
+        "header is still browsable; a directory is searched when resolving a "
+        "comment's C path. Repeatable. Only used with --hls-map.",
+    )
     args = ap.parse_args(argv)
 
     files: list[str] = list(args.files)
@@ -1960,6 +2029,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         gate_level=args.gate_level,
         hls_map=args.hls_map,
         hls_comment_re=args.hls_comment_re,
+        hls_src=args.hls_src,
     )
     model = el.build()
     # Compile errors always render to stderr for visibility, but only an empty
