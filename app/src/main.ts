@@ -48,6 +48,8 @@ import {
 import { formatLogEntry, type LogLevel } from "./log";
 import { filterSignals, isTextEntryTag, moveIndex } from "./schempick";
 import { highlightLineRange } from "./source";
+import { tokenizeLines } from "./syntax";
+import { lineColumn } from "./srcoffset";
 import {
   formatExcluded,
   loadExcluded,
@@ -2436,6 +2438,12 @@ async function renderSourceInto(pane: SourcePane, file: number, line: number, en
   // def_range offset basis (set at elaboration) differs from the on-disk source.
   const [hlStart, hlEnd] = highlightLineRange(line, endLine);
 
+  // Lexical syntax highlighting (#223). Tokenized once per render from the same cached
+  // lines, so `lineTokens[i]` lines up with `lines[i]`. Each token renders as a bare text
+  // node (`plain`) or a themed `.tok-*` span; the concatenation is the original line, so
+  // `sourceOffsetAt` still resolves a byte offset (via `lineColumn`).
+  const lineTokens = tokenizeLines(lines.join("\n"), fileLangs.get(file));
+
   const host = $(pane.hostId);
   host.innerHTML = "";
   lines.forEach((text, i) => {
@@ -2443,7 +2451,21 @@ async function renderSourceInto(pane: SourcePane, file: number, line: number, en
     div.className = "line" + (i >= hlStart && i <= hlEnd ? " hl" : "");
     div.dataset.lineIndex = String(i);
     div.innerHTML = `<span class="ln">${i + 1}</span>`;
-    div.appendChild(document.createTextNode(text));
+    const toks = lineTokens[i];
+    if (toks && toks.length) {
+      for (const t of toks) {
+        if (t.cls === "plain") {
+          div.appendChild(document.createTextNode(t.text));
+        } else {
+          const s = document.createElement("span");
+          s.className = "tok-" + t.cls;
+          s.textContent = t.text; // textContent, never innerHTML — source text is untrusted
+          div.appendChild(s);
+        }
+      }
+    } else {
+      div.appendChild(document.createTextNode(text));
+    }
     host.appendChild(div);
   });
   host.querySelector(".hl")?.scrollIntoView({ block: "center" });
@@ -3275,7 +3297,11 @@ function sourceOffsetAt(
   if (!lineDiv?.dataset.lineIndex) return null;
   const start = ctx.lineStarts[Number(lineDiv.dataset.lineIndex)];
   // A click on the line-number gutter resolves to the start of the line's code.
-  return el?.closest(".ln") ? start : start + col;
+  if (el?.closest(".ln")) return start;
+  // Syntax highlighting (#223) splits a line into many token nodes, so the caret's `col`
+  // is an offset within one token — sum the tokens before it to recover the line column.
+  if (node.nodeType === Node.TEXT_NODE) return start + lineColumn(lineDiv, node, col);
+  return start + col; // element-level caret (rare) — preserve prior behavior
 }
 
 function closeContextMenu() {

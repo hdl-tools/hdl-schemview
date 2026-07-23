@@ -17,6 +17,9 @@
   --label:#eaeefb; --sublabel:#9fb4d8;
   --pin:#9cc4ff; --pin-out:#ffd479; --pin-en:#9fe0a8;
   --wire:#7f93b5; --wire-label:#c7d3ea;
+  /* source syntax tokens (#223) */
+  --tok-keyword:#569cd6; --tok-type:#4ec9b0; --tok-number:#b5cea8; --tok-string:#ce9178;
+  --tok-comment:#6a9955; --tok-directive:#c586c0; --tok-systask:#dcdcaa; --tok-operator:#d4d4d4;
 }
 :root[data-theme="light"] {
   --bg:#f4f5f7; --fg:#1c2330; --accent:#2563eb; --sel:#c87f00;
@@ -35,6 +38,8 @@
   --label:#1a2233; --sublabel:#55617a;
   --pin:#2f5fb0; --pin-out:#b56a00; --pin-en:#2f7d32;
   --wire:#5a6a86; --wire-label:#33415c;
+  --tok-keyword:#0000ff; --tok-type:#267f99; --tok-number:#098658; --tok-string:#a31515;
+  --tok-comment:#008000; --tok-directive:#af00db; --tok-systask:#795e26; --tok-operator:#1c2330;
 }
 * { box-sizing: border-box; }
 body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); height:100vh; display:flex; flex-direction:column; }
@@ -129,6 +134,15 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #source .line, #csrc .line { padding:0 8px; white-space:pre; }
 #source .line .ln, #csrc .line .ln { color:var(--muted); display:inline-block; width:42px; text-align:right; margin-right:8px; user-select:none; }
 #source .line.hl, #csrc .line.hl { background:var(--hl); }
+/* lexical syntax tokens (#223); identifiers stay unstyled — semantic names are #225 */
+.tok-keyword { color:var(--tok-keyword); }
+.tok-type { color:var(--tok-type); }
+.tok-number { color:var(--tok-number); }
+.tok-string { color:var(--tok-string); }
+.tok-comment { color:var(--tok-comment); font-style:italic; }
+.tok-directive { color:var(--tok-directive); }
+.tok-systask { color:var(--tok-systask); }
+.tok-operator { color:var(--tok-operator); }
 /* The C-file picker in the C/C++ tab's aux area (#159). */
 #csrc-file { background:var(--panel, #1b1b1b); color:inherit; border:1px solid var(--border, #333); border-radius:4px; font-size:12px; padding:1px 4px; }
 /* Full-width bottom drawer (#98): the status ↔ waveform tab group (#99). Its height
