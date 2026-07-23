@@ -523,6 +523,7 @@ fn elaborate_and_load_runs_the_harness() {
         &fixture("traces/picorv32_soc.fst"),
         vec!["TOP".into(), "tb".into(), "soc_pkg".into()],
         repo_root(),
+        &[], // no declared C sources (#222) ⇒ no --hls-map, pure-RTL path unchanged
     )
     .unwrap();
     assert_eq!(s.design_top(), "picorv32_soc");
@@ -536,6 +537,7 @@ fn elaborate_and_load_runs_the_harness() {
         &fixture("traces/picorv32_soc.fst"),
         vec![],
         repo_root(),
+        &[],
     );
     assert!(err.is_err(), "unknown top should fail loudly");
 }

@@ -261,6 +261,7 @@ impl Session {
         trace: &str,
         excluded: Vec<String>,
         src_root: impl AsRef<Path>,
+        hls_src: &[String],
     ) -> Result<Self> {
         // Without --top the harness would silently auto-select one; require an
         // explicit name so the guard below compares against the user's intent.
@@ -280,6 +281,18 @@ impl Session {
         // loaded design shows combinational logic as opaque Comb/Assign blocks even with
         // the toggle on, since there are no gates to dissolve.
         cmd.arg("--gate-level");
+        // Declared C/C++ sources (#222) drive the HLS provenance pass. `--hls-map` is
+        // passed *only* when sources are declared: it regex-scans every line of every
+        // RTL file, which a pure-RTL design gains nothing from, and declaring C sources
+        // is itself the opt-in. (Before #222 the flag was never passed at all, so a
+        // designlist-loaded HLS design produced no source_map and could not cross-probe
+        // to its C sources.)
+        if !hls_src.is_empty() {
+            cmd.arg("--hls-map");
+            for path in hls_src {
+                cmd.arg("--hls-src").arg(path);
+            }
+        }
         cmd.arg("-o").arg("-"); // model JSON on stdout; progress goes to stderr
         let out = cmd.output().context(
             "running svxprobe-elaborate (is the elaboration harness installed and on PATH?)",

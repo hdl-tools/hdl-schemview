@@ -214,6 +214,7 @@ type LoadSpec =
       trace: string;
       excluded: string[];
       srcRoot: string;
+      hlsSrc: string[]; // declared C/C++ sources / search roots (#222)
     };
 
 // Per-label localStorage seed keys. The main window writes a pop-out's initial state
@@ -370,7 +371,8 @@ function loadMode(): string {
 function syncLoadMode() {
   const filelist = loadMode() === "filelist";
   $("model").classList.toggle("hidden", filelist);
-  for (const id of ["filelist", "top", "incdir"]) $(id).classList.toggle("hidden", !filelist);
+  for (const id of ["filelist", "top", "incdir", "hlssrc"])
+    $(id).classList.toggle("hidden", !filelist);
 }
 
 async function load() {
@@ -392,10 +394,33 @@ async function load() {
         .split(";")
         .map((s) => s.trim())
         .filter(Boolean);
+      // Declared C/C++ sources / search roots (#222); empty ⇒ no HLS provenance pass.
+      const hlsSrc = (($("hlssrc") as HTMLInputElement).value || "")
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean);
       log("info", `elaborating ${filelist || "designlist"}…`);
-      top = await api.elaborateAndLoad(filelist, topName, incdirs, trace, excluded, srcRoot);
+      top = await api.elaborateAndLoad(
+        filelist,
+        topName,
+        incdirs,
+        trace,
+        excluded,
+        srcRoot,
+        undefined,
+        hlsSrc,
+      );
       // Capture the load so a waveform pop-out can re-elaborate its own session (#170).
-      state.loaded = { mode: "filelist", filelist, top: topName, incdirs, trace, excluded, srcRoot };
+      state.loaded = {
+        mode: "filelist",
+        filelist,
+        top: topName,
+        incdirs,
+        trace,
+        excluded,
+        srcRoot,
+        hlsSrc,
+      };
     } else {
       log("info", `loading model ${model}…`);
       top = await api.loadDesign(model, trace, excluded, srcRoot);
@@ -3829,6 +3854,7 @@ function loadPaneSession(spec: LoadSpec, id?: string): Promise<string> {
         spec.excluded,
         spec.srcRoot,
         id,
+        spec.hlsSrc, // else a pop-out re-elaborates without the design's C sources (#222)
       )
     : api.loadDesign(spec.model, spec.trace, spec.excluded, spec.srcRoot, id);
 }
