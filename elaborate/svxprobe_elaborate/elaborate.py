@@ -89,6 +89,58 @@ _KIND_MAP = {
 }
 
 
+# Node-model kind -> NameClass for a *declaration* name token (#225). Only real
+# declarations are listed: the logic spine (`Ff`/`Comb`/`Assign`) and the gate-level
+# primitives declare nothing, so they never contribute a name ref.
+_NAME_CLASS_BY_NODE_KIND = {
+    "Instance": "instance",
+    "Interface": "instance",
+    "Modport": "modport",
+    "Port": "port",
+    "Net": "signal",
+    "Var": "signal",
+    "Memory": "signal",
+    "Param": "param",
+}
+
+# slang SymbolKind name -> NameClass for a *reference* occurrence (#225). The class is
+# read off the symbol slang resolved the identifier to — a lookup, never the token text.
+# A symbol kind absent from this map yields no ref: an uncolored identifier, never a
+# guessed one.
+_NAME_CLASS_BY_SYM_KIND = {
+    "Variable": "signal",
+    "Net": "signal",
+    "Port": "port",
+    "InterfacePort": "port",
+    "ModportPort": "port",
+    "FormalArgument": "signal",
+    "Parameter": "param",
+    "TypeParameter": "param",
+    "Specparam": "param",
+    "EnumValue": "enum-member",
+    "Genvar": "genvar",
+    "Instance": "instance",
+    "Subroutine": "function",
+    "Modport": "modport",
+}
+
+# Tie-break when two records land on the same span with the same `rel` — the
+# port/backing-net dual declaration is the real case (both sit on one token).
+# Lower wins.
+_NAME_CLASS_RANK = {
+    "port": 0,
+    "instance": 1,
+    "modport": 2,
+    "param": 3,
+    "enum-member": 4,
+    "genvar": 5,
+    "function": 6,
+    "type": 7,
+    "signal": 8,
+    "module": 9,
+}
+
+
 def _is_interface_instance(sym: Any) -> bool:
     """True if `sym` is an instance whose definition is an `interface` (not a
     module) — so it can be retagged from the generic `Instance` to `Interface`."""
@@ -183,7 +235,19 @@ class Elaborator:
         hls_map: bool = False,
         hls_comment_re: Optional[str] = None,
         hls_src: Optional[list[str]] = None,
+        name_refs: bool = False,
     ) -> None:
+        # Opt-in identifier-occurrence spans (#225): every declaration name token and
+        # every resolved value reference, so the source pane can color identifiers and
+        # a click on a *usage* can resolve to the signal it names. Off by default ⇒
+        # output byte-identical (no `name_refs` key at all).
+        self.name_refs = name_refs
+        self.name_ref_rows: list[dict[str, Any]] = []
+        # (node id, declaring symbol) for every spine node, so the name-ref pass can
+        # take each declaration's name token without re-walking the hierarchy.
+        self._decl_syms: list[tuple[int, Any]] = []
+        # (file, offset) -> the winning record for that span (see `_add_name_ref`).
+        self._name_ref_index: dict[tuple[int, int], dict[str, Any]] = {}
         # Opt-in gate-level projection (#157, ADR 0005): decompose process/assign
         # RHS expressions into gate/mux primitive nodes *in addition* to the
         # process-level logic nodes. Off by default ⇒ output byte-identical.
@@ -426,6 +490,7 @@ class Elaborator:
         (path + symbol_key) when the symbol is a *view* of another signal — a
         modport pin carries the path of the member it exposes."""
         nid = len(self.nodes)
+        self._decl_syms.append((nid, sym))
         if path is None:
             path = getattr(sym, "hierarchicalPath", "") or ""
         node: dict[str, Any] = {
@@ -1839,6 +1904,148 @@ class Elaborator:
                     if nid is not None and self.nodes[nid]["kind"] == "Memory":
                         self.nodes[nid]["init_source"] = source
 
+    # -- identifier occurrences (#225) ---------------------------------------
+    def _enclosing_scope(self, nid: Optional[int]) -> Optional[str]:
+        """Path of the nearest *ancestor* instance/interface of `nid` — the elaborated
+        scope whose body physically contains this node's declaration. `None` at the
+        top (a top instance's own name token is a module definition, not a member)."""
+        cur = self.nodes[nid]["parent"] if nid is not None else None
+        while cur is not None:
+            node = self.nodes[cur]
+            if node["kind"] in ("Instance", "Interface"):
+                return node["path"]
+            cur = node["parent"]
+        return None
+
+    @staticmethod
+    def _name_ref_rel(sym_path: str, scope_path: Optional[str]) -> str:
+        """A symbol path expressed *relative to* its enclosing elaborated scope.
+
+        This is what makes one source span serve every instantiation of a module:
+        `clk` inside `picorv32` is `clk` whether the reader is looking at
+        `soc.g_lane[0].core` or `[1]`. A symbol that is not under the scope (a
+        package parameter like `soc_pkg::XLEN`, a cross-hierarchy reference) is
+        stored absolute with a leading `/` — a character SV paths never contain — so
+        the consumer can tell the two apart without guessing.
+        """
+        if scope_path and sym_path.startswith(scope_path + "."):
+            return sym_path[len(scope_path) + 1 :]
+        return "/" + sym_path
+
+    def _add_name_ref(
+        self, sl: Any, length: int, cls: str, rel: str, end_off: Optional[int] = None
+    ) -> None:
+        """Record one identifier occurrence, deduped by (file, offset).
+
+        The same span is reached once per elaborated instance of its module, so
+        dedup keeps the record with the **shortest `rel`** — which is the one taken
+        against the innermost enclosing instance, i.e. the correct scope. Equal
+        `rel`s (the port/backing-net dual declaration) break by `_NAME_CLASS_RANK`.
+        """
+        if length <= 0 and end_off is None:
+            return
+        try:
+            loc = self._loc(sl)
+            fid = self._file_id(self.sm.getFileName(sl))
+        except Exception:
+            return
+        span = length if end_off is None else end_off - loc["offset"]
+        if span <= 0:
+            return
+        key = (fid, loc["offset"])
+        prev = self._name_ref_index.get(key)
+        if prev is not None:
+            better = (len(rel), _NAME_CLASS_RANK.get(cls, 99)) < (
+                len(prev["rel"]),
+                _NAME_CLASS_RANK.get(prev["class"], 99),
+            )
+            if not better:
+                return
+        self._name_ref_index[key] = {
+            "file": fid,
+            "line": loc["line"],
+            "col": loc["col"],
+            "offset": loc["offset"],
+            "len": span,
+            "class": cls,
+            "rel": rel,
+        }
+
+    def _scan_name_refs(self) -> None:
+        """Collect every identifier occurrence the elaboration can classify (#225).
+
+        Two sources, both authoritative:
+
+        * **declarations** — each spine node's own name token (`sym.location` plus the
+          name's length), classified by the node kind the walk already assigned;
+        * **references** — every `NamedValue`/`HierarchicalValue` in an instance body,
+          classified by the symbol slang resolved it to and spanned by the expression's
+          own `sourceRange`. This is the span `_value_refs` computes and discards.
+
+        An identifier the elaboration cannot classify simply yields no record: it stays
+        default-colored, which is the point — no name guessing.
+        """
+        self._name_ref_index.clear()
+
+        for nid, sym in self._decl_syms:
+            node = self.nodes[nid]
+            cls = _NAME_CLASS_BY_NODE_KIND.get(node["kind"])
+            if cls is None or nid in self._modport_pin_ids:
+                continue  # logic/gate nodes declare nothing; a modport pin is a view
+            scope = self._enclosing_scope(nid)
+            if node["kind"] in ("Instance", "Interface"):
+                # The definition's own name token (`module picorv32`) — the same span
+                # for every instantiation, so it dedups to one record. `rel` is empty:
+                # the token names the scope itself, not a member of it.
+                defn = getattr(getattr(sym, "body", None), "definition", None) or getattr(
+                    sym, "interfaceDef", None
+                )
+                dname = getattr(defn, "name", None)
+                if defn is not None and dname:
+                    self._add_name_ref(defn.location, len(dname), "module", "")
+                if scope is None:
+                    # A top instance has no instantiation site — its `location` *is* the
+                    # definition name token just emitted.
+                    continue
+            name = node["name"]
+            loc = getattr(sym, "location", None)
+            if name and loc is not None:
+                self._add_name_ref(
+                    loc, len(name), cls, self._name_ref_rel(node["path"], scope)
+                )
+
+        for nid, sym in self.instances:
+            scope = self.nodes[nid]["path"]
+            body = getattr(sym, "body", None)
+            if body is None:
+                continue
+
+            def cb(n: Any, _scope: str = scope) -> None:
+                k = _kind_name(n)
+                if "NamedValue" not in k and "HierarchicalValue" not in k:
+                    return
+                target = getattr(n, "symbol", None)
+                cls = _NAME_CLASS_BY_SYM_KIND.get(_kind_name(target)) if target else None
+                path = _value_sym_path(target)
+                if cls is None or not path:
+                    return
+                try:
+                    sr = n.sourceRange
+                except Exception:
+                    return
+                self._add_name_ref(
+                    sr.start, 0, cls, self._name_ref_rel(path, _scope), sr.end.offset
+                )
+
+            try:
+                body.visit(cb)
+            except Exception:
+                continue
+
+        self.name_ref_rows = [
+            self._name_ref_index[k] for k in sorted(self._name_ref_index)
+        ]
+
     def build(self) -> dict[str, Any]:
         root = self.comp.getRoot()
         # Slang's analysis pass flags `always_comb` blocks that infer a latch; used
@@ -1853,6 +2060,10 @@ class Elaborator:
         if self.hls_map:
             self._scan_hls_provenance()
             self._register_declared_c_sources()
+        # Identifier-occurrence spans (#225): opt-in, and runs after the walk so every
+        # node (and its declaring symbol) exists to classify against.
+        if self.name_refs:
+            self._scan_name_refs()
         model: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "design": root.topInstances[0].name if root.topInstances else "",
@@ -1866,6 +2077,9 @@ class Elaborator:
         # flag-off (or empty-result) run stays byte-identical to the pre-#159 output.
         if self.source_map:
             model["source_map"] = self.source_map
+        # Same rule for name_refs (#225): absent unless the pass ran and found spans.
+        if self.name_ref_rows:
+            model["name_refs"] = self.name_ref_rows
         return model
 
 
@@ -1934,6 +2148,7 @@ def build_model(
     hls_map: bool = False,
     hls_comment_re: Optional[str] = None,
     hls_src: Optional[list[str]] = None,
+    name_refs: bool = False,
 ) -> dict[str, Any]:
     return Elaborator(
         files,
@@ -1943,6 +2158,7 @@ def build_model(
         hls_map=hls_map,
         hls_comment_re=hls_comment_re,
         hls_src=hls_src,
+        name_refs=name_refs,
     ).build()
 
 
@@ -1989,6 +2205,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         "the default output is unchanged.",
     )
     ap.add_argument(
+        "--name-refs",
+        action="store_true",
+        help="Also emit identifier-occurrence spans (#225): every declaration name "
+        "token and every resolved value reference, so the source pane can color "
+        "identifiers by kind and a click on a usage resolves to the signal it names. "
+        "Off by default; the default output is unchanged.",
+    )
+    ap.add_argument(
         "--hls-map",
         action="store_true",
         help="Also emit the HLS C/C++ <-> RTL provenance map (#159): scan the "
@@ -2030,6 +2254,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         hls_map=args.hls_map,
         hls_comment_re=args.hls_comment_re,
         hls_src=args.hls_src,
+        name_refs=args.name_refs,
     )
     model = el.build()
     # Compile errors always render to stderr for visibility, but only an empty
@@ -2048,7 +2273,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.out == "-":
         sys.stdout.write(text + "\n")
     else:
-        with open(args.out, "w") as f:
+        # newline="\n" so a regeneration on Windows produces the same bytes as on
+        # Linux: the goldens are pinned LF (.gitattributes), and the CI staleness
+        # check diffs them byte-for-byte. Without it Python's text mode would
+        # translate every \n to \r\n and the golden would never match.
+        with open(args.out, "w", newline="\n") as f:
             f.write(text + "\n")
     print(
         f"elaborated {model['design']}: {len(model['nodes'])} nodes, "

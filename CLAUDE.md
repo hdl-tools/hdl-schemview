@@ -267,6 +267,11 @@ uv run svxprobe-elaborate --top <top> -f <filelist.f> --hls-map -o <out.json>
 # root used when resolving a comment's C path. Repeatable; only used with --hls-map:
 uv run svxprobe-elaborate --top <top> -f <filelist.f> --hls-map \
     --hls-src src/foo.cpp --hls-src src/ -o <out.json>
+# Opt-in identifier-occurrence spans (#225) — every declaration name token and every
+# resolved value reference, so the source pane can color identifiers by kind and a click
+# on a *usage* resolves to the signal it names (the model otherwise carries declaration
+# spans only). Additive + off by default (no `name_refs` key ⇒ byte-identical):
+uv run svxprobe-elaborate --top <top> -f <filelist.f> --name-refs -o <out.json>
 ```
 
 Fixtures: `fixtures/picorv32_soc/` (committed golden + VCD/FST). PR-gate tests run
