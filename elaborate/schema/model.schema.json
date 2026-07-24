@@ -74,9 +74,35 @@
           "source": { "$ref": "#/$defs/range", "description": "Span in the high-level (c/cpp) source file." }
         }
       }
+    },
+    "name_refs": {
+      "type": "array",
+      "description": "Identifier-occurrence spans (#225): every declaration name token and every resolved value reference, each classified by the symbol the elaboration resolved it to. Populated by the harness's --name-refs pass; absent when it did not run. Backs semantic name coloring in the source pane and lets a click on a *usage* resolve to the signal it names (the model otherwise carries declaration spans only). Sorted by (file, offset), one record per span.",
+      "items": { "$ref": "#/$defs/nameRef" }
     }
   },
   "$defs": {
+    "nameRef": {
+      "type": "object",
+      "required": ["file", "line", "col", "offset", "len", "class", "rel"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "integer", "minimum": 0, "description": "Index into the files table." },
+        "line": { "type": "integer", "minimum": 1, "description": "1-based line of the identifier. Line/col are line-ending independent, so the frontend renders against these." },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based byte column of the identifier's first character." },
+        "offset": { "type": "integer", "minimum": 0, "description": "Byte offset of the identifier, on the same basis as a node's `def_range` — the resolver's lookup key." },
+        "len": { "type": "integer", "minimum": 1, "description": "Byte length of the occurrence. A qualified reference spans the whole reference (`bus.valid`, `soc_pkg::XLEN`), not just its last segment." },
+        "class": {
+          "type": "string",
+          "enum": ["module", "instance", "port", "signal", "param", "type", "enum-member", "function", "interface", "modport", "genvar"],
+          "description": "What the elaboration resolved this identifier to. Read off the symbol, never inferred from the token text: an identifier that cannot be classified yields no record at all."
+        },
+        "rel": {
+          "type": "string",
+          "description": "Symbol path relative to the enclosing elaborated scope (`clk`, `g_lane[0].bus.valid`), so one span serves every instantiation of its module. Empty means the token names the scope itself (a module definition's name). A symbol outside that scope (package parameter, cross-hierarchy reference) is stored absolute with a leading `/` — a character SV paths never contain."
+        }
+      }
+    },
     "enumDef": {
       "type": "object",
       "required": ["width", "members"],
