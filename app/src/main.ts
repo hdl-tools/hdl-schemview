@@ -92,8 +92,9 @@ const $ = (id: string) => document.getElementById(id)!;
 const SVGNS = "http://www.w3.org/2000/svg";
 
 // Append a timestamped, level-tagged row to the #status-log pane (#100, epic #94
-// 4c) and echo the latest line to the compact toolbar #status. Errors also bring
-// the Status tab forward, so a failure is never hidden behind the Waveform tab.
+// 4c) — the single place status/progress/error messages are reported (#228), so
+// the toolbar stays inputs-only. Errors also bring the Status tab forward, so a
+// failure is never hidden behind the Waveform tab.
 function log(level: LogLevel, message: string) {
   const entry = formatLogEntry(level, message, new Date());
   const pane = $("status-log");
@@ -108,7 +109,6 @@ function log(level: LogLevel, message: string) {
   row.append(ts, msg);
   pane.appendChild(row);
   pane.scrollTop = pane.scrollHeight; // keep the newest entry in view
-  $("status").textContent = entry.message; // compact latest-state echo
   if (level === "error") activateTab("status-pane");
 }
 

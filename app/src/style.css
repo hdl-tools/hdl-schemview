@@ -150,8 +150,8 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
    visible regardless of the content above. #wave-pane / #status-pane are its tabs. */
 #bottom-group { grid-area:bottom; }
 /* Status / log pane (#100, epic #94 4c): timestamped, level-tagged rows of designlist
-   parsing, model/trace loading, and API errors — the full history the toolbar #status
-   only echoes the latest of. */
+   parsing, model/trace loading, and API errors — the single place such messages are
+   reported (#228), with the full history rather than just the latest line. */
 #status-log { flex:1; min-height:0; overflow:auto; padding:6px 8px; font-family:ui-monospace, monospace; font-size:12px; }
 .log-row { display:flex; gap:8px; padding:1px 0; white-space:pre-wrap; word-break:break-word; }
 .log-row .log-ts { flex:0 0 auto; color:var(--muted); }
