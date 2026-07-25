@@ -7,6 +7,7 @@
 // payload, so the Rust `Option<String>` resolves to the default.
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  NameRefDto,
   ProbeResponse,
   Projection,
   SchematicGraph,
@@ -84,6 +85,10 @@ export const api = {
   // Every source file + language, so the frontend can reveal a C/C++ pane (#159).
   sourceFiles: (sessionId?: string) =>
     invoke<SourceFile[]>("source_files", { sessionId }),
+  // Identifier-occurrence spans for a file's semantic coloring (#225). Empty for a
+  // model elaborated without --name-refs, so the pane just renders lexically.
+  nameRefs: (file: number, sessionId?: string) =>
+    invoke<NameRefDto[]>("name_refs", { sessionId, file }),
   traceTimescale: (sessionId?: string) =>
     invoke<TraceTimescale | null>("trace_timescale", { sessionId }),
   startupArgs: () => invoke<StartupArgs | null>("startup_args", {}),

@@ -19,6 +19,7 @@ import {
 } from "./elk";
 import type { Pt, TrunkGroup } from "./elk";
 import type {
+  NameRefDto,
   NodeRef,
   ProbeResponse,
   SchematicGraph,
@@ -49,14 +50,17 @@ import { formatLogEntry, type LogLevel } from "./log";
 import { filterSignals, isTextEntryTag, moveIndex } from "./schempick";
 import { highlightLineRange } from "./source";
 import { tokenizeLines } from "./syntax";
+import { applyNameRefs } from "./names";
 import { lineColumn } from "./srcoffset";
 import {
   formatExcluded,
   loadExcluded,
   loadGateLevel,
+  loadSemanticNames,
   parseExcluded,
   saveExcluded,
   saveGateLevel,
+  saveSemanticNames,
 } from "./prefs";
 import {
   defaultDisplayUnit,
@@ -124,7 +128,13 @@ const state = {
   graph: null as SchematicGraph | null,
   stack: [] as ScopeFrame[],
   selected: null as number | null,
-  source: new Map<number, { lines: string[]; lineStarts: number[] }>(),
+  source: new Map<
+    number,
+    { lines: string[]; lineStarts: number[]; nameRefs?: NameRefDto[] }
+  >(),
+  // The RTL pane's last render args (#225), so toggling semantic coloring in Settings
+  // can re-render the source in place. Null until a source is shown.
+  sourceView: null as { file: number; line: number; endLine?: number } | null,
   // Signals pinned to the waveform pane, organized into collapsible groups (#182) with
   // one always-empty trailing group. Lanes append to the working group; reordered/removed
   // via the per-lane controls, regrouped via the name-cell menu. Reset on model reload.
@@ -2429,10 +2439,21 @@ async function showInSource(resp: ProbeResponse) {
 // stash the click context. Both render the same line-list; only the target differs (#159).
 interface SourcePane {
   hostId: string;
+  /** Whether to overlay model-driven name coloring (#225). The C/C++ pane is lexical
+   *  only — the model never parses C, so it carries no name refs (ADR 0006). */
+  semantic: boolean;
   setCtx: (ctx: { file: number; lineStarts: number[] }) => void;
 }
-const RTL_PANE: SourcePane = { hostId: "source", setCtx: (c) => (sourceCtx = c) };
-const CSRC_PANE: SourcePane = { hostId: "csrc", setCtx: (c) => (csrcCtx = c) };
+const RTL_PANE: SourcePane = {
+  hostId: "source",
+  semantic: true,
+  setCtx: (c) => (sourceCtx = c),
+};
+const CSRC_PANE: SourcePane = {
+  hostId: "csrc",
+  semantic: false,
+  setCtx: (c) => (csrcCtx = c),
+};
 
 // Render a source file's lines into `pane`, highlighting `line..=endLine`. File ids are
 // unique design-wide, so the `state.source` cache holds both RTL and C files with no
@@ -2453,8 +2474,16 @@ async function renderSourceInto(pane: SourcePane, file: number, line: number, en
     cached = { lines, lineStarts };
     state.source.set(file, cached);
   }
+  // Semantic name spans (#225), fetched once per file. Only the RTL pane asks: the C
+  // pane is lexical-only (no name refs exist for it). Empty for a model built without
+  // --name-refs. A failure degrades to lexical rendering — never blocks the source.
+  if (pane.semantic && cached.nameRefs === undefined) {
+    cached.nameRefs = await api.nameRefs(file).catch(() => []);
+  }
   const { lines, lineStarts } = cached;
   pane.setCtx({ file, lineStarts });
+  // Remember the RTL pane's view so the Settings toggle can re-render in place.
+  if (pane.semantic) state.sourceView = { file, line, endLine };
 
   // Highlight the construct's whole span (#158) by LINE NUMBER (#203): the probe
   // carries the def's first and last line, so light every line it covers. Line
@@ -2467,7 +2496,15 @@ async function renderSourceInto(pane: SourcePane, file: number, line: number, en
   // lines, so `lineTokens[i]` lines up with `lines[i]`. Each token renders as a bare text
   // node (`plain`) or a themed `.tok-*` span; the concatenation is the original line, so
   // `sourceOffsetAt` still resolves a byte offset (via `lineColumn`).
-  const lineTokens = tokenizeLines(lines.join("\n"), fileLangs.get(file));
+  // Semantic name coloring (#225) then splits `plain` tokens at the model's identifier
+  // spans — lexer authoritative for lexical classes, model for names. Skipped when the
+  // pane is lexical-only, the toggle is off, or the model carries no refs; the concat
+  // invariant `lineColumn` relies on holds either way (applyNameRefs preserves it).
+  const lexed = tokenizeLines(lines.join("\n"), fileLangs.get(file));
+  const lineTokens =
+    pane.semantic && loadSemanticNames() && cached.nameRefs?.length
+      ? applyNameRefs(lexed, cached.nameRefs)
+      : lexed;
 
   const host = $(pane.hostId);
   host.innerHTML = "";
@@ -3644,6 +3681,16 @@ function initSettings() {
       rememberCurrentView();
       void setScope(cur.path, cur.label, false);
     }
+  });
+
+  // Semantic name coloring toggle (#225): applies live — persist, then re-render the
+  // source pane in place with/without the name overlay (the lexical layer is unchanged).
+  const names = $("set-semantic-names") as HTMLInputElement;
+  names.checked = loadSemanticNames();
+  names.addEventListener("change", () => {
+    saveSemanticNames(names.checked);
+    const v = state.sourceView;
+    if (v) void renderSourceInto(RTL_PANE, v.file, v.line, v.endLine);
   });
 }
 

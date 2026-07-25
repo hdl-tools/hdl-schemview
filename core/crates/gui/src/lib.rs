@@ -294,6 +294,12 @@ impl Session {
         // loaded design shows combinational logic as opaque Comb/Assign blocks even with
         // the toggle on, since there are no gates to dissolve.
         cmd.arg("--gate-level");
+        // Always emit identifier-occurrence spans (#225), like the committed golden, for
+        // the same reason as --gate-level: the frontend's semantic-name coloring and a
+        // source *usage* click resolving to the signal it names both need `name_refs` in
+        // the model. Without this, a designlist-loaded design renders lexically only and a
+        // click on `clk` inside an always_ff resolves to the enclosing Ff block, not clk.
+        cmd.arg("--name-refs");
         // Declared C/C++ sources (#222) drive the HLS provenance pass. `--hls-map` is
         // passed *only* when sources are declared: it regex-scans every line of every
         // RTL file, which a pure-RTL design gains nothing from, and declaring C sources
