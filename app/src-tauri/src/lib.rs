@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use svxprobe_gui::{
-    ProbeResponse, Projection, Session, SignalEntry, SourceFile, StartupArgs, StartupError,
-    TreeNode,
+    NameRefDto, ProbeResponse, Projection, Session, SignalEntry, SourceFile, StartupArgs,
+    StartupError, TreeNode,
 };
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
@@ -259,6 +259,17 @@ fn source_files(
     with_session(&state, session_id, |s| Ok(s.source_files()))
 }
 
+/// Every identifier occurrence in `file` (#225), for the source pane's semantic
+/// coloring. Bulk (one call per file); empty for a model elaborated without `--name-refs`.
+#[tauri::command]
+fn name_refs(
+    state: State<AppState>,
+    session_id: Option<String>,
+    file: u32,
+) -> CmdResult<Vec<NameRefDto>> {
+    with_session(&state, session_id, |s| Ok(s.name_refs(file)))
+}
+
 #[tauri::command]
 fn trace_timescale(
     state: State<AppState>,
@@ -337,6 +348,7 @@ pub fn run() {
             signal_values,
             source_text,
             source_files,
+            name_refs,
             trace_timescale,
             startup_args,
         ])

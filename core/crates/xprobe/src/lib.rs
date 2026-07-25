@@ -245,7 +245,81 @@ impl CrossProbe {
             let (rtl_file, lo, hi) = (rtl.file, rtl.start.offset as usize, rtl.end.offset as usize);
             return self.resolve_source_range(rtl_file, lo, hi);
         }
-        self.resolve_source_range(file, offset, offset + 1)
+        let by_span = self.resolve_source_range(file, offset, offset + 1);
+        // A declaration click already lands on a concrete signal via its `def_range`,
+        // *and* resolves generate-unrolled declarations to every lane (both share the
+        // template's span). Trust it — the name-ref path can't, since a declaration's
+        // `rel` pins one arbitrary generate index.
+        if by_span
+            .as_ref()
+            .is_some_and(|r| self.is_leaf_signal(r.selection.anchor))
+        {
+            return by_span;
+        }
+        // Otherwise the click is inside a process / gate body, where span resolution
+        // can reach no finer than the enclosing block. Resolve the identifier
+        // occurrence to the *signal it names* (#225); fall back to the span result on
+        // any miss (no name refs, or an offset none covers), so behavior is unchanged
+        // for a model without them.
+        self.resolve_name_ref(file, offset).or(by_span)
+    }
+
+    /// Whether `id` is a concrete leaf signal (a declared net/var/port), as opposed to
+    /// a process, gate, instance, or other structural node.
+    fn is_leaf_signal(&self, id: NodeId) -> bool {
+        matches!(
+            self.design.node(id).map(|n| n.kind),
+            Some(NodeKind::Var | NodeKind::Net | NodeKind::Port)
+        )
+    }
+
+    /// Resolve an identifier occurrence (#225) at `offset` to the node(s) it names.
+    ///
+    /// The ref's `rel` is a path relative to its enclosing elaborated instance, which is
+    /// what lets one source span serve every instantiation: resolve `rel` against each
+    /// elaborated instance of the module whose *body* contains the click (the instances
+    /// whose `def_range` covers the offset), then let `resolve_candidates` pick the
+    /// anchor by context and surface the other instances as `alternatives` — the same
+    /// picker that handles generate-block ambiguity. A ref stored absolute (a package
+    /// parameter, a cross-hierarchy reference) names one path directly. `None` on any
+    /// miss, so `from_source` falls back to declaration-span resolution.
+    fn resolve_name_ref(&self, file: u32, offset: usize) -> Option<Resolution> {
+        let nref = self.design.name_ref_at(file, offset)?;
+        if let Some(abs) = nref.absolute_path() {
+            let ids = self.design.nodes_at_path(abs);
+            return (!ids.is_empty()).then(|| self.resolve_candidates(ids.to_vec()));
+        }
+        let rel = nref.rel.as_str();
+        let mut hits: Vec<NodeId> = Vec::new();
+        for &sid in &self.design.nodes_in_source_range(file, offset, offset + 1) {
+            let Some(scope) = self.design.node(sid) else {
+                continue;
+            };
+            if !matches!(scope.kind, NodeKind::Instance | NodeKind::Interface) {
+                continue;
+            }
+            // The module-body scope, not an instantiation site whose `inst_range`
+            // happens to cover a port-connection expression: `rel` was computed against
+            // the enclosing module's body (its `def_range`).
+            let covers_body = scope.def_range.is_some_and(|r| {
+                r.file == file
+                    && (r.start.offset as usize) <= offset
+                    && offset < (r.end.offset as usize)
+            });
+            if !covers_body {
+                continue;
+            }
+            hits.extend_from_slice(
+                self.design
+                    .nodes_at_path(&format!("{}.{}", scope.path, rel)),
+            );
+        }
+        if hits.is_empty() {
+            return None;
+        }
+        hits.sort_unstable();
+        hits.dedup();
+        Some(self.resolve_candidates(hits))
     }
 
     /// Resolve the innermost node(s) whose def/inst range overlaps `[lo, hi)` in `file`.
