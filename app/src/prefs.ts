@@ -74,3 +74,24 @@ export function saveGateLevel(on: boolean): void {
     /* ignore persistence failure */
   }
 }
+
+// Semantic name coloring toggle (#225). On by default — the source pane colors
+// identifiers by the model's classification. Off falls back to lexical-only
+// highlighting (#223). Stored as the literal "false" so an absent key reads as on.
+const KEY_SEMANTIC_NAMES = "semanticNames";
+
+export function loadSemanticNames(): boolean {
+  try {
+    return localStorage.getItem(KEY_SEMANTIC_NAMES) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export function saveSemanticNames(on: boolean): void {
+  try {
+    localStorage.setItem(KEY_SEMANTIC_NAMES, String(on));
+  } catch {
+    /* ignore persistence failure */
+  }
+}

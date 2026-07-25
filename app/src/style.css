@@ -20,6 +20,11 @@
   /* source syntax tokens (#223) */
   --tok-keyword:#569cd6; --tok-type:#4ec9b0; --tok-number:#b5cea8; --tok-string:#ce9178;
   --tok-comment:#6a9955; --tok-directive:#c586c0; --tok-systask:#dcdcaa; --tok-operator:#d4d4d4;
+  /* semantic name coloring (#225): grouped by role — signals, boundary ports,
+     constants (param/enum/genvar), structural (instance), type-like (module/type/
+     interface/modport), and callables */
+  --tok-name-signal:#9cdcfe; --tok-name-port:#4fc1ff; --tok-name-const:#d7ba7d;
+  --tok-name-instance:#c586c0; --tok-name-type:#4ec9b0; --tok-name-func:#dcdcaa;
 }
 :root[data-theme="light"] {
   --bg:#f4f5f7; --fg:#1c2330; --accent:#2563eb; --sel:#c87f00;
@@ -40,6 +45,8 @@
   --wire:#5a6a86; --wire-label:#33415c;
   --tok-keyword:#0000ff; --tok-type:#267f99; --tok-number:#098658; --tok-string:#a31515;
   --tok-comment:#008000; --tok-directive:#af00db; --tok-systask:#795e26; --tok-operator:#1c2330;
+  --tok-name-signal:#001080; --tok-name-port:#0451a5; --tok-name-const:#795e26;
+  --tok-name-instance:#af00db; --tok-name-type:#267f99; --tok-name-func:#795e26;
 }
 * { box-sizing: border-box; }
 body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); height:100vh; display:flex; flex-direction:column; }
@@ -143,6 +150,14 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 .tok-directive { color:var(--tok-directive); }
 .tok-systask { color:var(--tok-systask); }
 .tok-operator { color:var(--tok-operator); }
+/* semantic name coloring (#225): the classes applyNameRefs emits (tok-name-<class>),
+   grouped onto the role vars above. */
+.tok-name-signal { color:var(--tok-name-signal); }
+.tok-name-port { color:var(--tok-name-port); }
+.tok-name-param, .tok-name-enum-member, .tok-name-genvar { color:var(--tok-name-const); }
+.tok-name-instance { color:var(--tok-name-instance); }
+.tok-name-module, .tok-name-type, .tok-name-interface, .tok-name-modport { color:var(--tok-name-type); }
+.tok-name-function { color:var(--tok-name-func); }
 /* The C-file picker in the C/C++ tab's aux area (#159). */
 #csrc-file { background:var(--panel, #1b1b1b); color:inherit; border:1px solid var(--border, #333); border-radius:4px; font-size:12px; padding:1px 4px; }
 /* Full-width bottom drawer (#98): the status ↔ waveform tab group (#99). Its height

@@ -178,6 +178,18 @@ export interface SourceFile {
   language?: string | null;
 }
 /**
+ * One identifier occurrence in a source file (#225) — a declaration name token or a
+ * resolved value reference — for the source pane's semantic coloring. Mirrors
+ * svxprobe-gui's `NameRefDto`. `line`/`col` are 1-based; `cls` is the kebab-case
+ * `NameClass` (`signal`, `port`, `param`, `enum-member`, …), rendered as `.tok-name-<cls>`.
+ */
+export interface NameRefDto {
+  line: number;
+  col: number;
+  len: number;
+  cls: string;
+}
+/**
  * One node of the lazy instance-hierarchy tree (#92). `children` is populated
  * to the requested depth only; `expandable` flags nodes with more levels below,
  * fetched on demand via `hierarchy_tree(path, 1)`.
