@@ -358,6 +358,7 @@ pub fn generate(cfg: &SynthConfig) -> Synth {
         edges: b.edges,
         enums: std::collections::HashMap::new(),
         source_map: Vec::new(),
+        name_refs: Vec::new(),
     };
 
     Synth {
