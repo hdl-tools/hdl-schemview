@@ -114,6 +114,26 @@ fn probe_signal_links_all_views() {
 }
 
 #[test]
+fn name_refs_feeds_the_source_pane() {
+    let s = session();
+    // The committed golden is elaborated with --name-refs, so its files carry spans.
+    let all: Vec<_> = s
+        .source_files()
+        .into_iter()
+        .flat_map(|f| s.name_refs(f.id))
+        .collect();
+    assert!(
+        !all.is_empty(),
+        "golden carries identifier-occurrence spans"
+    );
+    // Every DTO is renderable: a nonempty class + a positive span length.
+    assert!(all.iter().all(|r| !r.cls.is_empty() && r.len > 0));
+    // The source pane colors at least these; the classes come from the model, kebab-cased.
+    assert!(all.iter().any(|r| r.cls == "signal"), "signals classified");
+    assert!(all.iter().any(|r| r.cls == "param"), "params classified");
+}
+
+#[test]
 fn probe_source_picker_with_context() {
     let mut s = session();
     // lane_state decl is shared across lanes (offset 1028 in file 0).

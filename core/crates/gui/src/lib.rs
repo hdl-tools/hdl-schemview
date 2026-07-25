@@ -88,6 +88,19 @@ pub struct SourceFile {
     pub language: Option<String>,
 }
 
+/// One identifier occurrence in a source file (#225), for the source pane's semantic
+/// coloring: a declaration name token or a resolved value reference, with the byte span
+/// (`line`/`col`/`len`) the frontend paints over and the kind that picks the color. The
+/// model's `rel`/`offset` stay backend-only — the pane needs neither to render.
+#[derive(Debug, Clone, Serialize)]
+pub struct NameRefDto {
+    pub line: u32,
+    pub col: u32,
+    pub len: u32,
+    /// The `NameClass`, kebab-cased (`enum-member`), matching the class the model stores.
+    pub cls: String,
+}
+
 /// One node of the lazy instance-hierarchy tree (#92): a structural scope with
 /// its children populated down to the requested depth. `expandable` flags an
 /// unexpanded node that has more levels below, so the frontend fetches them on
@@ -554,6 +567,24 @@ impl Session {
                 id: f.id,
                 path: f.path.clone(),
                 language: f.language.clone(),
+            })
+            .collect()
+    }
+
+    /// Every identifier occurrence in `file` (#225), for the source pane's semantic
+    /// coloring. The bulk feed — one call per rendered file — so the pane never point-
+    /// probes per token. Answered straight from the model's `name_refs` index; empty for
+    /// a model elaborated without `--name-refs` (so the pane just renders lexically).
+    pub fn name_refs(&self, file: u32) -> Vec<NameRefDto> {
+        self.cross
+            .design()
+            .name_refs_in_file(file)
+            .into_iter()
+            .map(|r| NameRefDto {
+                line: r.line,
+                col: r.col,
+                len: r.len,
+                cls: r.class.as_str().to_string(),
             })
             .collect()
     }

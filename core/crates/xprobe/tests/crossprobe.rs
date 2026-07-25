@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use svxprobe_matcher::MatchOptions;
-use svxprobe_model::{NodeId, WaveSignalRef};
+use svxprobe_model::{NameClass, NodeId, NodeKind, WaveSignalRef};
 use svxprobe_xprobe::{CrossProbe, WaveTarget};
 
 fn fixture(rel: &str) -> String {
@@ -221,6 +221,81 @@ fn modport_pin_click_reaches_wave(ext: &str) {
         matches!(cp.to_wave(&res.selection), WaveTarget::Linked { .. }),
         "[{ext}] a modport pin click reaches the member's wave link"
     );
+}
+
+/// A source click on a *usage* inside a process resolves to the signal it names,
+/// not the enclosing process block a declaration-span lookup would return (#225).
+/// Because the picorv32 core is instantiated on two lanes, the sibling lane is also
+/// offered as a picker alternative — the same disambiguation as the `picker` test,
+/// but reached from a usage the model previously had no span for.
+fn usage_resolves_to_signal(ext: &str) {
+    let cp = build(ext);
+    let d = cp.design();
+    let pv = d
+        .doc
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("picorv32.v"))
+        .expect("picorv32.v in files")
+        .id;
+    let is_signal = |id: NodeId| {
+        matches!(
+            d.node(id).map(|n| n.kind),
+            Some(NodeKind::Var | NodeKind::Net | NodeKind::Port)
+        )
+    };
+    // A local-signal usage whose enclosing source node is a process, so a pre-#225
+    // declaration-span lookup would have landed on that block instead.
+    let target = d
+        .name_refs_in_file(pv)
+        .into_iter()
+        .find(|r| {
+            r.class == NameClass::Signal
+                && !r.rel.contains('.')
+                && r.absolute_path().is_none()
+                && d.nodes_at_path(&format!("picorv32_soc.g_lane[0].core.{}", r.rel))
+                    .iter()
+                    .any(|&id| is_signal(id))
+                && d.nodes_in_source_range(pv, r.offset as usize, r.offset as usize + 1)
+                    .iter()
+                    .any(|&id| {
+                        matches!(
+                            d.node(id).map(|n| n.kind),
+                            Some(NodeKind::Ff | NodeKind::Comb | NodeKind::Assign)
+                        )
+                    })
+        })
+        .expect("a local-signal usage inside a process");
+    let (off, rel) = (target.offset as usize, target.rel.clone());
+
+    let res = cp.from_source(pv, off).expect("usage resolves");
+    assert!(
+        is_signal(res.selection.anchor),
+        "[{ext}] usage resolved to {:?}, expected a signal",
+        d.node(res.selection.anchor).map(|n| n.kind),
+    );
+    let apath = path_of(&cp, res.selection.anchor);
+    assert!(
+        apath.ends_with(&format!(".core.{rel}")),
+        "[{ext}] anchor {apath} does not name core.{rel}",
+    );
+    // Both core lanes are represented across anchor + alternatives.
+    let mut all: Vec<String> = res.alternatives.iter().map(|&n| path_of(&cp, n)).collect();
+    all.push(apath);
+    assert!(
+        all.iter().any(|p| p.contains("g_lane[0].core"))
+            && all.iter().any(|p| p.contains("g_lane[1].core")),
+        "[{ext}] both core lanes present: {all:?}",
+    );
+}
+
+#[test]
+fn usage_resolves_to_signal_fst() {
+    usage_resolves_to_signal("fst");
+}
+#[test]
+fn usage_resolves_to_signal_vcd() {
+    usage_resolves_to_signal("vcd");
 }
 
 #[test]

@@ -208,6 +208,27 @@ pub enum NameClass {
     Genvar,
 }
 
+impl NameClass {
+    /// The kebab-case string this class serializes to — the single source of the class
+    /// name the frontend colors by (kept in lockstep with the `serde` rename above, so a
+    /// DTO built from it can't drift from the wire format).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NameClass::Module => "module",
+            NameClass::Instance => "instance",
+            NameClass::Port => "port",
+            NameClass::Signal => "signal",
+            NameClass::Param => "param",
+            NameClass::Type => "type",
+            NameClass::EnumMember => "enum-member",
+            NameClass::Function => "function",
+            NameClass::Interface => "interface",
+            NameClass::Modport => "modport",
+            NameClass::Genvar => "genvar",
+        }
+    }
+}
+
 /// One identifier occurrence in a source file (#225): a declaration's own name token
 /// or a resolved value reference.
 ///
