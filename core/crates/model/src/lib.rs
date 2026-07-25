@@ -176,6 +176,95 @@ pub struct SourceMapEntry {
     pub source: Range,
 }
 
+/// What the elaboration resolved an identifier occurrence to (#225). Mirrors the
+/// schema enum. Read off the symbol, never inferred from the token text — an
+/// identifier the harness cannot classify emits no [`NameRef`] at all, so it stays
+/// default-colored rather than guessed at.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum NameClass {
+    Module,
+    Instance,
+    Port,
+    Signal,
+    Param,
+    Type,
+    EnumMember,
+    Function,
+    Interface,
+    Modport,
+    Genvar,
+}
+
+/// One identifier occurrence in a source file (#225): a declaration's own name token
+/// or a resolved value reference.
+///
+/// The model otherwise carries spans for *declarations* only (`def_range` /
+/// `inst_range`), which is why a click inside a process body could resolve no finer
+/// than the enclosing block. Populated by the harness's opt-in `--name-refs` pass;
+/// empty otherwise, so a model without it behaves exactly as before.
+///
+/// Deliberately carries **no [`NodeId`]**: one source span maps to N elaborated nodes
+/// when a module is instantiated more than once. [`rel`](Self::rel) is the
+/// instance-invariant half, and the enclosing instance comes from the click context at
+/// resolve time.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct NameRef {
+    pub file: u32,
+    /// 1-based line. Line/col are line-ending independent, so the source pane renders
+    /// against these.
+    pub line: u32,
+    /// 1-based byte column of the identifier's first character.
+    pub col: u32,
+    /// Byte offset, on the same basis as a node's `def_range` — the resolver's key.
+    pub offset: u32,
+    /// Byte length. A qualified reference spans the whole reference (`bus.valid`,
+    /// `soc_pkg::XLEN`), not just its last segment.
+    pub len: u32,
+    pub class: NameClass,
+    /// Symbol path relative to the enclosing elaborated scope (`clk`,
+    /// `g_lane[0].bus.valid`), so one span serves every instantiation of its module.
+    /// Empty means the token names the scope itself (a module definition's name). A
+    /// symbol outside that scope (package parameter, cross-hierarchy reference) is
+    /// stored absolute with a leading `/` — a character SV paths never contain.
+    pub rel: String,
+}
+
+impl NameRef {
+    /// Byte range `[start, end)` of the occurrence.
+    pub fn span(&self) -> (usize, usize) {
+        (self.offset as usize, (self.offset + self.len) as usize)
+    }
+
+    /// The absolute path this ref names, if it was stored absolute (`/soc_pkg::XLEN`).
+    /// `None` for the ordinary scope-relative case, which needs a scope to resolve.
+    pub fn absolute_path(&self) -> Option<&str> {
+        self.rel.strip_prefix('/')
+    }
+}
+
 /// One source file referenced by ranges.
 #[derive(
     Debug,
@@ -430,6 +519,12 @@ pub struct Document {
     /// provenance comments (the default, so non-HLS output is unaffected).
     #[serde(default)]
     pub source_map: Vec<SourceMapEntry>,
+    /// Identifier-occurrence spans (#225): every declaration name token and every
+    /// resolved value reference, for semantic source coloring and usage → signal
+    /// resolution. Empty unless the harness ran with `--name-refs`, so a model without
+    /// it behaves exactly as before. Sorted by `(file, offset)`.
+    #[serde(default)]
+    pub name_refs: Vec<NameRef>,
 }
 
 /// An enum type's bit width and its value→name members.
@@ -511,6 +606,11 @@ pub struct Design {
     /// Per-(C/C++ file) interval tree over `source_map[*].source` offsets → `source_map`
     /// index. Answers "which RTL span does this C offset map to?" (#159).
     src_map_index: HashMap<u32, Lapper<usize, usize>>,
+    /// Per-file interval tree over `name_refs` offsets → index into `doc.name_refs`
+    /// (#225). Symmetric to `src_index`, but kept **separate** so it never changes
+    /// `src_index`'s narrowest-covering-node outcome: a usage span is finer than the
+    /// enclosing declaration and would silently alter every existing click-to-probe.
+    name_ref_index: HashMap<u32, Lapper<usize, usize>>,
     pub wave_index: WaveIndex,
 }
 
@@ -575,6 +675,22 @@ impl Design {
             .map(|(f, ivs)| (f, Lapper::new(ivs)))
             .collect();
 
+        // Name-ref index (#225): one interval tree per file over the identifier spans.
+        let mut nr_ivs: HashMap<u32, Vec<Interval<usize, usize>>> = HashMap::new();
+        for (i, r) in doc.name_refs.iter().enumerate() {
+            let (lo, hi) = r.span();
+            let stop = if hi > lo { hi } else { lo + 1 };
+            nr_ivs.entry(r.file).or_default().push(Interval {
+                start: lo,
+                stop,
+                val: i,
+            });
+        }
+        let name_ref_index = nr_ivs
+            .into_iter()
+            .map(|(f, ivs)| (f, Lapper::new(ivs)))
+            .collect();
+
         Design {
             doc,
             path_index,
@@ -582,6 +698,7 @@ impl Design {
             conn_index,
             gen_map_index,
             src_map_index,
+            name_ref_index,
             wave_index: WaveIndex::default(),
         }
     }
@@ -676,6 +793,28 @@ impl Design {
             })
     }
 
+    /// The narrowest identifier occurrence covering `offset` in `file` (#225), or
+    /// `None` if none does. Narrowest wins so a reference nested inside a wider one
+    /// (`bus.valid` covers `valid`) resolves to the tightest match. The index is
+    /// separate from `src_index`, so this never perturbs node source-resolution.
+    pub fn name_ref_at(&self, file: u32, offset: usize) -> Option<&NameRef> {
+        let lap = self.name_ref_index.get(&file)?;
+        lap.find(offset, offset + 1)
+            .map(|iv| &self.doc.name_refs[iv.val])
+            .min_by_key(|r| r.len)
+    }
+
+    /// Every identifier occurrence in `file`, in `(file, offset)` order (#225). The
+    /// bulk feed for the source pane's semantic coloring — one call per rendered file
+    /// instead of a point probe per token.
+    pub fn name_refs_in_file(&self, file: u32) -> Vec<&NameRef> {
+        self.doc
+            .name_refs
+            .iter()
+            .filter(|r| r.file == file)
+            .collect()
+    }
+
     pub fn path_count(&self) -> usize {
         self.path_index.len()
     }
@@ -766,6 +905,7 @@ mod tests {
             edges: vec![],
             enums: HashMap::new(),
             source_map: Vec::new(),
+            name_refs: Vec::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.nodes_at_path("t.a"), &[1]);
@@ -804,6 +944,7 @@ mod tests {
                 generated: rng(0, 4, 8),
                 source: rng(1, 20, 24),
             }],
+            name_refs: Vec::new(),
         };
         let d = Design::from_document(doc);
         // RTL offset 5 → C span 20..24
@@ -815,6 +956,58 @@ mod tests {
         assert!(d.mapped_from_src(1, 30).is_none());
         // Wrong-file lookups don't cross wires.
         assert!(d.mapped_from_gen(1, 22).is_none());
+    }
+
+    #[test]
+    fn name_ref_lookup_is_narrowest_and_separate_from_src_index() {
+        // Two refs on one file: a wide qualified reference `bus.valid` (4..13) and the
+        // bare `valid` nested inside it (8..13). A declaration node covers 0..20.
+        let doc = Document {
+            schema_version: 1,
+            design: "t".into(),
+            generator: Generator::default(),
+            files: vec![FileEntry {
+                id: 0,
+                path: "t.sv".into(),
+                language: None,
+            }],
+            nodes: vec![node(0, "t", NodeKind::Instance, Some(rng(0, 0, 20)))],
+            edges: vec![],
+            enums: HashMap::new(),
+            source_map: Vec::new(),
+            name_refs: vec![
+                NameRef {
+                    file: 0,
+                    line: 1,
+                    col: 5,
+                    offset: 4,
+                    len: 9,
+                    class: NameClass::Signal,
+                    rel: "bus.valid".into(),
+                },
+                NameRef {
+                    file: 0,
+                    line: 1,
+                    col: 9,
+                    offset: 8,
+                    len: 5,
+                    class: NameClass::Signal,
+                    rel: "bus.valid".into(),
+                },
+            ],
+        };
+        let d = Design::from_document(doc);
+        // Offset 10 sits inside both spans → the narrower (len 5) wins.
+        assert_eq!(d.name_ref_at(0, 10).map(|r| r.len), Some(5));
+        // Offset 5 sits only inside the wide one.
+        assert_eq!(d.name_ref_at(0, 5).map(|r| r.len), Some(9));
+        // A name ref never leaks into node source-resolution: the only node here is `t`.
+        assert_eq!(d.nodes_at_source(0, 10), vec![0]);
+        // Bulk feed returns both refs for the file, none for an unknown file.
+        assert_eq!(d.name_refs_in_file(0).len(), 2);
+        assert!(d.name_refs_in_file(1).is_empty());
+        // Absolute-path marker round-trips.
+        assert_eq!(d.name_ref_at(0, 10).unwrap().absolute_path(), None);
     }
 
     #[test]
@@ -844,6 +1037,7 @@ mod tests {
             }],
             enums: HashMap::new(),
             source_map: Vec::new(),
+            name_refs: Vec::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.edges().len(), 1);
@@ -896,6 +1090,7 @@ mod tests {
             edges: vec![],
             enums: HashMap::new(),
             source_map: Vec::new(),
+            name_refs: Vec::new(),
         };
         let d = Design::from_document(doc);
         assert_eq!(d.modport_member_nodes(3, "valid"), &[2]);
@@ -932,6 +1127,7 @@ mod tests {
             edges: vec![],
             enums,
             source_map: Vec::new(),
+            name_refs: Vec::new(),
         };
         let d = Design::from_document(doc);
         let e = d.enum_for_type("p::e_t").expect("enum present");

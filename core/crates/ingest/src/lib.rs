@@ -15,7 +15,11 @@ use svxprobe_model::{Design, Document, Node, NodeKind};
 
 /// Bumped whenever the rkyv archive layout changes incompatibly; gates a cache
 /// hit alongside the JSON `schema_version` (#21, ADR 0003).
-pub const RKYV_FORMAT_VERSION: u32 = 1;
+///
+/// * v1 — initial rkyv cache.
+/// * v2 — `Document` gained `name_refs` (#225); the archived layout changed, so a
+///   v1 archive would deserialize garbage and must miss.
+pub const RKYV_FORMAT_VERSION: u32 = 2;
 
 /// Hidden directory, beside the model JSON, holding derived rkyv load caches.
 const CACHE_DIR: &str = ".schemview_data";
@@ -643,6 +647,51 @@ mod tests {
         let d2 = from_path(&model).unwrap();
         assert_eq!(d2.nodes().len(), 2);
         assert_eq!(d2.nodes_at_path("t.a"), &[1]);
+    }
+
+    // A document carrying identifier-occurrence spans (#225). One reference to `a`
+    // inside the assign, plus the `a` declaration name token.
+    const NAME_REFS_DOC: &str = r#"{
+        "schema_version": 1,
+        "design": "t",
+        "files": [{"id": 0, "path": "t.sv"}],
+        "nodes": [
+            {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+             "children":[1],"symbol_key":"t"},
+            {"id":1,"kind":"Var","name":"a","path":"t.a","parent":0,
+             "children":[],"symbol_key":"t.a"}
+        ],
+        "name_refs": [
+            {"file":0,"line":2,"col":10,"offset":9,"len":1,"class":"signal","rel":"a"},
+            {"file":0,"line":3,"col":14,"offset":20,"len":1,"class":"signal","rel":"a"}
+        ]
+    }"#;
+
+    #[test]
+    fn accepts_and_indexes_name_refs() {
+        let d = from_slice(NAME_REFS_DOC.as_bytes()).unwrap();
+        assert_eq!(d.doc.name_refs.len(), 2);
+        // The occurrence at offset 20 resolves to the signal ref, not a node span.
+        let r = d.name_ref_at(0, 20).expect("ref at usage offset");
+        assert_eq!(r.class, svxprobe_model::NameClass::Signal);
+        assert_eq!(r.rel, "a");
+        assert_eq!(d.name_refs_in_file(0).len(), 2);
+    }
+
+    #[test]
+    fn name_refs_survive_the_rkyv_cache_round_trip() {
+        // The rkyv archive layout changed when `Document` gained `name_refs` (v2), so
+        // guard that a cache hit reconstructs them faithfully — a v1 archive of this
+        // doc would have deserialized garbage.
+        let dir = scratch("name_refs_cache");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, NAME_REFS_DOC).unwrap();
+
+        let d1 = from_path(&model).unwrap(); // miss: parses JSON, writes archive
+        let d2 = from_path(&model).unwrap(); // hit: served from the rkyv archive
+        assert_eq!(d1.doc.name_refs, d2.doc.name_refs);
+        assert_eq!(d2.doc.name_refs.len(), 2);
+        assert_eq!(d2.name_ref_at(0, 20).map(|r| r.rel.as_str()), Some("a"));
     }
 
     #[test]
