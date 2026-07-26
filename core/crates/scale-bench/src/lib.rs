@@ -13,17 +13,41 @@
 //! **Hard invariant:** `Design::node(id)` is `doc.nodes[id as usize]`, so every
 //! node's `id` equals its index in `doc.nodes`. The generator assigns ids from
 //! the push position and never reorders (asserted in `tests/valid.rs`).
+//!
+//! # Features (#240)
+//!
+//! All three are **on by default**, so `cargo test`, clippy and the benches see
+//! the crate exactly as before. They exist because this crate is now linked into
+//! the packaged desktop app, which is entitled to leave measurement scaffolding
+//! out:
+//!
+//! * `synth` — the deterministic generator, and with it the `665`/`100K`/`1M`
+//!   bases.
+//! * `golden` — embeds the 2.1 MB committed fixture (see [`golden`]).
+//! * `collect` — the matrix driver and markdown renderer (see [`collect`]).
+//!
+//! The `real` basis is deliberately unconditional: a `--no-default-features`
+//! build still benchmarks a user's own elaborated model, which is the one basis
+//! that needs no scaffolding at all.
 
+#[cfg(feature = "collect")]
+pub mod collect;
+pub mod golden;
 pub mod mem;
+#[cfg(feature = "synth")]
 mod rng;
+pub mod scenario;
 
+#[cfg(feature = "synth")]
 use rng::SplitMix64;
-use svxprobe_model::{
-    Design, Dir, Document, Edge, FileEntry, Generator, Location, Node, NodeId, NodeKind, Range,
-};
+use svxprobe_model::{Design, Document, Node, NodeId, NodeKind};
+// Generator-only model types, so a `synth`-less build has no unused imports.
+#[cfg(feature = "synth")]
+use svxprobe_model::{Dir, Edge, FileEntry, Generator, Location, Range};
 use svxprobe_wave::WaveVar;
 
 /// Knobs for a synthetic design. Deterministic for a given `seed`.
+#[cfg(feature = "synth")]
 #[derive(Debug, Clone, Copy)]
 pub struct SynthConfig {
     /// Approximate target total node count (geometry is derived to land near it).
@@ -38,6 +62,7 @@ pub struct SynthConfig {
     pub seed: u64,
 }
 
+#[cfg(feature = "synth")]
 impl SynthConfig {
     /// ~665 nodes — mirrors the real `picorv32_soc` fixture baseline point.
     pub fn baseline() -> Self {
@@ -74,6 +99,7 @@ impl SynthConfig {
 }
 
 /// A generated design plus the handles the benches hit for representative work.
+#[cfg(feature = "synth")]
 pub struct Synth {
     /// The valid document (passes `ingest::validate`).
     pub doc: Document,
@@ -91,6 +117,7 @@ pub struct Synth {
     pub probe_source: (u32, usize),
 }
 
+#[cfg(feature = "synth")]
 struct Builder {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -98,6 +125,7 @@ struct Builder {
     rng: SplitMix64,
 }
 
+#[cfg(feature = "synth")]
 impl Builder {
     fn new(seed: u64) -> Self {
         Self {
@@ -182,12 +210,14 @@ impl Builder {
 
 /// Approximate branching factor so a `depth`-level tree yields enough leaves to
 /// hold the node budget. Always ≥ 2.
+#[cfg(feature = "synth")]
 fn branching_for(node_count: usize, depth: usize) -> usize {
     let exp = 1.0 / ((depth + 1) as f64);
     ((node_count as f64).powf(exp) as usize).max(2)
 }
 
 /// Build a valid synthetic [`Document`] (+ handles) for `cfg`.
+#[cfg(feature = "synth")]
 pub fn generate(cfg: &SynthConfig) -> Synth {
     let mut b = Builder::new(cfg.seed);
     let depth = cfg.depth.max(1);
@@ -381,6 +411,7 @@ pub fn to_json(doc: &Document) -> Vec<u8> {
 /// Generate and build a [`Design`] (skips `validate`; use for query/cone/matcher
 /// setup where the input is already known-valid). Returns the `Synth` too, for
 /// its handles.
+#[cfg(feature = "synth")]
 pub fn build_design(cfg: &SynthConfig) -> (Design, Synth) {
     let synth = generate(cfg);
     let design = Design::from_document(synth.doc.clone());
@@ -391,6 +422,7 @@ pub fn build_design(cfg: &SynthConfig) -> (Design, Synth) {
 /// `MatchOptions.anchor = Some(vec!["top"])` they match ~100% deterministically.
 /// `count` is independent of node count, letting the matcher axis sweep signal
 /// count on its own.
+#[cfg(feature = "synth")]
 pub fn synth_signals(synth: &Synth, _design: &Design, count: usize) -> Vec<WaveVar> {
     let var_paths: Vec<&str> = synth
         .doc

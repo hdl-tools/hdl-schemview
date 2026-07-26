@@ -63,6 +63,42 @@ exists; without one the raw JSONL records still carry every number.
 uploads the result as the `scale-bench-metrics` artifact. It is `continue-on-error`, so
 benchmark noise never fails the nightly.
 
+### The Rust collector (#240)
+
+The same three layers, driven from Rust instead of a shell:
+
+```bash
+cd core
+cargo build --release -p scale-bench --offline
+./target/release/collect                        # golden + 665 + 100K
+./target/release/collect --bases "665" --skip-criterion --skip-report
+./target/release/collect --full --model <model.json> --out metrics.md
+```
+
+Flags are the bash collector's superset — `--full`, `--model`, `--bases`,
+`--skip-criterion`, `--skip-report`, `--online`, `--out` — and the default output path is
+unchanged. It exists because a **packaged app** (issue #240 tier 1) has no PowerShell, no
+bash and no working `python3`, so the *matrix* had to move into Rust; `collect` is the
+developer-side front door to the same code the app runs.
+
+Two intentional differences from the shell collectors:
+
+- **`golden` is embedded** in the binary rather than resolved through
+  `CARGO_MANIFEST_DIR`, so it survives a build whose source tree is gone. It is the only
+  basis measured against byte-identical input on every machine, which is what makes it the
+  cross-run anchor §Findings compares against.
+- **The Criterion section is the `.ps1`'s shape** — a `| bench | mean ms | median ms | std
+  dev ms |` table parsed from `target/criterion/**/new/estimates.json`, filtered by
+  modification time so a stale estimate cannot leak in. The `.sh` grepped its log into a
+  bare fence instead; that shape goes away when nightly repoints to this bin.
+
+Also new: a `build` row (`version @ SVX_BUILD_REV`) in the environment table. On the target
+machine `rustc`, `cargo` and `git` are all absent, so it is the only provenance a metrics
+file from there would otherwise carry. The `Generated` line is UTC and names the collector.
+
+The `.ps1` / `.sh` / `scale_bench_tables.py` scripts **stay** for now, and nightly still
+runs the `.sh`; they are removed once this bin has been confirmed at parity on a full run.
+
 ## The real-design basis (realism anchor)
 
 The synthetic generator owns the 1M point and axis isolation; a real elaborated design
@@ -171,14 +207,25 @@ cargo bench -p scale-bench -- load/cache_hit           # filter
 # single-shot report
 cargo run -p scale-bench --release --bin report [-- --full]
 
+# the same scenario through the packaged app's hidden child flag (#240) — the app
+# binary re-execs itself this way because a bundle carries no second executable
+hdl-schemview --bench-scenario --basis golden --mode cache_hit
+
 # pre-build the #21 rkyv load cache for a model (what `prepare` times internally)
 cargo run --bin svxprobe -- cache <model.json>
 ```
 
 Peak/end RSS comes from `core/crates/scale-bench/src/mem.rs`, which is **dependency-free by
-design** — a hand-declared `K32GetProcessMemoryInfo` on Windows, `/proc/self/status` on Linux.
-The benchmark has to build `--offline` from the existing lockfile, so it cannot pull in a
-memory-stats crate to get this.
+design** — a hand-declared `K32GetProcessMemoryInfo` on Windows, `/proc/self/status` on Linux,
+plus `GlobalMemoryStatusEx` / `/proc/meminfo` for the machine RAM the environment table
+reports (#240). The benchmark has to build `--offline` from the existing lockfile, so it
+cannot pull in a memory-stats crate to get any of this.
+
+The scenario logic itself lives in `scale_bench::scenario` rather than in the bin, so the
+same code backs three entry points — the `scenario` binary, the `collect` driver, and the
+packaged app's `--bench-scenario` arm. `cargo check -p scale-bench --no-default-features`
+(a PR gate) builds it without the synthetic generator, the embedded fixture or the
+collector, which is the shape a lean packaged build can ask for.
 
 ## Reading the results
 
