@@ -68,6 +68,61 @@ pub fn build_cache(path: impl AsRef<Path>) -> Result<PathBuf> {
     Ok(cache_path_for(path))
 }
 
+/// Price the archive read *without* the `deserialize` pass (#155 measurement
+/// hook): mmap the cache, run the same validating `access` + header check
+/// [`from_path`] runs, and return the archived `(nodes, edges)` counts read
+/// straight off the archived view.
+///
+/// This is **not** a load path — it cannot produce a [`Design`], because the
+/// indices still need an owned [`Document`]. It exists so a benchmark can price
+/// the step a true zero-copy read-back (#155) would remove: the gap between
+/// `from_path` (access + deserialize + index build) and this (access only).
+///
+/// Returns `None` on exactly the conditions [`from_path`]'s cache probe misses
+/// on: absent cache, unreadable source, version mismatch, stale source, or a
+/// corrupt archive.
+pub fn access_cache_checked(model: &Path) -> Option<(usize, usize)> {
+    let (src_len, src_mtime_ns) = source_meta(model).ok()?;
+    let cache = cache_path_for(model);
+    let file = File::open(&cache).ok()?;
+    // SAFETY: as in `try_load_cache` — a read-only mmap of a regular file we just
+    // opened, used only within this function; the validating `access` below
+    // rejects a concurrently truncated mapping rather than risking UB.
+    let mmap = unsafe { Mmap::map(&file) }.ok()?;
+    let archived = rkyv::access::<ArchivedCacheArchive, RkyvError>(&mmap).ok()?;
+    if archived.rkyv_format_version.to_native() != RKYV_FORMAT_VERSION
+        || archived.schema_version.to_native() != 1
+        || archived.src_len.to_native() != src_len
+        || archived.src_mtime_ns.to_native() != src_mtime_ns
+    {
+        return None;
+    }
+    Some((archived.doc.nodes.len(), archived.doc.edges.len()))
+}
+
+/// As [`access_cache_checked`], but skipping rkyv's bytecheck validation, so a
+/// benchmark can price *validation* separately from *deserialization* (#155).
+/// A zero-copy read-back would still pay validation unless it trusts the archive.
+///
+/// # Safety
+///
+/// The caller must guarantee the archive at `<model>`'s cache path is a
+/// well-formed `CacheArchive` written by **this** build (same
+/// [`RKYV_FORMAT_VERSION`] and struct layout) and is not concurrently modified.
+/// Unlike [`access_cache_checked`], nothing here rejects a corrupt or truncated
+/// archive — reading one is undefined behaviour. Benchmark-only; never a load
+/// path.
+pub unsafe fn access_cache_unchecked(model: &Path) -> Option<(usize, usize)> {
+    let cache = cache_path_for(model);
+    let file = File::open(&cache).ok()?;
+    // SAFETY: read-only mmap of a regular file we just opened, used only within
+    // this function. Well-formedness of its contents is the caller's contract.
+    let mmap = unsafe { Mmap::map(&file) }.ok()?;
+    // SAFETY: the caller guarantees the mapping is a valid `CacheArchive` archive.
+    let archived = unsafe { rkyv::access_unchecked::<ArchivedCacheArchive>(&mmap) };
+    Some((archived.doc.nodes.len(), archived.doc.edges.len()))
+}
+
 /// `<model dir>/.schemview_data/<model file name>.rkyv`.
 fn cache_path_for(model: &Path) -> PathBuf {
     let dir = model
@@ -707,6 +762,79 @@ mod tests {
         // Load still succeeds via the JSON — corruption is a miss, never an error.
         let d = from_path(&model).unwrap();
         assert_eq!(d.nodes().len(), 2);
+    }
+
+    // --- #155 measurement hooks ---
+
+    #[test]
+    fn access_hooks_agree_with_the_loaded_design() {
+        let dir = scratch("access_agree");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        build_cache(&model).unwrap();
+
+        let design = from_path(&model).unwrap();
+        let expected = (design.nodes().len(), design.edges().len());
+
+        // The whole point of the hooks is that they read the *same* archive the
+        // warm load reads — a divergence here would make the #155 numbers lie.
+        assert_eq!(access_cache_checked(&model), Some(expected));
+        // SAFETY: the archive was written by this build, moments ago, in a
+        // scratch dir owned by this test.
+        assert_eq!(unsafe { access_cache_unchecked(&model) }, Some(expected));
+    }
+
+    #[test]
+    fn access_checked_misses_without_a_cache() {
+        let dir = scratch("access_nocache");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        // No build_cache call: nothing to access.
+        assert_eq!(access_cache_checked(&model), None);
+    }
+
+    #[test]
+    fn access_checked_misses_on_a_stale_source() {
+        let dir = scratch("access_stale");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        build_cache(&model).unwrap();
+        assert!(access_cache_checked(&model).is_some(), "fresh cache hits");
+
+        // Same staleness key `from_path` gates on (src_len): rewrite with content
+        // of a different length and the archive must stop answering, or a
+        // benchmark would happily time a read of the *previous* design.
+        let three = r#"{
+            "schema_version": 1,
+            "design": "t",
+            "files": [{"id": 0, "path": "t.sv"}],
+            "nodes": [
+                {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+                 "children":[1,2],"symbol_key":"t"},
+                {"id":1,"kind":"Var","name":"a","path":"t.a","parent":0,
+                 "children":[],"symbol_key":"t.a","type":"logic"},
+                {"id":2,"kind":"Var","name":"b","path":"t.b","parent":0,
+                 "children":[],"symbol_key":"t.b","type":"logic"}
+            ]
+        }"#;
+        assert_ne!(three.len(), DOC.len(), "new content differs in length");
+        std::fs::write(&model, three).unwrap();
+        assert_eq!(access_cache_checked(&model), None, "stale archive rejected");
+    }
+
+    #[test]
+    fn access_checked_rejects_a_corrupt_archive() {
+        let dir = scratch("access_corrupt");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        let cache = build_cache(&model).unwrap();
+
+        // Truncating past the header leaves the version/staleness fields intact
+        // but the body invalid — exactly what bytecheck exists to catch, and the
+        // reason `access_unchecked` is unsafe.
+        let bytes = std::fs::read(&cache).unwrap();
+        std::fs::write(&cache, &bytes[..bytes.len() / 2]).unwrap();
+        assert_eq!(access_cache_checked(&model), None);
     }
 
     #[test]

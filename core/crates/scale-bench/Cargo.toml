@@ -6,6 +6,12 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+# The lib's unittest target would also be run by `cargo bench` and would reject
+# criterion's flags ("Unrecognized option: 'warm-up-time'", exit 101). Only the
+# three [[bench]] targets below should run under `cargo bench`.
+[lib]
+bench = false
+
 [dependencies]
 svxprobe-model = { workspace = true }
 svxprobe-ingest = { workspace = true }
@@ -30,6 +36,16 @@ harness = false
 name = "matcher"
 harness = false
 
+# `bench = false` on both bins: cargo would otherwise run them as bench targets
+# during `cargo bench` and hand them criterion's flags, which `scenario` rejects
+# (exit 2) — aborting the real benchmark run before it starts.
 [[bin]]
 name = "report"
 path = "src/bin/report.rs"
+bench = false
+
+# One measured scenario per process, so peak RSS is attributable (#22/#155).
+[[bin]]
+name = "scenario"
+path = "src/bin/scenario.rs"
+bench = false

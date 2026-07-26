@@ -14,6 +14,7 @@
 //! node's `id` equals its index in `doc.nodes`. The generator assigns ids from
 //! the push position and never reorders (asserted in `tests/valid.rs`).
 
+pub mod mem;
 mod rng;
 
 use rng::SplitMix64;
