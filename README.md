@@ -6,7 +6,7 @@
 
 - **Source** — the SystemVerilog text (file:line:col, lexical scopes).
 - **Schematic** — a generated, navigable diagram of the elaborated design.
-- **Waveform** — simulation traces (VCD/FST, with user-supplied readers for others).
+- **Waveform** — simulation traces (VCD/FST/GHW, with user-supplied readers for others).
 
 Click a signal in any view and the other two jump to the corresponding object.
 The commercial equivalents are Synopsys Verdi and Cadence Indago; we are **not**
@@ -18,7 +18,7 @@ composing existing best-in-class components.
 1. **Full SystemVerilog elaboration** — via [slang](https://github.com/MikePopoloski/slang) (IEEE 1800-2023, through elaboration).
 2. **Scalable visualization** — hierarchical, on-demand schematics that survive a real SoC.
 3. **Accurate source / schematic / waveform cross-probing** — lookups against one elaborated model, not heuristics.
-4. **VCD & FST support plus user-brought plugins** — built-in [wellen](https://github.com/ekiwi/wellen); user readers (e.g. FSDB) load out-of-process so no proprietary bits ship.
+4. **VCD, FST & GHW support plus user-brought plugins** — built-in [wellen](https://github.com/ekiwi/wellen); user readers (e.g. FSDB) load out-of-process so no proprietary bits ship.
 
 ## The one principle that governs the design
 
@@ -29,31 +29,59 @@ Get this right and cross-probing is lookups, not guesswork.
 
 ## Status
 
-**Phases 0–3 done — all three views are linked in a desktop GUI.** The Phase 1
-matcher gate passed (project GO); Phase 2 linked source ↔ waveform; Phase 3 adds
-the schematic and a **Tauri desktop app** ([`app/`](app/)) with three linked panes,
-including drill-down into a leaf module's **internal logic** (process-level FF/comb
-boxes, Phase 3d) and an interactive **waveform** pane (markers, zoom/pan, per-signal
-radix, FSM state names). Next up is **Phase 4 — scalability hardening** (lazy loading,
-schematic level-of-detail, bounded-memory traces). The execution plan lives in
-**[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture decisions are ADRs in
-**[docs/decisions/](docs/decisions/)**; the reference fixtures and the pinned gate
-threshold are in **[docs/fixtures.md](docs/fixtures.md)**.
+**Phases 0–3e done — all three views are linked in a desktop GUI.** The Phase 1
+matcher gate passed (project GO); Phase 2 linked source ↔ waveform; Phase 3 added the
+schematic and a **Tauri desktop app** ([`app/`](app/)), including drill-down into a leaf
+module's **internal logic** (Phase 3d) and an interactive waveform pane; Phase 3e added
+the selectable projections and source fidelity listed below. **Phase 4 — scalability
+hardening — is active**, and measurement-first: the benchmark landed before any storage
+change, and the numbers are in **[docs/benchmarking.md](docs/benchmarking.md)**.
+
+The execution plan lives in **[docs/ROADMAP.md](docs/ROADMAP.md)**; architecture
+decisions are ADRs in **[docs/decisions/](docs/decisions/)**; the reference fixtures and
+the pinned gate threshold are in **[docs/fixtures.md](docs/fixtures.md)**.
 
 What exists today:
 
 - `elaborate/` — the **pyslang** harness that elaborates SystemVerilog and emits
-  the Node-model JSON (`schema/model.schema.json`), including parameters.
+  the Node-model JSON (`schema/model.schema.json`). Everything past the structural
+  spine is behind an opt-in flag and is purely additive — see
+  [`elaborate/README.md`](elaborate/README.md).
 - `core/` — the **Rust** workspace: `model` (Node model + indices), `ingest`
-  (deserialize the harness JSON), `wave` (waveform access via **wellen**),
-  `matcher` (the canonical-path matcher + hit-rate report), `xprobe` (the
-  source ↔ waveform cross-probe engine), `schematic` (scope/cone graph extractor),
-  `gui` (the desktop app's session logic), and the `svxprobe` CLI.
-- `app/` — the **Tauri** desktop app: three linked panes (schematic via elkjs,
-  source, waveform canvas) over the cross-probe engine. See [`app/README.md`](app/README.md).
+  (deserialize the harness JSON + the rkyv load cache), `wave` (waveform access via
+  **wellen**), `matcher` (the canonical-path matcher + hit-rate report), `xprobe` (the
+  cross-probe engine), `schematic` (scope/cone graph extractor), `gui` (the desktop
+  app's session logic), the `svxprobe` CLI, and `scale-bench` (dev-only scalability
+  benchmark, not shipped).
+- `app/` — the **Tauri** desktop app: a hierarchy tree beside tabbed content
+  (Source / C&nbsp;·&nbsp;C++ / Schematic / Settings) over a tabbed bottom pane
+  (Status / Waveform), all driven by one cross-probe. See [`app/README.md`](app/README.md).
 - `fixtures/picorv32_soc/` — the tier-1 reference fixture (PicoRV32 + a SystemVerilog
   wrapper exercising package / interface / parameterized-instance / generate), with
-  frozen Verilator **FST + VCD** traces and a golden hierarchy.
+  frozen Verilator **FST + VCD** traces and a golden hierarchy. `fixtures/hls_min/` is a
+  tiny synthetic HLS fixture; `fixtures/ibex_soc/` is an experimental tier-2 target.
+
+### What it does beyond the three panes
+
+- **Two schematic projections.** The default drills a module to **process level** — one
+  box per `always`/`assign`. Flip a Settings toggle and combinational blocks dissolve
+  into **gate-level** primitives drawn as IEEE distinctive glyphs, with folded
+  inverters, inline constant/parameter tie values, and `case` statements shown as mux
+  trees. Both are projections of the same model, so cross-probe works identically in
+  either ([ADR 0005](docs/decisions/0005-optional-gate-level-projection.md)).
+- **HLS C/C++ ↔ RTL tracing.** For designs generated by an HLS tool, a C/C++ pane traces
+  to and from the generated RTL using the tool's *own* provenance comments — never
+  inferred ([ADR 0006](docs/decisions/0006-hls-cpp-rtl-source-tracing.md)).
+- **A source pane that knows what it's showing.** Lexical syntax highlighting for
+  SystemVerilog and C/C++, with identifiers colored by what the *elaboration* resolved
+  them to — so a click on a signal's **usage** inside a process resolves to the signal,
+  not the process ([ADR 0007](docs/decisions/0007-model-driven-semantic-name-coloring.md),
+  [ADR 0008](docs/decisions/0008-lexical-source-highlighting.md)).
+- **Detachable, independent panes.** Schematic and waveform panes pop out into their own
+  windows; each keeps its own scope, its own trace, and its own signal picker.
+- **A waveform pane built for reading.** Collapsible lane groups with drag reordering,
+  A/B markers with Δ, per-signal radix, derived sub-buses, and FSM **state names**
+  decoded from the model's enum table.
 
 The project go/no-go was the **Phase 1 matcher gate**: on the frozen fixture,
 ≥ 95% of design-scope signals matched with zero mystery misses, against both FST
@@ -106,7 +134,7 @@ nix develop .#verilator  # just a pinned Verilator (for trace regen)
 
 ```bash
 cd core
-cargo test --all     # builds model/ingest/wave/cli; ingests the golden; loads both traces
+cargo test --all     # all 9 crates; ingests the golden; loads both traces
 cargo run --bin svxprobe -- ingest ../fixtures/picorv32_soc/golden/hierarchy.json
 cargo run --bin svxprobe -- wave   ../fixtures/picorv32_soc/traces/picorv32_soc.fst
 ```
@@ -120,6 +148,11 @@ uv sync                # create .venv from pinned deps
 uv run pytest -q
 uv run svxprobe-elaborate --top picorv32_soc -f ../fixtures/picorv32_soc/picorv32_soc.f -o /tmp/h.json
 ```
+
+The harness has nine flags; all but the basics are **opt-in and additive**, so the
+default output is byte-identical without them. The full table — including
+`--gate-level`, `--name-refs`, and the `--hls-*` family — is in
+[`elaborate/README.md`](elaborate/README.md#options).
 
 …or with pip as a fallback:
 

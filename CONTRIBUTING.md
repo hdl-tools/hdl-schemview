@@ -20,8 +20,8 @@ PR templates and points at the gates your change needs to clear.
 
 A polyglot monorepo with three trees:
 
-- **`core/`** — the Rust workspace (model, ingest, matcher, xprobe, schematic,
-  gui, CLI).
+- **`core/`** — the Rust workspace (model, ingest, wave, matcher, xprobe,
+  schematic, gui, the `svxprobe` CLI, and the dev-only `scale-bench`).
 - **`elaborate/`** — the Python (pyslang) elaboration harness that emits the
   golden model JSON.
 - **`app/`** — the Tauri 2 desktop app (vanilla TS + Vite frontend over a thin
@@ -50,18 +50,35 @@ cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all
 
-# Matcher gate — if you touched the matcher or model (≥95% hit-rate is a hard gate)
+# Matcher gate — if you touched the matcher or model (≥95% hit-rate is a hard gate).
+# CI runs BOTH formats; run both locally, since a rule can pass one and fail the other:
 cargo run --bin svxprobe -- match \
     ../fixtures/picorv32_soc/golden/hierarchy.json \
     ../fixtures/picorv32_soc/traces/picorv32_soc.fst \
     --excluded ../fixtures/picorv32_soc/excluded_scopes.txt
+cargo run --bin svxprobe -- match \
+    ../fixtures/picorv32_soc/golden/hierarchy.json \
+    ../fixtures/picorv32_soc/traces/picorv32_soc.vcd \
+    --excluded ../fixtures/picorv32_soc/excluded_scopes.txt
 
-# Frontend (from app/) — if you touched app/
+# Frontend (from app/) — if you touched app/. Both are enforced by app.yml.
 npm run build
 npm test
 
 # Python harness (from elaborate/) — if you touched elaborate/
+uv run ruff check .
 uv run pytest -q
+uv run python -m svxprobe_elaborate.validate ../fixtures/picorv32_soc/golden/hierarchy.json
+# RTL lint gate — illegal always_ff driver combinations (VCS rejects what slang and
+# Verilator accept, IEEE 1800 §9.2.2.4), so CI checks it explicitly. From the repo
+# root, explicit file list: a *.sv glob would skip picorv32.v (and not expand at all
+# in PowerShell):
+cd .. && uv run --project elaborate python -m svxprobe_elaborate.lint --top picorv32_soc \
+    fixtures/picorv32_soc/rtl/picorv32.v \
+    fixtures/picorv32_soc/rtl/soc_pkg.sv \
+    fixtures/picorv32_soc/rtl/mem_if.sv \
+    fixtures/picorv32_soc/rtl/soc_mem.sv \
+    fixtures/picorv32_soc/rtl/picorv32_soc.sv
 
 # Golden reproducibility (from the repo root) — if you touched elaborate/.
 # CI re-elaborates the golden and diffs it, so a harness change that alters the
@@ -80,7 +97,21 @@ diff <(jq -S . fixtures/picorv32_soc/golden/hierarchy.json) \
 
 **DTO sync:** the Rust serde DTOs in the `gui` and `schematic` crates are the
 wire format for the frontend. If you change any of them, mirror the change in
-[`app/src/types.ts`](app/src/types.ts) or the TS layer silently desyncs.
+[`app/src/types.ts`](app/src/types.ts) or the TS layer silently desyncs. A model-level
+change usually needs a third edit, in
+[`elaborate/schema/model.schema.json`](elaborate/schema/model.schema.json).
+
+**What runs where:** `ci.yml` (every push/PR) covers the Rust gates, the matcher on both
+trace formats, the Python lint/test/schema gates, the RTL `always_ff` lint, and golden
+reproducibility. `app.yml` builds the Tauri app on Ubuntu + Windows and runs `npm test` +
+`npm run build` when `app/` or `core/crates/` change. `nightly.yml` has three jobs —
+`repro-tier1` (regenerate traces with Verilator), `stress-tier2` (Ibex, `continue-on-error`),
+and `scale-bench` (the scalability benchmark, `continue-on-error`, uploads a metrics
+artifact). None of the nightly jobs gate a PR.
+
+**Docs are part of the change, not a follow-up.** If your PR alters architecture, commands,
+DTOs, gates, or workflow, update `CLAUDE.md` and the relevant `docs/*` in the same PR. A
+decision with lasting consequences gets an ADR in [`docs/decisions/`](docs/decisions).
 
 ## Commit messages
 

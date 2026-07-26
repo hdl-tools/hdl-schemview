@@ -21,11 +21,19 @@ starting in Phase 1; Phase 0 only establishes the fixtures and the round-trip.
 |---|---|---|---|---|
 | 1 | `picorv32_soc/` | PicoRV32 + SV wrapper (vendored) | **Yes** | `ci.yml` (committed traces) + `nightly.yml` (regen) |
 | 2 | `ibex_soc/` | lowRISC Ibex (fetched, pinned) | No | `nightly.yml` only (`continue-on-error`) |
+| — | `hls_min/` | synthetic HLS provenance micro-fixture | **Yes**, via `cargo test` | `ci.yml` (Rust test job) |
 
 Tier 1 is small enough that the golden hierarchy is hand-verifiable and CI is
 fast and Verilator-free. Tier 2 stresses the elaboration/match path on a real
 production core; it is experimental until the hardening tasks in
 `ibex_soc/README.md` are done.
+
+`hls_min/` sits outside the tiers on purpose. It is not a *design* fixture — it is the
+smallest artifact that exercises one construct the reference design cannot contain
+(see the amended rule in [`ROADMAP.md`](ROADMAP.md) §9): HLS provenance comments only
+appear in **generated** RTL, so adding them to a hand-written core would make it not
+hand-written. It gates PRs through the Rust test suite rather than the golden-diff job,
+and `fixtures/regen.sh` does not know about it — see below.
 
 ## Tier-1: `picorv32_soc`
 
@@ -91,6 +99,34 @@ equivalence.
 > working tree that matches those offsets — regenerate the golden directly, with no
 > manual `tr -d '\r'` step. If you have a pre-`.gitattributes` CRLF checkout, run
 > `git add --renormalize .` once.
+
+## `hls_min` — HLS C↔RTL provenance (#159, #222)
+
+A synthetic two-file stand-in for HLS output, exercising [ADR 0006](decisions/0006-hls-cpp-rtl-source-tracing.md):
+
+```
+hls_min/
+  foo.cpp     the "original" C source
+  foo.sv      generated-style RTL (module mac) carrying `// foo.cpp:N` provenance comments
+  hls_min.f   designlist, for loading it through the app's designlist path
+  golden/     hierarchy.json — language + source_map (--hls-map) and gate primitives (--gate-level)
+```
+
+Gated by `cargo test` (`core/crates/ingest/src/lib.rs:631` ingests the golden and checks the
+map), **not** by the golden-diff job — `ci.yml`'s reproducibility step regenerates tier-1 only.
+`fixtures/regen.sh` doesn't handle it either; regenerate by hand from the repo root, with the
+flag set this golden was built from (verified to reproduce it byte-for-byte):
+
+```bash
+uv run --project elaborate svxprobe-elaborate --top mac \
+    fixtures/hls_min/foo.sv \
+    --gate-level --hls-map --hls-src fixtures/hls_min/foo.cpp \
+    -o fixtures/hls_min/golden/hierarchy.json
+```
+
+Note this golden is **not** elaborated with `--name-refs` (unlike tier-1's) — nothing in its
+test path reads identifier spans, and leaving them out keeps it minimal. There are no traces
+either: it exercises the source-map path, never the matcher.
 
 ## Tier-2: `ibex_soc`
 

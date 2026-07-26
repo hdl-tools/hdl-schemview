@@ -1,6 +1,7 @@
 # hdl-schemview — Execution Roadmap
 
-**Status:** Architecture validated, ready for build.
+**Status:** Phases 0–3e shipped (all three views linked in a desktop app); Phase 4
+(scalability hardening) active; Phases 5–6 open.
 **Audience:** An executing agent or engineer with no access to the design
 conversation. This document is self-contained.
 **How to read it:** Sections 1–4 are context you must internalize before touching
@@ -16,7 +17,7 @@ them in sync:
 
 - **Source** — the SystemVerilog text (file:line:col, lexical scopes).
 - **Schematic** — a generated, navigable diagram of the elaborated design.
-- **Waveform** — simulation traces (VCD/FST, optionally FSDB via a user reader).
+- **Waveform** — simulation traces (VCD/FST/GHW, optionally FSDB via a user reader).
 
 The value is **accurate cross-probing**: click a signal in any view, the other
 two jump to the corresponding object. Commercial equivalents are Synopsys Verdi
@@ -28,8 +29,8 @@ focused, open, RTL-level tool by composing existing components.
 | Goal | Delivered by |
 |---|---|
 | Full SystemVerilog elaboration | Phase 0 (harness) + Phase 1 (Node model spine) |
-| Accurate source/schematic/waveform cross-probing | Phase 1 (matcher, **go/no-go**) → Phase 2 (source↔wave) → Phase 3 (schematic) |
-| Scalable visualization | Phase 3 (schematic) + Phase 4 (scalability hardening) |
+| Accurate source/schematic/waveform cross-probing | Phase 1 (matcher, **go/no-go**) → Phase 2 (source↔wave) → Phase 3 (schematic) → Phase 3e (usage-level source resolution, C↔RTL) |
+| Scalable visualization | Phase 3 (schematic) + Phase 3e (selectable projections) + Phase 4 (scalability hardening) |
 | VCD & FST + user-brought plugins | Phase 1 (wellen ingest) + Phase 5 (reader & translator plugin surfaces) |
 
 Phase 6 makes the whole thing installable and embeddable.
@@ -54,7 +55,7 @@ serves this principle.
 Adopting these is mandatory, not optional. The single biggest failure mode is an
 agent trying to build something already solved. When in doubt, **adopt**.
 
-| Concern | Adopt | Current status (verified Jun 2026) | Do NOT build |
+| Concern | Adopt | Current status (verified Jul 2026) | Do NOT build |
 |---|---|---|---|
 | SV parse + elaboration | **slang** (`MikePopoloski/slang`) — complete IEEE 1800-2023 through elaboration; library-first; ships **Python bindings (`pyslang`) in-tree** | The standalone `pyslang` repo was **archived Jan 2025**; bindings consolidated into `slang` and still published to PyPI as `pyslang`. Target the consolidated source. | A SystemVerilog frontend. This is decades of work. |
 | Waveform read (VCD/FST/GHW) | **wellen** (`ekiwi/wellen`) — pure-Rust, lazy per-signal loading | Confirmed VCD/FST/GHW. FST is truly lazy; VCD/GHW are parsed once into a compressed in-memory store (FST-like). `pywellen` wrapper exists; used beyond Surfer (e.g. VaporView). | A VCD/FST parser |
@@ -70,6 +71,13 @@ agent trying to build something already solved. When in doubt, **adopt**.
 
 Both forks are **re-examined** as Architecture Decision Records and **locked to
 their defaults** for v1. Read the ADRs before deviating.
+
+> **All ADRs** live in [`decisions/`](decisions). 0001/0002 are the two forks below;
+> the rest record decisions made during the build: 0003 storage backend for parse
+> scalability, 0004 internal-logic granularity, 0005 optional gate-level projection,
+> 0006 HLS C↔RTL source tracing, 0007 model-driven semantic name coloring, 0008
+> lexical source highlighting. The §8 stack sub-decisions (elkjs, custom waveform
+> canvas) are closed inline there rather than as separate ADRs.
 
 ### 4.1 Scope: RTL-level vs. netlist-level → **RTL-level (locked)**
 Source = the hierarchy, so cross-probe is direct and a weekend-feasible spike on
@@ -110,6 +118,7 @@ return to the indicated loop-back point rather than proceeding.
      ```
      core/                 Rust workspace: data model, indices, matcher, event bus
      elaborate/            pyslang harness: elaborate → serialize Node model
+     app/                  Tauri 2 desktop app (added in Phase 3c)
      fixtures/             frozen reference fixture (see below)
      docs/                 this roadmap + ADRs
      .github/workflows/    CI
@@ -259,8 +268,97 @@ return to the indicated loop-back point rather than proceeding.
   so cross-probe stays a lookup — no heuristics, no string-matching.
 - **Out of scope:** gate/operator-level netlist decomposition; `initial`/`final`
   blocks; tasks/functions.
+  - **Superseded in part by ADR 0005 (Phase 3e).** Gate/operator decomposition is no
+    longer out of scope outright — it exists as an **opt-in projection** behind the
+    harness's `--gate-level` flag and a Settings toggle. Process-level remains the
+    default and the granularity ADR 0004 fixes; the gate view is a second projection
+    of the same model, never a replacement. `initial`/`final` and tasks/functions
+    stay out of scope.
+
+#### Phase 3e — Projections & source fidelity · Size: L
+
+> **Status: DONE.** The wave after 3d, delivered as independent slices rather than
+> one epic. Everything here is a *projection* of the same elaborated model, per §2 —
+> no new identity space, and every addition to the harness is **opt-in and additive**
+> (`schema_version` stays `1`; with the flag off the emitted JSON is byte-identical).
+
+- **Gate-level schematic projection** (#157 → #199, #206, #207; **ADR 0005**) — a
+  `Projection { ProcessLevel | GateLevel }` selects internal-logic granularity.
+  Under `GateLevel` a combinational block dissolves into flat gate/mux primitives
+  drawn as IEEE distinctive glyphs, with inverter folding, inline constant/parameter
+  tie values, `Concat` primitives, memory-array read operands, and `case` statements
+  lowered to priority-mux trees. Harness side is `--gate-level`; frontend side is a
+  Settings toggle. **Open follow-up: #215** (`if`/`else` statement lowering — the
+  `case` sibling; not implemented).
+- **Memory glyph** (#112; **ADR 0004 amendment**) — an unpacked-array `Var` re-kinds
+  to `Memory` and renders as a MEMORY glyph with `Addr`/`Din`/`Dout` pins from typed
+  `mem_port` edges, plus depth and an INIT marker from `$readmemh`/`$readmemb`.
+- **HLS C/C++ ↔ RTL source tracing** (#159, #222; **ADR 0006**) — a bidirectional
+  line-region `source_map` scanned from the generated RTL's own provenance comments
+  gives HLS designs a C/C++ source pane that cross-probes to schematic and waveform.
+  C is **display-only and never parsed**: the correspondence is always the tool's own
+  provenance, never inferred.
+- **Source-pane fidelity** — lexical syntax highlighting for SystemVerilog and C/C++
+  (#223, #224; **ADR 0008**) layered under **model-driven semantic name coloring**
+  (#225; **ADR 0007**), where identifier spans come from the elaboration
+  (`--name-refs`) rather than the lexer. The same spans make a click on a *usage*
+  resolve to the signal it names, not merely to the enclosing process.
+- **Independent panes** (#167 epic: #168, #169, #170, #171) — multi-session backend,
+  detachable schematic and waveform windows each with their own trace, and a per-pane
+  signal picker; extended to the schematic pane by the `a`-key palette (#219).
+- **Waveform pane** — collapsible lane groups with drag reordering (#182, #188, #192),
+  sticky ruler and top-packed lanes (#180, #181), per-signal multi-view lanes and
+  sub-buses (#179).
+- **Polish** — dangling logic-box and gate outputs labelled with their driven net
+  (#118, #202, #216); navigable-scope predicate shared by tree and schematic (#184);
+  status/log consolidated into one pane (#100, #228); `.gitattributes eol=lf` pinning
+  source offsets across platforms (#203).
+- **Governing principle held throughout:** every one of these is a lookup against the
+  model. The gate view carries model `NodeId`s and sub-expression `def_range`s; the
+  C↔RTL map is emitted provenance; name coloring is classified off the symbol the
+  elaboration resolved, never off the token text.
 
 ### Phase 4 — Scalability hardening · Size: M
+
+> **Status: ACTIVE — measurement-first.** The rule for this phase is that no storage
+> or representation change lands before a measurement justifies it, so the benchmark
+> was built first.
+>
+> - **`scale-bench` (#24)** ✅ — a dev-only crate: a deterministic synthetic-model
+>   generator (665 / 100K / 1M nodes), criterion benches for load/query/matcher, and a
+>   `scenario` bin that runs **one measured operation per process** so peak RSS is
+>   attributable. Bases include the committed golden and any **real** elaborated design.
+>   `core/scripts/scale-bench-collect.{ps1,sh}` drives the whole matrix into one
+>   paste-ready metrics file; the nightly `scale-bench` job runs the POSIX collector
+>   and uploads it. Runbook: [`benchmarking.md`](benchmarking.md).
+> - **rkyv load cache (#21)** ✅ — ADR 0003 Phase A. `ingest` caches the parsed
+>   `Document` in `.schemview_data/` and mmaps it on repeat launches; measured **3.8×**
+>   faster warm load at 100K (570 ms → 150 ms).
+> - **`wave_index` cache (#153)** ✅ — persists the matcher's resolved `(NodeId,
+>   var_ref)` pairs, so a warm launch also skips the matcher pass that dominated
+>   per-launch cost once the parse was cached.
+>
+> **Measured against the exit gate** (2026-07-26, 16 GB desktop, full matrix in
+> `benchmarking.md` §Findings):
+>
+> - *Bounded memory* — 1M nodes **fit**: 4.1 s cold load at 1,129 MB peak RSS, 1.4 s
+>   warm. Nothing OOMs. This matters because it means #22's premise (a design *too
+>   large to materialize*) is **not met at 1M**, which shifts weight toward ADR 0003's
+>   third outcome (level-of-detail / fan-out policy) over a storage swap.
+> - *Sub-second scope expansion* — holds everywhere: `scope_graph` is **flat in node
+>   count** (6.6 µs at 665 → 17.3 µs at 100K → 7.2 µs p50 at 1M). What drives it is
+>   **edge density per scope**, not size: a real 7.2K-node design costs 203 µs p50 /
+>   1.5 ms p95, ~28× the 100K synthetic at 1/140th the node count.
+> - *Sub-second signal query* — the one interactive miss is **`cone()` under fan-out**:
+>   190.8 ms at a 59K-load clock. That is the concrete target for the level-of-detail
+>   work, and per ADR 0003 it is an algorithmic fix, not a storage one.
+>
+> **Open and gated on this data:** **#22** (Phase B — redb/SQLite demand-loading) and
+> **#155** (true zero-copy rkyv read-back). For #155 the split is already measured:
+> `access_unchecked` 0.29 ms vs `cache_hit` 1,414 ms at 1M, but 294 ms of that gap is
+> bytecheck *validation* a zero-copy path still needs, and most of the rest is
+> **index build**, not `deserialize` — so the payoff is smaller than the headline gap
+> suggests.
 
 - **Goal:** Survive a real SoC, not just a core.
 - **Tasks:** lazy everywhere (hierarchy, connectivity, signal data via wellen's
@@ -357,13 +455,25 @@ Two **separate** surfaces — do not conflate them (§6, ADR 0002).
   model (JSON/MessagePack). FFI only if throughput demands it.
 - **Waveform read:** wellen (built-in); subprocess IPC for user readers; nFFR for
   FSDB (user-supplied).
-- **Schematic layout:** ELK. **Open sub-decision for Phase 3:** `elkjs`
-  (mature, JS/WASM, proven in `d3-hwschematic`/`netlistsvg`) vs. `elk-rs` (pure
-  Rust, no JS runtime in the layout path). Default lean: prototype with `elkjs`
-  for ecosystem maturity; migrate to `elk-rs` if the JS boundary costs more than it
-  saves. Record the choice as an ADR when made.
-- **Rendering/control:** embed Surfer + WCP if convenient, else custom canvas.
-- **Editor:** Monaco/CodeMirror or LSP client.
+- **Schematic layout:** ELK — **`elkjs`, decided in Phase 3c.** The layout path runs
+  in the webview alongside the SVG renderer (`app/src/elk.ts`), so there is no
+  JS-boundary crossing to pay for: the graph is already in the frontend when it is
+  laid out. `elk-rs` would have moved layout into the Rust shell only to serialize the
+  result straight back out. Revisit only if layout becomes the interactive bottleneck
+  — at present `cone()` extraction, not layout, is the measured cliff (Phase 4).
+- **Rendering/control:** **custom canvas, decided in Phase 3c.** Surfer is embedded via
+  `<iframe>` + WCP or not at all, and an embedded pane cannot participate in the
+  cross-probe as a *projection of our model* — WCP would have made it a second
+  identity space to reconcile, which §2 exists to prevent. The waveform pane is a
+  canvas 2D renderer (`app/src/wave.ts`) over the same `wave_index` lookups as every
+  other view; wellen is still the reader, so nothing was rebuilt but the drawing.
+  WCP remains available as a Phase 5 *outbound* surface.
+- **Editor:** **own source pane with a hand-rolled lexical highlighter, decided in
+  Phase 3e** — an argued reversal of §3's "Do NOT build: a code editor", scoped to a
+  *viewer*, not an editor. See **ADR 0008**: the pane's whole job is byte-offset-exact
+  cross-probe anchoring, and semantic identifier coloring comes from the model
+  (**ADR 0007**), not from a language service. Monaco/CodeMirror/LSP stay the answer
+  if editing is ever in scope; it is not.
 
 ---
 
@@ -381,5 +491,14 @@ Two **separate** surfaces — do not conflate them (§6, ADR 0002).
   regression target through Phase 4. The Phase 1 threshold (≥ 95%, zero mystery
   misses) is pinned alongside it. Do not invent ad-hoc test files in later phases
   — extend the fixture.
+  - **Amended.** The rule's target is ad-hoc files invented *instead of* exercising
+    the reference design; a **purpose-built fixture for a construct the reference
+    design does not contain** is legitimate, because extending `picorv32_soc` with
+    unrelated constructs would erode the very property that makes it a stable gate.
+    `fixtures/hls_min/` is the precedent: HLS provenance comments cannot be added to
+    a hand-written RTL core without making it not-hand-written. Such a fixture must
+    be tiny, committed, deterministic, and documented in
+    [`fixtures.md`](fixtures.md) with the tier table saying what gates it. The
+    matcher and cross-probe gates still run on tier-1 only.
 - When in doubt about a build-vs-adopt call, re-read §3. The default is always
   adopt.

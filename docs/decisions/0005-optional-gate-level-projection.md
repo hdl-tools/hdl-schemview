@@ -1,6 +1,6 @@
 # ADR 0005 — Optional gate-level projection over the model spine
 
-- **Status:** Accepted
+- **Status:** Accepted; implemented (#157 PR1–PR5, #199, #206, #207). One follow-up open: #215
 - **Date:** 2026-07-18
 - **Deciders:** project maintainers
 - **Relates to:** ROADMAP Phase 3d; issue #157 (this change); **amends/extends** [ADR 0004](0004-internal-logic-schematic-granularity.md); builds on #112/#160 (memory glyph, landed)
@@ -129,10 +129,33 @@ extending the existing `_add_logic` `$ff{nid}` scheme.
   callers pass the default, so behavior is neutral until the toggle flips.
 - The matcher gate (≥95%) is unaffected — the projection is schematic-only; no wave signals
   change.
-- **Follow-up (#207):** `case`/`casez`/`casex` statements lower into priority-`Mux` chains
-  (a one-hot `case (1'b1)` uses each item predicate as the select; a general `case (expr)`
-  uses equality-`Cmp` selects), reusing the `Mux` kind + `mux_port` roles — additive, no
-  schema change. §1's `if`/`else` → `Mux` remains a tracked follow-up (#215).
+- **Follow-up (#207) — LANDED** (`fc8b0bc`): `case`/`casez`/`casex` statements lower into
+  priority-`Mux` chains (a one-hot `case (1'b1)` uses each item predicate as the select; a
+  general `case (expr)` uses equality-`Cmp` selects), reusing the `Mux` kind + `mux_port`
+  roles — additive, no schema change. The lowered branch assignments are excluded from the
+  flat expression pass via a `consumed` set keyed on **source-range offsets**, never pyslang
+  wrapper `id()`: pyslang re-wraps a node per traversal, so `id()` is unstable across the two
+  passes and its reuse made node output hash-seed dependent.
+  §1's `if`/`else` → `Mux` remains a tracked follow-up (**#215, still open** — no
+  `ConditionalStatement` pre-pass exists in the harness).
+
+### As built — three refinements beyond the original slice
+
+- **Constant and parameter operands are inline ties, not nodes (#199).** A hard-coded literal
+  (`a & 8'hFF`) or a parameter (`a & MASK`) surfaces its value **on the gate's input pin**
+  (`SchPort.constant`, drawn just outside the west wall) rather than as a separate source box.
+  The value is then traceable *at the gate that uses it*, and a scope full of constants does
+  not fill with boxes carrying no structure. A literal is emitted as a synthetic `Const` node
+  purely to hang the value on; `Const` is never itself a box. A `{a, b}` concatenation operand
+  does get a box (`Concat`), because it has internal structure a tie label cannot express.
+- **Memory-array read operands wire to the array (#206).** A gate operand that reads
+  `cpuregs[decoded_rs1]` resolves to the whole `Memory` node and the `Memory` box gains a
+  synthesized east read-out pin, so the reader's wire reaches the glyph. Dropping the index is
+  the same fidelity simplification as a peeled bit-select. Without this the operand vanished
+  and the mux rendered with a missing input — which is worse than an approximate one.
+- **Datapath `Div`/`Mod`/`Power` shipped**, as the out-of-scope note's first option: they map
+  to the `Mul` node kind with the exact operator preserved on `Node.op`, so they render as a
+  labelled Mul-family box. No separate node kinds were added.
 
 ## Out of scope (unchanged from ADR 0004)
 
@@ -142,3 +165,10 @@ extending the existing `_add_logic` `$ff{nid}` scheme.
   *elaborated RTL's* expressions, not a synthesized netlist.
 - `Div`/`Mod`/`Power` datapath primitives may be deferred to a later slice (rendered as a
   labeled `Mul`-family box or left process-level) without reopening this ADR.
+  **Resolved:** shipped as labelled `Mul`-family boxes (the first option) — the exact
+  operator rides on `Node.op`, so no new node kinds were needed.
+- **Function-call operands** are still not decomposed — the one genuine remaining gap. None
+  occur in the committed golden, so it is untested rather than known-broken.
+- **Syntax highlighting is lexical only** ([ADR 0008](0008-lexical-source-highlighting.md)) and
+  therefore *not* an expression-level view of the source. The gate projection is the only
+  expression-aware surface; the source pane deliberately does not attempt a second one.

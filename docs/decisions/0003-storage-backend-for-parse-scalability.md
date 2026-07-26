@@ -138,6 +138,26 @@ scale-up generator** — parameterized fan-out, hierarchy depth, and signal coun
 CI; and (b) a **large external open SoC** (e.g. an OpenTitan/multicore-scale design) elaborated
 through the pyslang harness. The benchmark output is the input to the Phase-B engine decision.
 
+> **RESOLVED (#24, 2026-07-26).** Candidate (a) was built — `core/crates/scale-bench`, a
+> deterministic seeded generator at 665 / 100K / 1M nodes — and candidate (b) was folded in as a
+> **`real` basis** that loads any elaborated `hierarchy.json` (`claude_verilog_test`, ~7.2K nodes),
+> keeping it as the *realism anchor* it is suited to be rather than the scale basis it cannot be.
+> The committed `golden` fixture is a third basis. Runbook: [`../benchmarking.md`](../benchmarking.md).
+>
+> **The first full run changes the Phase-B picture.** At 1M nodes the eager path **does not fail**:
+> 4,123 ms cold load at **1,129 MB peak RSS**, 1,414 ms warm — comfortably inside a 16 GB desktop.
+> The premise "too large to materialize" is therefore **not met at 1M**, which is the condition
+> this ADR set for a storage swap. Meanwhile scoped queries are flat in node count
+> (`scope_graph` 6.6 µs → 17.3 µs → 7.2 µs p50 across 665 / 100K / 1M) and cost tracks **edge
+> density per scope** instead — the 7.2K real design costs 203 µs p50 / 1.5 ms p95, ~28× the 100K
+> synthetic. The single non-interactive operation is **`cone()` at 190.8 ms on a 59K-load clock**.
+>
+> That is precisely the shape the **third outcome** above describes: the bottleneck is a fan-out
+> traversal, not a storage engine, and no DB makes a 59K-node cone cheap to *draw*. So the next
+> Phase-4 step is the algorithmic one (level-of-detail / fan-out policy), and **#22 stays open
+> but its trigger is unmet** — it should be re-armed by a design that actually exceeds RAM, not by
+> node count alone.
+
 ## Consequences
 
 - **Phase A** touches only `core/crates/model` (rkyv derives on `Document`/`Node`/`Edge`/index
@@ -152,8 +172,17 @@ through the pyslang harness. The benchmark output is the input to the Phase-B en
     design outgrows RAM, at which point it converges with Phase B). The `path_index`/
     `src_index`/`conn_index` are still rebuilt on load. Any miss/stale/corrupt archive falls
     back to the JSON and rewrites the cache (best-effort). `svxprobe cache <model.json>`
-    pre-builds the archive for cache-less/ephemeral deploys. Measured at 100K synthetic nodes:
-    cold `from_slice` ~603 ms → warm `cache_hit` ~210 ms (~2.9×).
+    pre-builds the archive for cache-less/ephemeral deploys. Measured at 100K synthetic nodes
+    (2026-07-26, `scale-bench`): cold `from_slice` **570 ms** → warm `cache_hit` **150 ms**
+    (**~3.8×**). At 1M: 4,123 ms → 1,414 ms (~2.9×). (An earlier ~603→~210 ms / ~2.9× reading
+    here predates the current benchmark harness.)
+  - **Where the warm load actually goes (#155 input).** Splitting `cache_hit` at 1M:
+    `access_unchecked` (mmap only) **0.29 ms**, `access_checked` (+ bytecheck) **294.5 ms**,
+    full `cache_hit` **1,414 ms**. So of the ~1.41 s, ~294 ms is **validation a zero-copy path
+    still needs** and ~1,120 ms is deserialize **plus index build** — and criterion attributes a
+    large share of that to index build alone (77 ms of a 175 ms `cache_hit` at 100K). Peak RSS
+    tells the same story: 380 MB archive-only vs 1,432 MB owned. **#155's payoff is real but
+    smaller than the raw gap suggests**, because the indices are rebuilt either way.
   - **wave_index cache follow-up (#153, as built):** the matcher's resolved `wave_index`
     (trace signal ↔ NodeId) is now persisted too, closing the "persisting them is a follow-up"
     gap above. `ingest::{try_load_wave_index, write_wave_index}` cache the flat `(NodeId,
@@ -165,6 +194,12 @@ through the pyslang harness. The benchmark output is the input to the Phase-B en
     cost. The `svxprobe match` gate still runs the live matcher (it needs the `MatchReport`).
 - **A load-time benchmark** at 665 / ~6K / synthetic 100K nodes should be added as a CI perf
   guard so regressions are caught.
+  - **Done (#24):** criterion `load`/`query`/`matcher` groups at 665 / 100K (1M behind
+    `SCALE_BENCH_FULL`), plus the per-process `scenario` layer for peak RSS. It runs as the
+    **nightly `scale-bench` job**, which uploads the metrics file as an artifact. Deliberately
+    `continue-on-error` and *not* a PR gate: single-shot wall times on shared runners vary by
+    tens of percent, so a hard threshold would fail on noise. The artifact is for reading
+    trends; regressions are caught by comparing runs, not by a red build.
 - **Phase B remains open and is gated on a benchmark.** If a future workload needs to browse a
   100K+/1M+-node design without ever fully materializing it, the redb-vs-SQLite choice is decided
   by the scalability benchmark (see "1M+ node analysis" above), not by this ADR alone. This ADR is

@@ -1,12 +1,20 @@
 # hdl-schemview desktop app
 
-The Tauri GUI (roadmap Phase 3): three linked views — **schematic**, **source**,
+The Tauri GUI (roadmap Phases 3 + 3e): the linked views — **schematic**, **source**,
 **waveform** — over the cross-probe engine. Click a box/wire in the schematic and
 the source scrolls to its declaration while the waveform shows its signal; an
 ambiguous source position offers a picker; double-click a box to expand it, or drill
-into a leaf module to see its **internal logic** (process-level FF/comb boxes). The
-waveform pane is interactive: stack many traces, set A/B markers, zoom/pan the shared
-time window, switch per-signal radix, slice sub-buses, and read FSM **state names**.
+into a leaf module to see its **internal logic** (process-level by default,
+**gate-level** behind a Settings toggle). The waveform pane is interactive: stack many
+traces in collapsible groups, set A/B markers, zoom/pan the shared time window, switch
+per-signal radix, slice sub-buses, and read FSM **state names**.
+
+**Layout.** A hierarchy tree on the left (draggable column splitter), a tabbed content
+area top-right — **Source** · **C/C++** · **Schematic** · **Settings** — and a tabbed
+bottom pane — **Status** · **Waveform** — separated by a draggable row splitter. Source
+and Status are the defaults; Schematic, Waveform and C/C++ are revealed on demand.
+Schematic and waveform tabs can be **popped out** into their own windows (`⇱`), each
+independent: its own scope, its own trace, its own signal picker.
 
 **Standalone:** Tauri renders the frontend in the OS-native webview
 (WebKitGTK / WebView2 / WKWebView) — **no Chromium or Playwright at runtime**.
@@ -15,17 +23,50 @@ time window, switch per-signal radix, slice sub-buses, and read FSM **state name
 
 ```
 app/
-  src/                 frontend (TypeScript + Vite)
-    elk.ts             SchematicGraph -> ELK graph (elkjs layout)   [unit-tested]
-    api.ts             typed wrappers over the Tauri commands
-    main.ts            the three panes + one selection store
+  src/                 frontend (TypeScript + Vite) — 15 modules, 12 test files
+    main.ts            all panes, app state, and the only DOM outside tree.ts
+    api.ts             typed wrappers over the 18 Tauri commands
+    types.ts           DTO interfaces mirroring the Rust serde types
+    bus.ts             the single cross-pane selection channel     [unit-tested]
+    elk.ts             SchematicGraph -> ELK graph (elkjs layout)  [unit-tested]
+    tree.ts            hierarchy-tree factory (window tree + pickers) [happy-dom]
+    wave.ts            waveform geometry, groups, canvas drawing   [unit-tested]
+    syntax.ts          SV + C/C++ lexical tokenizer (ADR 0008)     [unit-tested]
+    names.ts           model-driven semantic name overlay (ADR 0007) [unit-tested]
+    source.ts          source-pane rendering + line highlighting
+    srcoffset.ts       caret -> byte offset across token spans     [happy-dom]
+    csrc.ts            routes a SourceLoc to the RTL or C/C++ pane [unit-tested]
+    schempick.ts       schematic signal-palette logic              [unit-tested]
+    prefs.ts           settings persistence (theme, excluded, toggles) [unit-tested]
+    log.ts             status/log pane formatting                  [unit-tested]
   src-tauri/           thin Tauri shell: commands forward to svxprobe-gui
 core/crates/gui        all session logic (no UI toolkit) — CI-tested
 ```
 
 The brain is **`svxprobe-gui`** in the core workspace (load, schematic, probe,
 signal values, source) — fully tested without a window. `src-tauri` only locks the
-session and forwards calls.
+session map and forwards calls: **18 commands**, each taking an optional `session_id`
+so a popped-out waveform window can load and query its own trace of the same design.
+The pure modules above are DOM-free on purpose, which is why most of the frontend is
+unit-testable without a browser environment.
+
+## Interacting
+
+| Action | Where |
+| --- | --- |
+| Drive the schematic to a scope | single-click a tree row |
+| Reveal a node in source | double-click a tree row |
+| Move the source highlight | left-click a line in the source pane |
+| Cross-probe menu (source ▸ / waveform ▸) | right-click a source token, schematic box/pin/wire |
+| Expand an instance / drill internal logic | double-click a schematic box |
+| **Search signals in the current scope** | **`a`** over the schematic (`Esc` closes) |
+| **Signal picker for a waveform pane** | **Ctrl/⌘+B**, or ☰ Signals |
+| Zoom the schematic to fit | Ctrl/⌘+0 |
+| Pop a pane into its own window | `⇱` in the tab's control strip |
+| Swap the trace of one pane | **Load trace…** in that pane's control strip |
+| Regroup / reorder waveform lanes | drag a lane by its name cell, or its name-cell menu |
+| Rename / collapse / delete a lane group | double-click or right-click the group header |
+| Set markers A / B | left-click / right-click a waveform track |
 
 ## Develop / run
 
@@ -41,9 +82,18 @@ npm run tauri dev        # launches the desktop window
 npm run tauri build
 ```
 
-In the window, the model/trace/source-root fields are prefilled for the bundled
-fixture; click **Load**. (Paths are resolved relative to the app's working
-directory — use absolute paths if needed.)
+In the window, the load bar offers two modes:
+
+| Mode | Fields |
+| --- | --- |
+| **Model JSON** | `model` (an already-elaborated `hierarchy.json`) |
+| **Designlist** | `filelist` (`.f`), `top`, `incdir` (`;`-separated), and `hlssrc` — *C/C++ sources or dirs*, `;`-separated, for an HLS design |
+
+Both then take `trace` and `srcroot`. The model/trace/source-root fields are prefilled
+for the bundled fixture; click **Load**. Paths resolve relative to the app's working
+directory — use absolute paths if unsure. **`srcroot` must be the directory the model
+was elaborated from**, since the source view resolves `srcroot` + each file's recorded
+relative path.
 
 ## Command line
 
@@ -59,7 +109,7 @@ hdl-schemview -f soc_top.f -top soc_top -I rtl/include -trace sim.fst -src-root 
 | `-f <filelist.f>` | designlist (`.f`) to elaborate — **required with `-top`** |
 | `-top <name>` | top module name — **required with `-f`** |
 | `-I <incdir>` | include directory (repeatable) |
-| `-trace <path>` | waveform trace (VCD/FST) to load (optional) |
+| `-trace <path>` | waveform trace (VCD/FST/GHW) to load (optional) |
 | `-src-root <dir>` | source root for the source view (optional, default `.`) |
 | `-h`, `--help` | print usage and exit |
 
@@ -69,11 +119,25 @@ Relative paths resolve against the **directory you launched from** (under
 **0** help, **1** a missing filelist/trace, **2** a usage error. With no arguments
 the app opens the normal load form.
 
+There is **no `-hls-src` startup flag**: a design launched from the command line cannot
+declare its C/C++ sources, so its C pane will only find sources the provenance comments
+resolve to on their own. Use the in-app designlist form's *C/C++ sources* field for an
+HLS design.
+
 Elaborating a `.f` designlist (`-f`/`-top`, same as the in-app flow) shells out to
 **`svxprobe-elaborate`**, which must be on `PATH`. It ships as a console script in
 the `elaborate/` package's venv — launch from a shell that has it on `PATH`, e.g.
 prepend `elaborate/.venv/Scripts` (Windows) or `elaborate/.venv/bin` (Unix), or
 `uv run` inside `elaborate/`.
+
+The shell **always** passes `--gate-level` and `--name-refs` (plus `--hls-map` and one
+`--hls-src` per declared entry when the C/C++ field is non-empty). This is a hard
+compatibility requirement on the venv's harness version: those flags are additive, but
+the frontend switches on data that must already be in the model — the gate-level toggle
+reads gate primitives, and semantic coloring plus usage-click resolution read
+`name_refs`. Against an older harness that doesn't accept the flags, elaboration fails
+outright; against one that accepts them, a designlist design behaves exactly like the
+committed golden.
 
 Under the dev server the extra `--` levels pass argv through Vite → Tauri → the app:
 
@@ -83,9 +147,17 @@ npm run tauri dev -- -- -- -f ../fixtures/picorv32_soc/picorv32_soc.f -top picor
 
 ## Tests
 
-- Frontend logic: `npm test` (vitest — the ELK adapter).
-- Frontend build: `npm run build` (tsc + vite).
+- Frontend logic: `npm test` (vitest — 12 suites covering the ELK adapter, the
+  selection bus, waveform geometry and grouping, the tokenizer and name overlay, the
+  tree factory, source offsets, prefs, log and palette helpers).
+- Frontend build: `npm run build` (tsc + vite). TS is strict, with
+  `noUnusedLocals`/`noUnusedParameters`; there is no ESLint or Prettier, so match the
+  surrounding style by hand.
 - Backend logic: `cargo test -p svxprobe-gui` (in `core/`).
+
+The default Vitest environment is **`node`** (DOM-free and faster). The two suites that
+need a DOM — `tree.test.ts` and `srcoffset.test.ts` — opt into happy-dom with a per-file
+`// @vitest-environment` docblock rather than switching it on globally.
 
 ## Windows notes
 
@@ -103,10 +175,10 @@ npm run tauri dev -- -- -- -f ../fixtures/picorv32_soc/picorv32_soc.f -top picor
 
 ## CI
 
-The **App** workflow (`.github/workflows/app.yml`) builds the desktop app on a
-matrix of **Ubuntu + Windows** for any PR/push that touches `app/**` or
-`core/crates/**` (and on demand via *Run workflow*). The Windows leg exercises the
-`tauri-build` Windows Resource/icon embed. **macOS is not CI-validated** — the
+The **App** workflow (`.github/workflows/app.yml`) runs `npm test` and `npm run build`,
+then builds the desktop app on a matrix of **Ubuntu + Windows**, for any PR/push that
+touches `app/**` or `core/crates/**` (and on demand via *Run workflow*). The Windows leg
+exercises the `tauri-build` Windows Resource/icon embed. **macOS is not CI-validated** — the
 `.icns` is generated and the `cargo build` works locally, but no macOS runner is
 in the matrix (it bills at 10× minutes on a private repo).
 
