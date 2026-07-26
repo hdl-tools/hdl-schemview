@@ -97,7 +97,10 @@ machine `rustc`, `cargo` and `git` are all absent, so it is the only provenance 
 file from there would otherwise carry. The `Generated` line is UTC and names the collector.
 
 The `.ps1` / `.sh` / `scale_bench_tables.py` scripts **stay** for now, and nightly still
-runs the `.sh`; they are removed once this bin has been confirmed at parity on a full run.
+runs the `.sh`. Retiring them and repointing nightly at this bin happen **together, in one
+change** (#246), gated on a full-matrix parity run — splitting them would either leave
+nightly generating its artifact from unmaintained code, or delete the scripts while nightly
+still calls them.
 
 ## The real-design basis (realism anchor)
 
