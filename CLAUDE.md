@@ -74,6 +74,24 @@ SystemVerilog RTL
 Tauri shell (`app/src-tauri/`, package `hdl-schemview-app`) is a thin `cdylib`/`lib`
 wrapping `svxprobe-gui` + `svxprobe-schematic` + `svxprobe-wave`.
 
+**Packaging for isolated environments (#240 tier 1, ADR 0009).** The deployment target
+has no network, no toolchain and no package manager, so the bundle carries its own
+runtime: `tauri.offline.conf.json` is a one-key **overlay** setting
+`webviewInstallMode: fixedRuntime` for Windows (the payload path stays *out* of the base
+config, which would otherwise break every contributor's `tauri build`), AppImage is the
+supported Linux artifact, and macOS is ad-hoc signed (`signingIdentity: "-"`, which does
+**not** clear Gatekeeper quarantine — `xattr -dr` is documented instead) and remains
+**unverified end-to-end**. `src/console.rs` attaches a release build to its parent console
+via hand-declared kernel32 externs (the `mem.rs` precedent, no new dependency): the
+GUI-subsystem binary otherwise has no std handles, so the documented `-h`→0 / usage→2 /
+bad-path→1 contract printed *nothing*. `startup::parse_launch` wraps `parse` with a
+`Launch { Gui, Bench, BenchScenario }` enum — the bench arms are recognized **only as the
+first argument** and are refused until the benchmark slice wires them. Elaboration stays
+out of the bundle (tier 2, gated on a PyInstaller spike): a missing harness now returns
+`gui::harness_missing_message()`, which names the copy-a-`hierarchy.json` workflow rather
+than only "install it". The Tauri command layer flattens errors with `fmt_err` (`{:#}`)
+so an anyhow context chain reaches the status pane instead of only its outermost layer.
+
 ### Frontend (`app/`, vanilla TS + Vite 5 + Vitest, no UI framework)
 
 | File | Role |
@@ -316,8 +334,13 @@ pytest, schema validation, an **RTL `always_ff` driver lint** — VCS rejects a 
 written by `always_ff` that has any other procedural driver, IEEE 1800 §9.2.2.4, while
 slang and Verilator accept it — and **golden reproducibility**, which re-elaborates
 `fixtures/picorv32_soc/golden/hierarchy.json` with **`--gate-level --name-refs`** and
-diffs it), Ubuntu, on push/PR. `app.yml` — `npm test` + `npm run build`, then a
-cross-platform Tauri build (Ubuntu + Windows), when `app/` or `core/crates/` change.
+diffs it), Ubuntu, on push/PR. `app.yml` — **two** jobs, when `app/` or `core/crates/`
+change: `build` (`npm test` + `npm run build` + `cargo build` on Ubuntu + Windows, the
+fast PR signal) and **`bundle`** (#240 — a real `tauri build` on Ubuntu + Windows +
+**macOS**, uploading each artifact; `cargo build` never exercises the bundler, so
+NSIS/AppImage/`.app` breakage would otherwise surface only at release). `bundle` skips
+pull requests, since macOS bills at 10× minutes on a private repo, and needs the
+`WEBVIEW2_CAB_URL` repo variable for the Windows fixed-runtime payload.
 `nightly.yml` — **three** jobs: `repro-tier1` (Verilator trace regeneration),
 `stress-tier2` (Ibex, `continue-on-error`), and `scale-bench` (the scalability
 collector, `continue-on-error`, uploads a `scale-bench-metrics` artifact).

@@ -36,6 +36,11 @@ ref/
 .schemview_data/
 
 # AI cached
+# WebView2 fixed-version runtime for the offline Windows bundle (#240). ~180 MB,
+# downloaded at build time by the `bundle` CI job (or by hand — see app/README.md)
+# and referenced by tauri.offline.conf.json. Never committed.
+app/src-tauri/webview2-runtime/
+
 .claude
 .gemini
 .kiro

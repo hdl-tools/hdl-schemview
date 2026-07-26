@@ -53,6 +53,12 @@ OPTIONS:
     -src-root <dir>     source root for the source view (default: .)
     -h, --help          print this help
 
+BENCHMARK (#240):
+    --bench [--full] [-model <hierarchy.json>] [-out <file>] [-bases \"665 100K\"]
+                        run the scalability scenarios, write a metrics file and
+                        exit. Single-shot (no criterion layer), so latency
+                        figures are order-of-magnitude; memory figures are not.
+
 With no arguments the app opens the normal load form. Long flags accept either
 one dash (-top) or two (--top).";
 
@@ -126,6 +132,107 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<StartupArg
             "-f <filelist> and -top <name> are required".into(),
         )),
     }
+}
+
+/// What argv asked this process to do (#240).
+///
+/// `Gui` is the pre-existing behaviour verbatim — [`parse`]'s result, unchanged
+/// — so adding the benchmark modes could not disturb the launch contract or its
+/// tests. The two bench arms exist because a packaged app is the only benchmark
+/// harness available on an isolated machine (no `cargo bench`, no toolchain).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Launch {
+    /// Boot the desktop app, optionally auto-loading a designlist.
+    Gui(Option<StartupArgs>),
+    /// `--bench …` — run the scenario matrix and write a metrics file.
+    Bench(BenchRequest),
+    /// `--bench-scenario <rest…>` — run exactly one measured scenario in this
+    /// process and exit. Deliberately **undocumented** in [`USAGE`]: it is the
+    /// child half of the `--bench` self re-exec, not a user-facing flag. Peak
+    /// RSS is only attributable to a process that did exactly one thing, which
+    /// is why the parent spawns children instead of looping in-process.
+    ///
+    /// `rest` is passed through verbatim — the scenario CLI owns its own
+    /// validation, usage text and exit codes, so the contract cannot fork.
+    BenchScenario(Vec<String>),
+}
+
+/// The `--bench` flags. All optional: a bare `--bench` runs the default matrix
+/// and writes `metrics-<stamp>.md` to the invocation directory.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BenchRequest {
+    /// Include the 1M-node basis (slow, and the case that may OOM).
+    pub full: bool,
+    /// An elaborated `hierarchy.json` to measure as the `real` basis.
+    pub model: Option<String>,
+    /// Where to write the metrics file.
+    pub out: Option<String>,
+    /// Override the basis list entirely, e.g. `"665 100K"`.
+    pub bases: Option<Vec<String>>,
+}
+
+/// Peel the benchmark modes off argv, else delegate to [`parse`] unchanged.
+///
+/// `--bench` and `--bench-scenario` are recognized **only as the first
+/// argument**. A stray `--bench` later in the line (`-f a.f --bench`) stays an
+/// ordinary unknown-argument usage error rather than silently discarding the
+/// GUI flags that preceded it.
+pub fn parse_launch(args: impl IntoIterator<Item = String>) -> Result<Launch, StartupError> {
+    let mut it = args.into_iter().peekable();
+    match it.peek().map(String::as_str) {
+        Some("--bench") => {
+            it.next();
+            parse_bench(it).map(Launch::Bench)
+        }
+        // Everything after the marker belongs to the scenario CLI, including a
+        // `-h` — forwarding it verbatim is what keeps the two in lockstep.
+        Some("--bench-scenario") => {
+            it.next();
+            Ok(Launch::BenchScenario(it.collect()))
+        }
+        _ => parse(it).map(Launch::Gui),
+    }
+}
+
+fn parse_bench(args: impl IntoIterator<Item = String>) -> Result<BenchRequest, StartupError> {
+    let mut req = BenchRequest::default();
+    let mut it = args.into_iter();
+    while let Some(arg) = it.next() {
+        let mut value = |flag: &str| -> Result<String, StartupError> {
+            match it.next() {
+                Some(v) if !v.starts_with('-') => Ok(v),
+                Some(v) => Err(StartupError::Usage(format!(
+                    "{flag} expects a value, got flag '{v}'"
+                ))),
+                None => Err(StartupError::Usage(format!("missing value for {flag}"))),
+            }
+        };
+        match arg.as_str() {
+            "-h" | "--help" => return Err(StartupError::Help),
+            "-full" | "--full" => req.full = true,
+            "-model" | "--model" => req.model = Some(value("-model")?),
+            "-out" | "--out" => req.out = Some(value("-out")?),
+            // One shell word, whitespace-separated, mirroring the collector's
+            // `--bases "golden 665"`. An all-whitespace value is a typo, not a
+            // request for zero bases — reject it rather than run nothing.
+            "-bases" | "--bases" => {
+                let raw = value("-bases")?;
+                let list: Vec<String> = raw.split_whitespace().map(str::to_string).collect();
+                if list.is_empty() {
+                    return Err(StartupError::Usage(
+                        "-bases needs at least one basis".into(),
+                    ));
+                }
+                req.bases = Some(list);
+            }
+            other => {
+                return Err(StartupError::Usage(format!(
+                    "unknown argument for --bench: {other}"
+                )));
+            }
+        }
+    }
+    Ok(req)
 }
 
 /// The directory a relative launch path should resolve against: the directory
@@ -353,5 +460,128 @@ mod tests {
         assert!(resolve_path("soc.f", cwd)
             .replace('\\', "/")
             .ends_with("/work/proj/soc.f"));
+    }
+
+    // --- parse_launch (#240) -------------------------------------------------
+
+    fn launch(args: &[&str]) -> Result<Launch, StartupError> {
+        parse_launch(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn launch_delegates_the_gui_cases_unchanged() {
+        // The whole point of the delegating layer: every pre-existing launch
+        // shape must survive byte-for-byte.
+        assert_eq!(launch(&[]), Ok(Launch::Gui(None)));
+        assert_eq!(launch(&["-h"]), Err(StartupError::Help));
+        assert_eq!(
+            launch(&["-f", "soc.f", "-top", "soc"]),
+            Ok(Launch::Gui(Some(StartupArgs {
+                filelist: "soc.f".into(),
+                top: "soc".into(),
+                incdirs: vec![],
+                trace: String::new(),
+                src_root: ".".into(),
+            })))
+        );
+        assert!(matches!(launch(&["--nope"]), Err(StartupError::Usage(_))));
+    }
+
+    #[test]
+    fn bare_bench_defaults_everything() {
+        assert_eq!(
+            launch(&["--bench"]),
+            Ok(Launch::Bench(BenchRequest::default()))
+        );
+    }
+
+    #[test]
+    fn bench_accepts_its_flags_under_either_dash_style() {
+        let want = Launch::Bench(BenchRequest {
+            full: true,
+            model: Some("m.json".into()),
+            out: Some("o.md".into()),
+            bases: None,
+        });
+        assert_eq!(
+            launch(&["--bench", "--full", "--model", "m.json", "--out", "o.md"]),
+            Ok(want.clone())
+        );
+        assert_eq!(
+            launch(&["--bench", "-full", "-model", "m.json", "-out", "o.md"]),
+            Ok(want)
+        );
+    }
+
+    #[test]
+    fn bench_bases_splits_one_shell_word() {
+        let Ok(Launch::Bench(req)) = launch(&["--bench", "-bases", "golden 665  100K"]) else {
+            panic!("expected a bench launch");
+        };
+        assert_eq!(
+            req.bases,
+            Some(vec!["golden".into(), "665".into(), "100K".into()])
+        );
+        // Whitespace-only is a typo, not "run zero bases".
+        assert!(matches!(
+            launch(&["--bench", "-bases", "   "]),
+            Err(StartupError::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn bench_rejects_unknown_flags_and_missing_values() {
+        assert!(matches!(
+            launch(&["--bench", "-top", "soc"]),
+            Err(StartupError::Usage(_))
+        ));
+        assert!(matches!(
+            launch(&["--bench", "-out"]),
+            Err(StartupError::Usage(_))
+        ));
+        assert_eq!(launch(&["--bench", "-h"]), Err(StartupError::Help));
+    }
+
+    #[test]
+    fn bench_scenario_forwards_its_tail_verbatim() {
+        // Including tokens the GUI parser would reject and a `-h` — the
+        // scenario CLI owns its own usage text and exit codes.
+        assert_eq!(
+            launch(&["--bench-scenario", "--basis", "665", "--mode", "nav"]),
+            Ok(Launch::BenchScenario(vec![
+                "--basis".into(),
+                "665".into(),
+                "--mode".into(),
+                "nav".into(),
+            ]))
+        );
+        assert_eq!(
+            launch(&["--bench-scenario", "-h"]),
+            Ok(Launch::BenchScenario(vec!["-h".into()]))
+        );
+        assert_eq!(
+            launch(&["--bench-scenario"]),
+            Ok(Launch::BenchScenario(vec![]))
+        );
+    }
+
+    #[test]
+    fn bench_flags_are_only_recognized_first() {
+        // A late `--bench` must not silently discard the GUI flags before it.
+        assert!(matches!(
+            launch(&["-f", "soc.f", "-top", "soc", "--bench"]),
+            Err(StartupError::Usage(_))
+        ));
+        assert!(matches!(
+            launch(&["-trace", "t.vcd", "--bench-scenario"]),
+            Err(StartupError::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn usage_documents_bench_but_not_the_child_flag() {
+        assert!(USAGE.contains("--bench"));
+        // The child half is an implementation detail of the re-exec.
+        assert!(!USAGE.contains("--bench-scenario"));
     }
 }

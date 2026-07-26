@@ -25,6 +25,33 @@ pub use svxprobe_schematic::{Projection, SchematicGraph};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
+/// The name the elaboration harness is resolved under, on `PATH`.
+const HARNESS_BIN: &str = "svxprobe-elaborate";
+
+/// Message shown when [`HARNESS_BIN`] is not on `PATH` (#240, ADR 0009 tier 1).
+///
+/// Elaboration is the one runtime dependency the app does not carry: it needs
+/// Python + pyslang out-of-process. Bundling it is tier 2, gated on a
+/// PyInstaller spike — so on the isolated target machine this state is normal
+/// and permanent, and the message has to name the *other* way to get a design
+/// in (elaborate elsewhere, copy the JSON) rather than only "install this".
+///
+/// Multi-line by design; the status pane renders `\n` (`.log-row` is
+/// `white-space: pre-wrap`).
+pub fn harness_missing_message() -> String {
+    format!(
+        "'{HARNESS_BIN}' was not found on PATH, so a designlist (.f) cannot be elaborated.\n\
+         This build does not bundle the elaboration harness — it needs Python 3.11+ with pyslang.\n\
+         \n\
+         Two ways forward:\n\
+         \x20 1. Install the harness on this machine (see elaborate/README.md), then reload.\n\
+         \x20 2. Elaborate on a connected machine and copy the resulting hierarchy.json here,\n\
+         \x20    then open it with 'Load model' instead of a designlist.\n\
+         \n\
+         Option 2 is the supported workflow for an isolated environment; see app/README.md."
+    )
+}
+
 /// A reference to a model node, for the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct NodeRef {
@@ -282,7 +309,7 @@ impl Session {
             !top.trim().is_empty(),
             "a top module name is required to elaborate a designlist"
         );
-        let mut cmd = std::process::Command::new("svxprobe-elaborate");
+        let mut cmd = std::process::Command::new(HARNESS_BIN);
         cmd.arg("--top").arg(top).arg("-f").arg(filelist);
         for dir in incdirs {
             cmd.arg("-I").arg(dir);
@@ -313,9 +340,19 @@ impl Session {
             }
         }
         cmd.arg("-o").arg("-"); // model JSON on stdout; progress goes to stderr
-        let out = cmd.output().context(
-            "running svxprobe-elaborate (is the elaboration harness installed and on PATH?)",
-        )?;
+                                // Discriminate "not installed" from every other spawn failure. On the
+                                // isolated target machine (ADR 0009 tier 1) a missing harness is the
+                                // *expected* state, not a fault, and it has a concrete way forward —
+                                // so it gets its own actionable message instead of a bare OS error.
+                                // Windows resolves `.exe` via PATHEXT, so an unactivated venv lands
+                                // here too, which is the common developer case.
+        let out = match cmd.output() {
+            Ok(out) => out,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!("{}", harness_missing_message())
+            }
+            Err(e) => return Err(e).context("running svxprobe-elaborate"),
+        };
         if !out.status.success() {
             anyhow::bail!(
                 "svxprobe-elaborate failed ({}): {}",
@@ -758,8 +795,31 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::pick_source_path;
+    use super::{harness_missing_message, pick_source_path, HARNESS_BIN};
     use std::path::{Path, PathBuf};
+
+    // The message is the only guidance a user gets on the isolated machine,
+    // where the failure is expected rather than exceptional. Assert the facts
+    // it must carry so the text cannot silently rot into a bare error string.
+    // Tested as a pure function: CI cannot provide "a machine without pyslang".
+    #[test]
+    fn harness_missing_message_stays_actionable() {
+        let m = harness_missing_message();
+        assert!(m.contains(HARNESS_BIN), "names the binary");
+        assert!(m.contains("PATH"), "says where it is looked up");
+        assert!(m.contains("pyslang"), "names the real dependency");
+        // Both ways forward, not just "install it" — option 2 is the only one
+        // available on a locked-down machine (ADR 0009 tier 1).
+        assert!(m.contains("elaborate/README.md"), "how to install");
+        assert!(m.contains("hierarchy.json"), "the copy-a-model workflow");
+        assert!(m.contains("Load model"), "names the UI action to use");
+        assert!(
+            m.contains("app/README.md"),
+            "where the workflow is documented"
+        );
+        // Multi-line, which the status pane renders (.log-row is pre-wrap).
+        assert!(m.lines().count() > 4);
+    }
 
     // The bug (#204/#205 follow-up): a designlist model records `../../fixtures/x.sv`,
     // already resolvable from the CWD, but a stale `src_root` double-applies `../..`.
