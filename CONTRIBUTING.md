@@ -62,6 +62,20 @@ npm test
 
 # Python harness (from elaborate/) — if you touched elaborate/
 uv run pytest -q
+
+# Golden reproducibility (from the repo root) — if you touched elaborate/.
+# CI re-elaborates the golden and diffs it, so a harness change that alters the
+# output fails the build until the golden is regenerated and committed. BOTH
+# opt-in flags are required, or the diff reports a stale golden:
+uv run --project elaborate svxprobe-elaborate --top picorv32_soc \
+    fixtures/picorv32_soc/rtl/picorv32.v \
+    fixtures/picorv32_soc/rtl/soc_pkg.sv \
+    fixtures/picorv32_soc/rtl/mem_if.sv \
+    fixtures/picorv32_soc/rtl/soc_mem.sv \
+    fixtures/picorv32_soc/rtl/picorv32_soc.sv \
+    --gate-level --name-refs -o /tmp/golden_regen.json
+diff <(jq -S . fixtures/picorv32_soc/golden/hierarchy.json) \
+     <(jq -S . /tmp/golden_regen.json)
 ```
 
 **DTO sync:** the Rust serde DTOs in the `gui` and `schematic` crates are the

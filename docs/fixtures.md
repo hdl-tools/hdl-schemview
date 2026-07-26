@@ -43,7 +43,7 @@ picorv32_soc/
   rtl/        picorv32.v (vendored, ISC) + soc_pkg.sv + mem_if.sv + soc_mem.sv + picorv32_soc.sv
   tb/         tb_picorv32_soc.sv (deterministic) + gen_firmware.py (tiny RV32I assembler)
   traces/     picorv32_soc.vcd, picorv32_soc.fst   (frozen, committed)
-  golden/     hierarchy.json   (elaborated spine incl. parameters + gate-level projection; reproducible from RTL)
+  golden/     hierarchy.json   (elaborated spine incl. parameters, gate-level projection, and name_refs; reproducible from RTL)
   excluded_scopes.txt          (TOP, tb, soc_pkg)
 ```
 
@@ -54,10 +54,19 @@ picorv32_soc/
 bash fixtures/regen.sh picorv32_soc
 
 # Golden hierarchy (needs the elaborate harness; deterministic). The explicit
-# file order matches ci.yml — a bare *.sv glob would skip picorv32.v. The golden
-# is elaborated WITH --gate-level (#199): the gate/mux/const projection is additive
-# and process-level rendering ignores it, so the default view is unchanged while the
-# committed fixture also exercises the gate-level toggle:
+# file order matches ci.yml — a bare *.sv glob would skip picorv32.v.
+#
+# BOTH opt-in flags are required, exactly as ci.yml passes them — omit either and
+# the regenerated golden differs from the committed one and CI fails the diff:
+#   --gate-level (#199)  the gate/mux/const projection. Additive; process-level
+#                        rendering ignores it, so the default view is unchanged
+#                        while the fixture also exercises the gate-level toggle.
+#   --name-refs (#225)   identifier-occurrence spans. Also additive (schema_version
+#                        stays 1); they feed the source pane's semantic coloring and
+#                        usage-click resolution. Adding this field bumped ingest's
+#                        RKYV_FORMAT_VERSION 1 -> 2.
+# The app's own designlist path (elaborate_and_load) always passes both, so the
+# committed golden mirrors what the GUI loads.
 uv run --project elaborate svxprobe-elaborate --top picorv32_soc \
     fixtures/picorv32_soc/rtl/picorv32.v \
     fixtures/picorv32_soc/rtl/soc_pkg.sv \
@@ -65,6 +74,7 @@ uv run --project elaborate svxprobe-elaborate --top picorv32_soc \
     fixtures/picorv32_soc/rtl/soc_mem.sv \
     fixtures/picorv32_soc/rtl/picorv32_soc.sv \
     --gate-level \
+    --name-refs \
     -o fixtures/picorv32_soc/golden/hierarchy.json
 
 # Verify committed traces are still reproducible (structural; restores committed):
