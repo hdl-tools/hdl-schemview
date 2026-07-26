@@ -764,6 +764,79 @@ mod tests {
         assert_eq!(d.nodes().len(), 2);
     }
 
+    // --- #155 measurement hooks ---
+
+    #[test]
+    fn access_hooks_agree_with_the_loaded_design() {
+        let dir = scratch("access_agree");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        build_cache(&model).unwrap();
+
+        let design = from_path(&model).unwrap();
+        let expected = (design.nodes().len(), design.edges().len());
+
+        // The whole point of the hooks is that they read the *same* archive the
+        // warm load reads — a divergence here would make the #155 numbers lie.
+        assert_eq!(access_cache_checked(&model), Some(expected));
+        // SAFETY: the archive was written by this build, moments ago, in a
+        // scratch dir owned by this test.
+        assert_eq!(unsafe { access_cache_unchecked(&model) }, Some(expected));
+    }
+
+    #[test]
+    fn access_checked_misses_without_a_cache() {
+        let dir = scratch("access_nocache");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        // No build_cache call: nothing to access.
+        assert_eq!(access_cache_checked(&model), None);
+    }
+
+    #[test]
+    fn access_checked_misses_on_a_stale_source() {
+        let dir = scratch("access_stale");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        build_cache(&model).unwrap();
+        assert!(access_cache_checked(&model).is_some(), "fresh cache hits");
+
+        // Same staleness key `from_path` gates on (src_len): rewrite with content
+        // of a different length and the archive must stop answering, or a
+        // benchmark would happily time a read of the *previous* design.
+        let three = r#"{
+            "schema_version": 1,
+            "design": "t",
+            "files": [{"id": 0, "path": "t.sv"}],
+            "nodes": [
+                {"id":0,"kind":"Instance","name":"t","path":"t","parent":null,
+                 "children":[1,2],"symbol_key":"t"},
+                {"id":1,"kind":"Var","name":"a","path":"t.a","parent":0,
+                 "children":[],"symbol_key":"t.a","type":"logic"},
+                {"id":2,"kind":"Var","name":"b","path":"t.b","parent":0,
+                 "children":[],"symbol_key":"t.b","type":"logic"}
+            ]
+        }"#;
+        assert_ne!(three.len(), DOC.len(), "new content differs in length");
+        std::fs::write(&model, three).unwrap();
+        assert_eq!(access_cache_checked(&model), None, "stale archive rejected");
+    }
+
+    #[test]
+    fn access_checked_rejects_a_corrupt_archive() {
+        let dir = scratch("access_corrupt");
+        let model = dir.join("hierarchy.json");
+        std::fs::write(&model, DOC).unwrap();
+        let cache = build_cache(&model).unwrap();
+
+        // Truncating past the header leaves the version/staleness fields intact
+        // but the body invalid — exactly what bytecheck exists to catch, and the
+        // reason `access_unchecked` is unsafe.
+        let bytes = std::fs::read(&cache).unwrap();
+        std::fs::write(&cache, &bytes[..bytes.len() / 2]).unwrap();
+        assert_eq!(access_cache_checked(&model), None);
+    }
+
     #[test]
     fn stale_source_forces_rebuild() {
         let dir = scratch("stale");
