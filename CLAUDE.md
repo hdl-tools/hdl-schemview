@@ -329,8 +329,13 @@ Nightly — Verilator trace regeneration.
 - **Roadmap** — Phase 0–2 = model/matcher/cross-probe; Phase 3 = schematic + Tauri app
   (done, incl. 3d internal-logic drill-down); Phase 4 = scalability hardening (active
   area — benchmark → lazy/LoD audit → rkyv cache → redb/SQLite). The benchmark step
-  landed first: the `scale-bench` crate (#24) measures the eager path at 665/100K/1M
-  and already shows `scope_graph`/`expand`'s full-edge scan blowing up ~300× by 100K.
+  landed first: the `scale-bench` crate (#24) measures the eager path at 665/100K/1M.
+  (An earlier note here claimed `scope_graph`/`expand`'s full-edge scan blew up ~300×
+  by 100K — that predates the scope-graph optimization and is **stale**: measured
+  2026-07-26, `scope_graph` runs 6.6 µs at 665 → 17.3 µs at 100K → 7.2 µs p50 at 1M,
+  i.e. it does not scale with node count at all. What *does* drive it is **edge density
+  per scope** — the real 7.2K-node design costs 203 µs p50 / 1.5 ms p95, ~28× the 100K
+  synthetic at 1/140th the size — and `cone()` under fan-out, 191 ms at 59K loads.)
   The **rkyv load cache (#21)** then landed (ADR 0003 Phase A / Option A): `ingest`
   caches the parsed `Document` in `.schemview_data/` and mmaps it on repeat launches,
   ~2.9× faster load at 100K (`load` bench `cache_hit` vs `from_slice`). The **wave_index
