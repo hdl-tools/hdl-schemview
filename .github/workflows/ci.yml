@@ -28,6 +28,12 @@ jobs:
       # Tests ingest the committed golden, load the committed FST + VCD traces
       # (Phase 0 round-trip), and run the Phase 1 matcher gate on both formats.
       - run: cargo test --all
+      # The lean build the packaged app may ask for (#240): no synthetic
+      # generator, no embedded fixture, no collector. Everything above runs with
+      # default features, so without this step the feature gates would only break
+      # at bundle time. `check` (not `--all-targets`) on purpose — tests and
+      # benches are allowed to assume the defaults.
+      - run: cargo check -p scale-bench --no-default-features
       # Phase 1 go/no-go gate, enforced as a hard PR gate on both committed
       # traces (no Verilator needed). `svxprobe match` exits non-zero below 95%
       # or on any mystery miss.

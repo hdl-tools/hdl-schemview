@@ -3,8 +3,6 @@
 //! `SCALE_BENCH_FULL`). A `665_golden` row loads the real fixture to anchor the
 //! synthetic baseline against reality.
 
-use std::path::PathBuf;
-
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use scale_bench::{generate, to_json, SynthConfig};
 use svxprobe_model::{Design, Document};
@@ -18,11 +16,6 @@ fn sizes() -> Vec<(&'static str, SynthConfig)> {
         v.push(("1M", SynthConfig::large()));
     }
     v
-}
-
-fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fixtures/picorv32_soc/golden/hierarchy.json")
 }
 
 fn bench_load(c: &mut Criterion) {
@@ -63,7 +56,10 @@ fn bench_load(c: &mut Criterion) {
         });
     }
 
-    if let Ok(bytes) = std::fs::read(golden_path()) {
+    // Embedded at compile time (#240), one accessor shared with the scenario and
+    // report paths — this row is the anchor against reality, so it must not go
+    // missing just because a build ran from another directory.
+    if let Some(bytes) = scale_bench::golden::golden_bytes() {
         g.bench_function("from_slice/665_golden", |b| {
             b.iter(|| svxprobe_ingest::from_slice(black_box(&bytes)).unwrap());
         });

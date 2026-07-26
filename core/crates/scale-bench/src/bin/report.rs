@@ -27,19 +27,15 @@ fn timed<F: FnMut()>(iters: u32, mut f: F) -> f64 {
     t.elapsed().as_secs_f64() / iters as f64
 }
 
-fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fixtures/picorv32_soc/golden/hierarchy.json")
-}
-
 fn header() {
     println!("| basis | nodes | edges | json MB | from_slice ms | parse ms | index ms | scope_graph µs | expand µs | path µs | src µs | cone ms | clk fanout | match ms |");
     println!("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|");
 }
 
 fn golden_row() {
-    let path = golden_path();
-    let Ok(bytes) = std::fs::read(&path) else {
+    // Embedded at compile time (#240) rather than read from a path built out of
+    // CARGO_MANIFEST_DIR, so the same accessor serves a packaged build.
+    let Some(bytes) = scale_bench::golden::golden_bytes() else {
         println!("| 665 (golden) | _fixture not found_ |");
         return;
     };

@@ -12,6 +12,19 @@ publish = false
 [lib]
 bench = false
 
+# All default-on, so `cargo test --all`, clippy and the benches see the crate
+# exactly as before (#240). They exist because the packaged desktop app links
+# this crate and is entitled to leave measurement scaffolding out; `wellen`
+# cannot be gated away either way, since svxprobe-matcher depends on it.
+# `cargo check -p scale-bench --no-default-features` (in ci.yml) is what keeps
+# the lean build honest — it checks the lib and bins, so tests and benches may
+# assume the defaults.
+[features]
+default = ["synth", "golden", "collect"]
+synth = []
+golden = []
+collect = []
+
 [dependencies]
 svxprobe-model = { workspace = true }
 svxprobe-ingest = { workspace = true }
@@ -39,13 +52,26 @@ harness = false
 # `bench = false` on both bins: cargo would otherwise run them as bench targets
 # during `cargo bench` and hand them criterion's flags, which `scenario` rejects
 # (exit 2) — aborting the real benchmark run before it starts.
+# `required-features` on the two dev-only front doors rather than `#[cfg]` inside
+# them: cargo then simply skips the target in a lean build, instead of every
+# function in it needing a gate. `scenario` stays unconditional — it is the one
+# bin a lean build must still produce.
 [[bin]]
 name = "report"
 path = "src/bin/report.rs"
 bench = false
+required-features = ["synth", "golden"]
 
 # One measured scenario per process, so peak RSS is attributable (#22/#155).
 [[bin]]
 name = "scenario"
 path = "src/bin/scenario.rs"
 bench = false
+
+# The matrix driver: what the collector shell scripts do, in Rust, so a packaged
+# app can run the benchmark with no PowerShell, bash or python3 (#240).
+[[bin]]
+name = "collect"
+path = "src/bin/collect.rs"
+bench = false
+required-features = ["collect"]
