@@ -18,6 +18,9 @@ use svxprobe_gui::{
     NameRefDto, ProbeResponse, Projection, Session, SignalEntry, SourceFile, StartupArgs,
     StartupError, TreeNode,
 };
+
+mod console;
+pub use console::attach_parent_console;
 use svxprobe_schematic::SchematicGraph;
 use svxprobe_wave::{TraceTimescale, ValueChange};
 use tauri::State;
@@ -36,6 +39,23 @@ struct AppState(Mutex<HashMap<String, Session>>);
 struct StartupState(Option<StartupArgs>);
 
 type CmdResult<T> = Result<T, String>;
+
+/// Flatten a backend error for the frontend, keeping its whole context chain
+/// (#240).
+///
+/// `to_string()` on an `anyhow::Error` renders only the outermost context and
+/// silently drops every `.context(...)` below it — so a failed elaboration
+/// arrived as one generic line with the actual cause missing. `{:#}` is
+/// anyhow's alternate-`Display` form, which joins the chain with `": "`; the
+/// status pane shows it verbatim.
+///
+/// Generic over `Display` rather than naming `anyhow::Error`, so the shell does
+/// not take a direct dependency on anyhow for one formatting call. Intended for
+/// the anyhow-returning commands; a `PoisonError` carries no chain and stays on
+/// `to_string()` at its own call sites.
+fn fmt_err<E: std::fmt::Display>(e: E) -> String {
+    format!("{e:#}")
+}
 
 /// Resolve `session_id` (defaulting to [`DEFAULT_SESSION`]), look up its loaded
 /// session, and run `f` against it. Errors loudly if that session isn't loaded.
@@ -78,7 +98,7 @@ fn load_design(
     excluded: Vec<String>,
     src_root: String,
 ) -> CmdResult<String> {
-    let session = Session::load(&model, &trace, excluded, &src_root).map_err(|e| e.to_string())?;
+    let session = Session::load(&model, &trace, excluded, &src_root).map_err(fmt_err)?;
     store_session(&state, session_id, session)
 }
 
@@ -105,7 +125,7 @@ async fn elaborate_and_load(
     let session = Session::elaborate_and_load(
         &filelist, &top, &incdirs, &trace, excluded, &src_root, &hls_src,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(fmt_err)?;
     store_session(&state, session_id, session)
 }
 
@@ -116,7 +136,7 @@ async fn elaborate_and_load(
 #[tauri::command]
 fn load_trace(state: State<AppState>, session_id: Option<String>, trace: String) -> CmdResult<()> {
     with_session(&state, session_id, |s| {
-        s.load_trace(&trace).map_err(|e| e.to_string())
+        s.load_trace(&trace).map_err(fmt_err)
     })
 }
 
@@ -245,7 +265,7 @@ fn signal_values(
 #[tauri::command]
 fn source_text(state: State<AppState>, session_id: Option<String>, file: u32) -> CmdResult<String> {
     with_session(&state, session_id, |s| {
-        s.source_text(file).map_err(|e| e.to_string())
+        s.source_text(file).map_err(fmt_err)
     })
 }
 
@@ -292,22 +312,34 @@ fn startup_args(startup: State<StartupState>) -> Option<StartupArgs> {
 /// stderr and exits 2; a missing filelist/trace prints to stderr and exits 1.
 /// A normal no-argument launch returns `StartupState(None)`.
 fn resolve_startup() -> StartupState {
-    use svxprobe_gui::startup::{self, USAGE};
+    use svxprobe_gui::startup::{self, Launch, USAGE};
     // `args_os` + lossy conversion, not `args()` — the latter panics on a
     // non-UTF-8 argument, which in a release (windows_subsystem) build would
     // make the app vanish with no console output, the worst mode for a CLI.
     let argv = std::env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned());
-    let parsed = match startup::parse(argv) {
-        Ok(None) => return StartupState(None),
-        Ok(Some(a)) => a,
+    let launch = match startup::parse_launch(argv) {
+        Ok(l) => l,
         Err(StartupError::Help) => {
             println!("{USAGE}");
             std::process::exit(0);
         }
         Err(StartupError::Usage(msg)) => {
             eprintln!("error: {msg}\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    };
+    let parsed = match launch {
+        Launch::Gui(None) => return StartupState(None),
+        Launch::Gui(Some(a)) => a,
+        // Wired in the #240 tier-1 benchmark slice. Until then the flags parse
+        // (so the contract and its tests are already fixed) but refuse to run,
+        // rather than falling through and silently opening a window.
+        Launch::Bench(_) | Launch::BenchScenario(_) => {
+            eprintln!(
+                "error: this build was compiled without the benchmark feature\n\n{USAGE}"
+            );
             std::process::exit(2);
         }
     };

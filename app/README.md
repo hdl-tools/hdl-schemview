@@ -161,9 +161,18 @@ need a DOM — `tree.test.ts` and `srcoffset.test.ts` — opt into happy-dom wit
 
 ## Windows notes
 
-- **Toolchain:** Rust MSVC (`rustup default stable-msvc`) + the "Desktop
-  development with C++" workload, plus the WebView2 runtime (preinstalled on
-  Win 11).
+- **Toolchain (to *build*):** Rust MSVC (`rustup default stable-msvc`) + the
+  "Desktop development with C++" workload, plus the WebView2 runtime
+  (preinstalled on Win 11).
+- **To *run* a bundle:** nothing, if it was built with
+  `--config tauri.offline.conf.json` — that vendors WebView2 into the install
+  directory. A default bundle instead downloads WebView2 at install time and so
+  needs network. See *Distribution / offline install*.
+- **No console output from a release build?** That was true before #240: the
+  release binary is GUI-subsystem, so Windows gave it no std handles and `-h`
+  printed nothing. It now attaches to the parent console when launched from a
+  terminal. Because the process is still GUI-subsystem, `cmd` returns to the
+  prompt immediately, so output can interleave with the next prompt — expected.
 - **`cargo` can't reach crates.io** with
   `CRYPT_E_NO_REVOCATION_CHECK (0x80092012)` (schannel can't check certificate
   revocation behind a corporate proxy/VPN): set `check-revoke = false` under
@@ -173,14 +182,76 @@ need a DOM — `tree.test.ts` and `srcoffset.test.ts` — opt into happy-dom wit
   `tauri-build` embeds as a resource. To regenerate from a source image:
   `npm run tauri icon path/to/icon.png`.
 
+## Distribution / offline install
+
+The deployment target is an **isolated machine: no network, no toolchain, no
+package manager** (#240, ADR 0009). An engineer copies one artifact across and
+runs it. Elaboration is *not* part of that — see "Getting a design in" below.
+
+| OS | Artifact | Webview runtime |
+| --- | --- | --- |
+| Windows | NSIS installer, built with `--config tauri.offline.conf.json` | **Vendored.** `webviewInstallMode: fixedRuntime` puts a pinned WebView2 inside the install directory — no network, no admin rights, no dependency on what the machine already has (~180 MB). |
+| Linux | **AppImage** | Bundled inside the AppImage. |
+| macOS | `.app` / `.dmg` | WKWebView is part of the OS. |
+
+The `.deb`/`.rpm` bundles declare WebKitGTK as a system dependency, so they need
+a package manager with repo access — **use the AppImage** on an isolated box.
+
+The default config deliberately carries **no** WebView2 payload path, so an
+ordinary `npm run tauri build` still works for contributors. The offline Windows
+bundle is an overlay:
+
+```bash
+# One-time: download the "Fixed Version" runtime .cab from
+#   https://developer.microsoft.com/microsoft-edge/webview2/
+# and expand it to app/src-tauri/webview2-runtime/ (gitignored, ~180 MB).
+npm run tauri build -- --config tauri.offline.conf.json --bundles nsis
+```
+
+In CI that URL is the `WEBVIEW2_CAB_URL` repository variable — pinned on
+purpose, since the runtime version is part of what the bundle ships.
+
+**macOS is signed ad-hoc** (`signingIdentity: "-"`), which is *not* enough to
+clear Gatekeeper on a downloaded app. After copying, run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/hdl-schemview.app
+```
+
+> ⚠️ macOS is **unverified end-to-end** — CI proves it builds and bundles, but
+> no maintainer has a macOS machine, so Gatekeeper behaviour and signing/
+> notarization remain an open workstream.
+
+### Getting a design in
+
+Elaboration needs Python + pyslang (`svxprobe-elaborate` on PATH) and is **not
+bundled** — freezing it into a sidecar is tier 2 of #240, gated on a PyInstaller
+spike. On a machine without it, the designlist (`.f`) flow reports so explicitly
+and points here. The supported workflow is:
+
+1. Elaborate on a connected machine: `svxprobe-elaborate --top <top> -f <list.f>
+   --gate-level --name-refs -o hierarchy.json`
+2. Copy `hierarchy.json` (and any trace) to the isolated machine.
+3. Open it with **Load model**.
+
+This is already how the #22/#155 benchmark's real-design basis was produced.
+
 ## CI
 
-The **App** workflow (`.github/workflows/app.yml`) runs `npm test` and `npm run build`,
-then builds the desktop app on a matrix of **Ubuntu + Windows**, for any PR/push that
-touches `app/**` or `core/crates/**` (and on demand via *Run workflow*). The Windows leg
-exercises the `tauri-build` Windows Resource/icon embed. **macOS is not CI-validated** — the
-`.icns` is generated and the `cargo build` works locally, but no macOS runner is
-in the matrix (it bills at 10× minutes on a private repo).
+The **App** workflow (`.github/workflows/app.yml`) has two jobs:
+
+- **`build`** — the fast signal on every PR/push touching `app/**` or
+  `core/crates/**`: `npm test`, `npm run build`, then `cargo build` on
+  **Ubuntu + Windows**. The Windows leg exercises the `tauri-build` Windows
+  Resource/icon embed.
+- **`bundle`** — the packaging path, on **push to `main` and manual dispatch
+  only**, across **Ubuntu + Windows + macOS**. It runs a real `tauri build`
+  (which `cargo build` never exercises, so NSIS/AppImage/`.app` breakage would
+  otherwise surface at release time) and uploads each bundle as an artifact.
+  It skips pull requests because macOS bills at 10× minutes on a private repo.
+
+The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
+`svxprobe-gui` logic it wraps is what that gate covers.
 
 The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
 `svxprobe-gui` logic it wraps is what that gate covers.

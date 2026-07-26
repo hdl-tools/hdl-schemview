@@ -1,6 +1,6 @@
 # ADR 0009 — Packaging for isolated environments
 
-- **Status:** Proposed (tracked by #240)
+- **Status:** Accepted — tier 1 in progress (tracked by #240)
 - **Date:** 2026-07-26
 - **Deciders:** project maintainers
 - **Relates to:** `app/src-tauri` (bundle config), `core/crates/gui` (`elaborate_and_load`),

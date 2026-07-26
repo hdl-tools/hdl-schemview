@@ -61,3 +61,105 @@ jobs:
       - name: Tauri shell (compile — exercises the Windows resource/icon embed)
         working-directory: app/src-tauri
         run: cargo build
+
+  # The bundle path (#240): `cargo build` above never exercises the bundler, so
+  # NSIS/AppImage/.app packaging could break unnoticed until release. This job
+  # actually bundles, on all three targets.
+  #
+  # Not on pull_request: macOS runners bill at 10x on a private repo, and a
+  # full `tauri build` per PR is a poor trade for the fast `cargo build` signal
+  # the `build` job already gives.
+  bundle:
+    name: Bundle (${{ matrix.os }})
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: core
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend deps
+        working-directory: app
+        run: npm install
+
+      # Vendored into the bundle so installing needs no network and no admin
+      # rights — the whole point of tier 1. Cached: it is ~180 MB and pinned.
+      #
+      # The fixed-version runtime is distributed as a .cab behind a per-release
+      # URL from https://developer.microsoft.com/microsoft-edge/webview2/ —
+      # there is no stable "latest" endpoint to hardcode, so the exact URL is a
+      # repo variable (Settings → Variables → WEBVIEW2_CAB_URL) and is pinned
+      # deliberately: the runtime version is part of what this bundle ships.
+      - name: Cache WebView2 fixed runtime
+        if: runner.os == 'Windows'
+        id: webview2
+        uses: actions/cache@v4
+        with:
+          path: app/src-tauri/webview2-runtime
+          key: webview2-fixed-${{ hashFiles('app/src-tauri/tauri.offline.conf.json') }}-${{ vars.WEBVIEW2_CAB_URL }}
+
+      - name: Fetch WebView2 fixed runtime
+        if: runner.os == 'Windows' && steps.webview2.outputs.cache-hit != 'true'
+        env:
+          CAB_URL: ${{ vars.WEBVIEW2_CAB_URL }}
+        run: |
+          if [ -z "$CAB_URL" ]; then
+            echo "::error::WEBVIEW2_CAB_URL repo variable is not set." >&2
+            echo "The offline Windows bundle vendors a pinned WebView2 fixed-version" >&2
+            echo "runtime. Get the .cab URL from" >&2
+            echo "  https://developer.microsoft.com/microsoft-edge/webview2/ (Fixed Version)" >&2
+            echo "and set it as the WEBVIEW2_CAB_URL repository variable." >&2
+            echo "See app/README.md — Distribution / offline install." >&2
+            exit 1
+          fi
+          curl -fsSL -o wv2.cab "$CAB_URL"
+          mkdir -p wv2
+          expand wv2.cab -F:* wv2/ >/dev/null
+          # The cab expands to a single versioned directory; normalize the name
+          # so tauri.offline.conf.json can reference a stable path.
+          inner=$(find wv2 -maxdepth 1 -mindepth 1 -type d | head -1)
+          mv "$inner" app/src-tauri/webview2-runtime
+
+      # `targets: "all"` would also attempt .rpm on Ubuntu, which can fail and
+      # take the job down — name the bundles explicitly instead. AppImage is the
+      # supported isolated-machine artifact; .deb needs repo access.
+      - name: Bundle
+        working-directory: app
+        run: |
+          case "${{ runner.os }}" in
+            Windows) npm run tauri build -- --config tauri.offline.conf.json --bundles nsis ;;
+            Linux)   npm run tauri build -- --bundles appimage,deb ;;
+            macOS)   npm run tauri build -- --bundles app,dmg ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hdl-schemview-bundle-${{ matrix.os }}
+          path: app/src-tauri/target/release/bundle/**
+          retention-days: 14
+          if-no-files-found: warn
