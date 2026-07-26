@@ -68,6 +68,61 @@ pub fn build_cache(path: impl AsRef<Path>) -> Result<PathBuf> {
     Ok(cache_path_for(path))
 }
 
+/// Price the archive read *without* the `deserialize` pass (#155 measurement
+/// hook): mmap the cache, run the same validating `access` + header check
+/// [`from_path`] runs, and return the archived `(nodes, edges)` counts read
+/// straight off the archived view.
+///
+/// This is **not** a load path — it cannot produce a [`Design`], because the
+/// indices still need an owned [`Document`]. It exists so a benchmark can price
+/// the step a true zero-copy read-back (#155) would remove: the gap between
+/// `from_path` (access + deserialize + index build) and this (access only).
+///
+/// Returns `None` on exactly the conditions [`from_path`]'s cache probe misses
+/// on: absent cache, unreadable source, version mismatch, stale source, or a
+/// corrupt archive.
+pub fn access_cache_checked(model: &Path) -> Option<(usize, usize)> {
+    let (src_len, src_mtime_ns) = source_meta(model).ok()?;
+    let cache = cache_path_for(model);
+    let file = File::open(&cache).ok()?;
+    // SAFETY: as in `try_load_cache` — a read-only mmap of a regular file we just
+    // opened, used only within this function; the validating `access` below
+    // rejects a concurrently truncated mapping rather than risking UB.
+    let mmap = unsafe { Mmap::map(&file) }.ok()?;
+    let archived = rkyv::access::<ArchivedCacheArchive, RkyvError>(&mmap).ok()?;
+    if archived.rkyv_format_version.to_native() != RKYV_FORMAT_VERSION
+        || archived.schema_version.to_native() != 1
+        || archived.src_len.to_native() != src_len
+        || archived.src_mtime_ns.to_native() != src_mtime_ns
+    {
+        return None;
+    }
+    Some((archived.doc.nodes.len(), archived.doc.edges.len()))
+}
+
+/// As [`access_cache_checked`], but skipping rkyv's bytecheck validation, so a
+/// benchmark can price *validation* separately from *deserialization* (#155).
+/// A zero-copy read-back would still pay validation unless it trusts the archive.
+///
+/// # Safety
+///
+/// The caller must guarantee the archive at `<model>`'s cache path is a
+/// well-formed `CacheArchive` written by **this** build (same
+/// [`RKYV_FORMAT_VERSION`] and struct layout) and is not concurrently modified.
+/// Unlike [`access_cache_checked`], nothing here rejects a corrupt or truncated
+/// archive — reading one is undefined behaviour. Benchmark-only; never a load
+/// path.
+pub unsafe fn access_cache_unchecked(model: &Path) -> Option<(usize, usize)> {
+    let cache = cache_path_for(model);
+    let file = File::open(&cache).ok()?;
+    // SAFETY: read-only mmap of a regular file we just opened, used only within
+    // this function. Well-formedness of its contents is the caller's contract.
+    let mmap = unsafe { Mmap::map(&file) }.ok()?;
+    // SAFETY: the caller guarantees the mapping is a valid `CacheArchive` archive.
+    let archived = unsafe { rkyv::access_unchecked::<ArchivedCacheArchive>(&mmap) };
+    Some((archived.doc.nodes.len(), archived.doc.edges.len()))
+}
+
 /// `<model dir>/.schemview_data/<model file name>.rkyv`.
 fn cache_path_for(model: &Path) -> PathBuf {
     let dir = model
