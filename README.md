@@ -69,17 +69,20 @@ cargo run --bin svxprobe -- match \
 ```
 
 **Cross-probe (Phase 2)** — resolve one view's selection and see the others.
-Run from the repo root so `--source` can read the RTL:
+Run from the repo root so `--source` can read the RTL. `--bin svxprobe` is required:
+`core/` is a virtual workspace with several binaries, so a bare `cargo run` there
+cannot pick one.
 
 ```bash
+C="--bin svxprobe --manifest-path core/Cargo.toml"
 P="probe fixtures/picorv32_soc/golden/hierarchy.json fixtures/picorv32_soc/traces/picorv32_soc.fst --excluded fixtures/picorv32_soc/excluded_scopes.txt"
 
 # waveform signal → source location
-cargo run --manifest-path core/Cargo.toml -- $P --signal TOP.tb.dut.g_lane[0].bus.valid
+cargo run $C -- $P --signal TOP.tb.dut.g_lane[0].bus.valid
 
 # source position inside a generate loop → picker; --context steers the anchor
-cargo run --manifest-path core/Cargo.toml -- $P --source picorv32_soc.sv:27:29
-cargo run --manifest-path core/Cargo.toml -- $P --source picorv32_soc.sv:27:29 --context picorv32_soc.g_lane[1]
+cargo run $C -- $P --source picorv32_soc.sv:27:29
+cargo run $C -- $P --source picorv32_soc.sv:27:29 --context picorv32_soc.g_lane[1]
 ```
 
 ## Development setup
