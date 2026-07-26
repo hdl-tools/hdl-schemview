@@ -66,11 +66,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core
-      # Single-shot report (665 golden + 665 synth + 100K synth); no --full (1M).
-      - name: Scalability report
-        run: cargo run -p scale-bench --release --bin report
-      # Quick criterion sanity at the default sizes (1M skipped without
-      # SCALE_BENCH_FULL); short warm-up/measurement to keep it fast.
-      - name: Criterion smoke
-        run: cargo bench -p scale-bench -- --warm-up-time 1 --measurement-time 3
+      # One collector run covers all three layers: the memory/RSS scenarios
+      # (#22/#155), a short criterion pass, and the single-shot report. No
+      # --full: the 1M basis needs several GB and a hosted runner has ~7.
+      - name: Scalability metrics
+        # --online: the collector defaults to --offline for the isolated-machine
+        # case, which would fail here on a cold registry cache.
+        run: bash scripts/scale-bench-collect.sh --online --out "$GITHUB_WORKSPACE/scale-bench-metrics.md"
+      # The metrics file is the artifact worth keeping — the numbers that gate
+      # the #22 (redb-vs-SQLite) and #155 (zero-copy) decisions.
+      - name: Upload metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-bench-metrics
+          path: scale-bench-metrics.md
+          if-no-files-found: warn
 

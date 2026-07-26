@@ -32,8 +32,13 @@ storage swap. The navigation and `cone()` rows are what make that case if it hol
 ## One command
 
 ```powershell
-# from anywhere
+# Windows
 & core/scripts/scale-bench-collect.ps1
+```
+
+```bash
+# Linux / macOS / git-bash — same three layers, same output shape
+bash core/scripts/scale-bench-collect.sh
 ```
 
 Writes `core/target/scale-bench/metrics-<timestamp>.md` and prints the path. That file
@@ -46,7 +51,16 @@ Full run, including the 1M point and a real-design basis:
 ```
 
 Useful flags: `-SkipCriterion` (memory axes only, minutes instead of tens of minutes),
-`-SkipReport`, `-Out <path>`.
+`-SkipReport`, `-Out <path>`. The bash sibling takes `--full`, `--model`,
+`--skip-criterion`, `--skip-report`, `--out`, plus two it alone needs:
+`--bases "golden 665"` to limit the matrix, and `--online` to drop `--offline` from the
+cargo invocations (what CI uses, since a cold registry cache makes `--offline` fail).
+It renders the derived tables with `scale_bench_tables.py` when a working `python3`
+exists; without one the raw JSONL records still carry every number.
+
+**In CI:** the nightly `scale-bench` job runs the bash collector with `--online` and
+uploads the result as the `scale-bench-metrics` artifact. It is `continue-on-error`, so
+benchmark noise never fails the nightly.
 
 ## The real-design basis (realism anchor)
 
@@ -66,8 +80,39 @@ cd <path-to>/claude_verilog_test
 ```
 
 `design element does not have a time scale defined` warnings are non-fatal — the harness
-still elaborates. Then pass the JSON via `-Model` (or `SCALE_BENCH_MODEL` for the bare
-`report` bin).
+still elaborates. Then pass the JSON via `-Model` / `--model` (or `SCALE_BENCH_MODEL` for
+the bare `report` bin and `scenario` binary).
+
+### Doing this on an isolated machine
+
+Both prerequisites are *network-dependent to create* and *offline to use*, so prepare
+them while the machine still has a network, then verify before disconnecting:
+
+1. **Warm the cargo registry cache** — `cd core && cargo fetch`, then prove it:
+   `cargo build --release -p scale-bench --offline`. If that succeeds, the whole
+   benchmark runs offline. (`cargo vendor` is the stricter alternative if the cache may
+   be pruned.)
+2. **Create the Python venv** — `cd elaborate && uv sync`. Elaboration itself is fully
+   offline afterwards; the runbook calls
+   `elaborate/.venv/Scripts/svxprobe-elaborate.exe` (or `.venv/bin/svxprobe-elaborate`)
+   directly rather than `uv run`, so uv never tries to re-resolve.
+
+Then, on the isolated machine:
+
+3. **Copy the design in** — the RTL tree only. Nothing else is fetched.
+4. **Write a filelist and elaborate** as above. Use `--gate-level --name-refs` so the
+   model matches what the app actually loads; without them you benchmark a smaller
+   document than the tool produces.
+5. **Run the collector** with `--model <hierarchy.json>`. The model is copied into a
+   temp dir first, so your design directory never grows a `.schemview_data/` cache —
+   budget disk for roughly (JSON size + ~0.4× that for the rkyv archive).
+6. **Sanity-check the row**: the `real` basis should report the node/edge counts the
+   harness printed at elaboration. A mismatch means the collector picked up a different
+   file.
+
+If elaboration fails on the design (unsupported constructs, missing include dirs), the
+synthetic and `golden` bases still run — report which bases completed rather than
+dropping the run.
 
 ## What the run actually does
 
