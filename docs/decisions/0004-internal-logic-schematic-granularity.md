@@ -89,3 +89,14 @@ process-level granularity, not against it:
 primitives extracted from process expressions — the "AND/OR/MUX/adder"
 decomposition this ADR rejects. That remains a separate *optional* gate-level
 projection over the same spine, never the default drilled view.
+
+> **Update — that ADR now exists:** [ADR 0005](0005-optional-gate-level-projection.md)
+> (implemented, #157). It extends this one exactly as anticipated: an **opt-in**
+> `Projection { ProcessLevel | GateLevel }`, with `ProcessLevel` remaining the default and
+> the granularity this ADR fixes. Nothing here is retracted.
+>
+> One touch-point worth recording: #206 wired **memory-array read operands** into the
+> gate-level muxes. A gate operand reading `ram[idx]` resolves to the whole `Memory` node
+> this ADR introduced, and the memory box gained a synthesized read-out pin so the wire has
+> somewhere to land. The array stays one glyph at both projection levels — the memory
+> decision above is unchanged; gate level only gave its readers a visible connection.

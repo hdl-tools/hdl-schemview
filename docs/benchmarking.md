@@ -25,7 +25,8 @@ storage swap. The navigation and `cone()` rows are what make that case if it hol
   `--offline`, so nothing is fetched — but the crates (incl. `criterion`) must already
   be in the local cargo registry cache. If `cargo build --offline -p scale-bench` fails,
   the cache is incomplete and the run cannot proceed.
-- **~6 GB of free RAM** for the optional 1M basis. It runs last on purpose.
+- **~2–3 GB of free RAM** for the optional 1M basis (measured peak is 1,549 MB, in the
+  `prepare` step — the load itself peaks lower). It runs last on purpose.
 - Close other heavy applications: peak-RSS and latency numbers are both sensitive to
   background load, and the report records free RAM at start so the reading can be judged.
 
@@ -139,7 +140,10 @@ Three layers, because no single tool covers all the axes:
    latency at 665/100K (`load`/`query`/`matcher` groups). The collector runs it with
    `--sample-size 20 --measurement-time 3` to keep it to minutes, and only harvests
    estimates written by *that* run, so a stale result can't leak into the report.
-   **1M stays out of criterion** — the scenario layer owns that point.
+   **The collector never runs 1M through criterion** — statistical sampling of a 4-second
+   load would dominate the run time, and the scenario layer already owns that point. The
+   benches themselves *can* do 1M via `SCALE_BENCH_FULL=1` (see below) for a hand-run
+   investigation; the collector simply does not set it.
 
 3. **Report bin** — the existing single-shot markdown snapshot
    (`cargo run -p scale-bench --release --bin report`).
@@ -153,6 +157,8 @@ cargo build --release -p scale-bench --offline
 # a single scenario (JSON on stdout, progress on stderr)
 ./target/release/scenario --basis 100K --mode prepare
 ./target/release/scenario --basis 100K --mode cache_hit
+# nav defaults are --nav-scopes 32 --nav-iters 3 (what the collector uses); pass
+# your own only when investigating, or the row won't compare to a collected one:
 ./target/release/scenario --basis 100K --mode nav --nav-scopes 64 --nav-iters 5
 ./target/release/scenario --basis 100K --mode match --signals 100000
 SCALE_BENCH_MODEL=<model.json> ./target/release/scenario --basis real --mode from_slice
@@ -164,7 +170,15 @@ cargo bench -p scale-bench -- load/cache_hit           # filter
 
 # single-shot report
 cargo run -p scale-bench --release --bin report [-- --full]
+
+# pre-build the #21 rkyv load cache for a model (what `prepare` times internally)
+cargo run --bin svxprobe -- cache <model.json>
 ```
+
+Peak/end RSS comes from `core/crates/scale-bench/src/mem.rs`, which is **dependency-free by
+design** — a hand-declared `K32GetProcessMemoryInfo` on Windows, `/proc/self/status` on Linux.
+The benchmark has to build `--offline` from the existing lockfile, so it cannot pull in a
+memory-stats crate to get this.
 
 ## Reading the results
 
@@ -182,6 +196,79 @@ cargo run -p scale-bench --release --bin report [-- --full]
 - **Noise.** Wall times on a desktop under load vary by tens of percent. The criterion
   layer exists for that reason; treat single-shot scenario times as order-of-magnitude
   and read the RSS numbers as the sharper signal.
+
+## Findings — first full run (2026-07-26)
+
+Intel i7-9700KF, 8 threads, 15.9 GB RAM, rustc 1.96.1, bases `golden 665 100K real 1M`.
+Source: `metrics-20260726-105448.md`. Numbers below are single-shot scenario measurements
+unless marked criterion; treat wall times as order-of-magnitude and RSS as the sharper signal.
+
+### The load path holds at 1M
+
+| basis | nodes | cold `from_slice` | warm `cache_hit` | cold peak RSS | warm peak RSS |
+|---|--:|--:|--:|--:|--:|
+| golden | 2,079 | 11.6 ms | 3.7 ms | 9.1 MB | 9.9 MB |
+| real | 7,203 | 44.6 ms | 13.4 ms | 20.1 MB | 22.8 MB |
+| 100K | 100,001 | 570 ms | 150 ms | 122 MB | 153 MB |
+| 1M | 1,000,001 | 4,123 ms | 1,414 ms | 1,129 MB | 1,432 MB |
+
+**Nothing OOMs.** A 1M-node design materializes fully in ~1.1 GB. This is the headline result
+for **#22**: its premise is a design *too large to materialize*, and 1M does not meet it on a
+16 GB desktop. The rkyv cache (#21) is worth **3.8×** at 100K and 2.9× at 1M.
+
+### Where warm-load time goes (#155)
+
+| basis | `access_unchecked` | `access_checked` | `cache_hit` | ⇒ validate | ⇒ deserialize + index |
+|---|--:|--:|--:|--:|--:|
+| 100K | 0.28 ms | 20.1 ms | 150 ms | 19.8 ms | 130 ms |
+| 1M | 0.29 ms | 294 ms | 1,414 ms | 294 ms | 1,120 ms |
+
+A true zero-copy read-back removes **deserialize** but keeps **validation** and keeps
+**index building**. Criterion splits the remainder further: at 100K, `load/index_build` is
+76.8 ms of a 175 ms `load/cache_hit` — i.e. roughly *half* the post-validation cost is index
+construction that zero-copy does not touch. RSS is the stronger argument: 380 MB archive-only
+vs 1,432 MB owned at 1M. **Verdict: the win is real but partial**; #155 should be scoped
+against the index-build cost, not against the full 1.4 s.
+
+### Query cost tracks edge density, not node count
+
+| basis | nodes | `scope_graph` p50 / p95 | `expand` p50 | `cone()` | cone nodes |
+|---|--:|--:|--:|--:|--:|
+| 665 | 666 | 6.1 / 18.4 µs | 5.9 µs | 0.3 ms | 125 |
+| 100K | 100,001 | 6.5 / 47.1 µs | 5.8 µs | 26.8 ms | 10,000 |
+| 1M | 1,000,001 | 7.2 / 53.8 µs | 5.6 µs | **190.8 ms** | 59,049 |
+| real | 7,203 | **202.7 / 1,472 µs** | 185.4 µs | 0.04 ms | 1 |
+| golden | 2,079 | **928.3 / 1,462.8 µs** | 814.9 µs | 0.05 ms | 1 |
+
+Two things to read here:
+
+1. **`scope_graph` does not scale with node count** — it is flat from 665 to 1M. An earlier
+   roadmap claim that the full-edge scan blew up ~300× by 100K predated the scope-graph
+   optimization and was stale; it would have sent the #22 decision after the wrong bottleneck.
+2. **Real designs cost far more per scope than synthetic ones of any size.** The 7.2K real
+   design is ~28× the 100K synthetic at 1/140th the nodes, and the 2,079-node golden is higher
+   still. The generator is uniform by construction; real adjacency is not. **Never quote a
+   synthetic absolute latency as a user-facing one** — use synthetic for scaling *shape* and
+   `golden`/`real` for absolute numbers.
+
+**`cone()` is the one interactive miss.** 190.8 ms on a 59K-load clock is the only operation
+in the matrix that misses the sub-second-and-comfortable bar, and it is a *fan-out traversal*
+cost — no storage backend makes a 59K-node cone cheap. This is the concrete target for the
+level-of-detail work, and it is exactly ADR 0003's "third outcome".
+
+### Matcher
+
+100% hit rate at every basis and every signal count. Wall time scales with **trace signal
+count**, not design size (~3 ms at 1K → ~360-580 ms at 100K across bases), and peak RSS is
+dominated by the loaded design rather than the match. With the #153 `wave_index` cache this
+is a first-launch cost only.
+
+### What this means for the two open issues
+
+- **#22** — trigger unmet at 1M. Keep open, but re-arm it on a design that actually exceeds
+  RAM; the measured bottleneck is algorithmic (`cone()` fan-out), not storage.
+- **#155** — worth doing, worth scoping honestly: budget against `deserialize` alone, with
+  validation and index build staying put.
 
 ## Handing the results over
 
