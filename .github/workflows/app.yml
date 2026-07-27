@@ -4,9 +4,16 @@ name: App
 # PRs/pushes that touch the app or the crates it wraps (the repo is private, and
 # the Windows runner bills at 2x minutes). The Windows leg exercises the
 # tauri-build Windows Resource/icon embed — the thing a Linux box can't validate.
+#
+# A `v*` tag additionally drives the `release` job below (#248). The `paths`
+# filter does NOT suppress that: GitHub does not evaluate path filters for
+# pushes of tags (workflow-syntax reference). Do not "fix" this by splitting the
+# trigger into a second workflow — duplicating the bundle matrix is the drift
+# trap #246 documents.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths: ["app/**", "core/crates/**", ".github/workflows/app.yml"]
   pull_request:
     paths: ["app/**", "core/crates/**", ".github/workflows/app.yml"]
@@ -102,6 +109,44 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # Two distinct failures, both silent without this (#248):
+      #
+      #   1. tag != tauri.conf.json — the bundle FILENAMES come from that config,
+      #      not the tag, so a v0.2.0 tag against a 0.1.0 config produces a
+      #      release full of hdl-schemview_0.1.0_* assets. This one breaks the
+      #      release.
+      #   2. the three manifests disagree — cosmetic (nothing reads them for
+      #      naming), but the repo then reports two versions of itself.
+      #
+      # Both are reported in one run so a maintainer fixes them in one pass.
+      # Checked as a step rather than a `needs:`-ed job because a job skipped by
+      # its own `if:` skips everything downstream too; as the first step after
+      # checkout it still aborts all three legs — incl. the 10x-billed macOS one
+      # — within seconds. `^version = ` is anchored on purpose: the dependency
+      # versions in Cargo.toml are inline in braces, so only [package] matches.
+      - name: Tag and manifest versions agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          conf=$(jq -r .version app/src-tauri/tauri.conf.json)
+          pkg=$(jq -r .version app/package.json)
+          crate=$(grep -m1 '^version = ' app/src-tauri/Cargo.toml | cut -d'"' -f2)
+          echo "tag=$GITHUB_REF_NAME tauri.conf.json=$conf package.json=$pkg Cargo.toml=$crate"
+          fail=0
+          if [ "$GITHUB_REF_NAME" != "v$conf" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match tauri.conf.json version $conf" >&2
+            echo "Bundle filenames come from the config, so this release would ship" >&2
+            echo "hdl-schemview_${conf}_* assets under the $GITHUB_REF_NAME tag." >&2
+            fail=1
+          fi
+          if [ "$pkg" != "$conf" ] || [ "$crate" != "$conf" ]; then
+            echo "::error::manifest versions disagree — tauri.conf.json=$conf app/package.json=$pkg app/src-tauri/Cargo.toml=$crate" >&2
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "Bump all three to match the tag, or retag. See docs/releasing.md." >&2
+            exit 1
+          fi
 
       - name: Install Tauri Linux deps
         if: runner.os == 'Linux'
@@ -210,3 +255,55 @@ jobs:
           path: app/src-tauri/target/release/bundle/**
           retention-days: 14
           if-no-files-found: warn
+
+  # Durable delivery for the artifacts `bundle` already produced (#248). Actions
+  # artifacts expire after 14 days, live behind the Actions UI, and carry no
+  # integrity check — the wrong vehicle for a ~200 MB installer that gets
+  # hand-carried onto a machine with no network (ADR 0009).
+  #
+  # ONE aggregating job, not per-matrix-leg uploads: three legs racing on
+  # `gh release create` would fight over creating the same release. `needs:` on a
+  # fail-fast:false matrix also means a single failed OS leg skips this job
+  # entirely — no partial releases.
+  release:
+    name: Publish draft release
+    needs: [build, bundle]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # Job level on purpose. The workflow default stays `contents: read`, so
+    # `build` and `bundle` — which run on every PR — never hold a write token.
+    permissions:
+      contents: write
+    steps:
+      # No checkout: nothing here needs the repo, and GH_REPO gives `gh` its
+      # target without a git remote to infer one from.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      # The artifacts are whole `bundle/**` trees — macOS's .app alone is a
+      # directory of thousands of files — so select the installers rather than
+      # uploading everything. Flattening also makes SHA256SUMS carry bare
+      # basenames matching the downloaded assets, which is the point of shipping
+      # it: on an isolated machine, "did this arrive intact" has no other answer.
+      - name: Stage installers + checksums
+        run: |
+          mkdir -p assets
+          find dist -type f \( -name '*.exe' -o -name '*.AppImage' \
+            -o -name '*.deb' -o -name '*.dmg' \) -exec cp {} assets/ \;
+          if [ -z "$(ls -A assets)" ]; then
+            echo "::error::no installer artifacts found in the bundle uploads" >&2
+            exit 1
+          fi
+          cd assets && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      # Draft, not published: macOS is unverified end-to-end (ADR 0009), so
+      # auto-publishing a .dmg nobody has opened would overclaim. A human checks
+      # the assets and publishes. See docs/releasing.md.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
+            --title "$GITHUB_REF_NAME" assets/*
