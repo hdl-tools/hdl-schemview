@@ -246,6 +246,24 @@ fn the_single_shot_banner_appears_only_without_criterion() {
 }
 
 #[test]
+fn packaged_notes_carry_the_banner_and_explain_both_missing_layers() {
+    // The packaged app's one supported Notes shape (#240 tier 1). Pinned here
+    // because the banner is ADR 0009's guard against a single-shot file being
+    // compared against a `cargo bench` one.
+    let notes = collect::packaged_notes();
+    assert!(!notes.criterion_ran);
+    assert!(notes.criterion_rows.is_empty());
+    assert!(notes.report_table.is_empty());
+
+    let text = rendered(&[], &notes);
+    assert!(text.contains("**Single-shot run — no criterion layer.**"));
+    // Each absent layer says *why* it is absent, so the file is self-explaining
+    // on a machine where nobody can go check.
+    assert!(text.contains("cargo bench"), "text: {text}");
+    assert!(text.contains("`report` bin"), "text: {text}");
+}
+
+#[test]
 fn criterion_and_report_notes_are_italicized_where_a_table_is_absent() {
     let text = rendered(
         &[],

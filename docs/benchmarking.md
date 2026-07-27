@@ -94,7 +94,42 @@ Two intentional differences from the shell collectors:
 
 Also new: a `build` row (`version @ SVX_BUILD_REV`) in the environment table. On the target
 machine `rustc`, `cargo` and `git` are all absent, so it is the only provenance a metrics
-file from there would otherwise carry. The `Generated` line is UTC and names the collector.
+file from there would otherwise carry. `app.yml` sets `SVX_BUILD_REV` from `github.sha`;
+`scale-bench`'s `build.rs` declares it `rerun-if-env-changed`, because `option_env!` is read
+at *compile* time and CI restores a cached `target/` — without that a rebuilt bundle would
+claim the revision it was **not** built from, which is worse than the honest fallback. The
+`Generated` line is UTC and names the collector.
+
+### The packaged app's `--bench` (#240 tier 1)
+
+On the isolated machine there is no `collect` binary, no `cargo`, and no second executable
+of any kind — so the app binary *is* the collector:
+
+```bash
+hdl-schemview --bench                                   # the default matrix
+hdl-schemview --bench --bases "golden 665" --out m.md
+hdl-schemview --bench --full --model <hierarchy.json>
+```
+
+Same matrix, same `render`, same file. Three things differ from `collect`, all inherent:
+
+- **The output goes to the invocation directory** as `metrics-<stamp>.md` (there is no
+  `target/` to default into). `-out` overrides, resolved against that same directory.
+- **The criterion and report layers are absent** — criterion needs `cargo bench` and a
+  toolchain, the report bin is a second executable a bundle does not carry. Both sections
+  say so instead of being silently empty, and `collect::packaged_notes` is the single place
+  that pairing is decided. The file therefore always carries the ADR 0009 banner:
+  *Single-shot run — no criterion layer.* Latency figures are order-of-magnitude; the
+  memory axes are unaffected.
+- **Each scenario runs as a child of the app re-exec'ing itself** with the hidden
+  `--bench-scenario` flag, since peak RSS is only attributable to a process that did exactly
+  one thing. The parent marks its children with `SVX_BENCH_CHILD`, so if a platform ever
+  strips the flag from the re-exec (an AppImage `AppRun` wrapper rewriting argv is the
+  realistic way) the child exits 3 with an explanation rather than opening a window per row.
+
+A build made with `--no-default-features` carries no benchmark code at all — 2.1 MB smaller,
+since the `golden` fixture is embedded — and `--bench` then refuses with
+*this build was compiled without the benchmark feature*, exit 2.
 
 The `.ps1` / `.sh` / `scale_bench_tables.py` scripts **stay** for now, and nightly still
 runs the `.sh`. Retiring them and repointing nightly at this bin happen **together, in one

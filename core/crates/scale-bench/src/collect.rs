@@ -597,6 +597,28 @@ pub struct Notes {
     pub report_table: Vec<String>,
 }
 
+/// The [`Notes`] a packaged run must use: neither extra layer can exist there.
+///
+/// Criterion needs `cargo bench` and a Rust toolchain; the `report` bin is a
+/// second executable a bundle does not carry. `criterion_ran: false` is what
+/// makes [`render`] emit ADR 0009's mandatory single-shot banner, so this is the
+/// one place that pairing is decided rather than re-stated at each call site.
+pub fn packaged_notes() -> Notes {
+    Notes {
+        criterion_note: "not run — the criterion layer needs `cargo bench` and a Rust \
+                         toolchain, which a packaged build has neither of"
+            .into(),
+        criterion_rows: Vec::new(),
+        criterion_ran: false,
+        report_note: Some(
+            "not run — the derived tables come from the `report` bin, a second executable \
+             the bundle does not carry"
+                .into(),
+        ),
+        report_table: Vec::new(),
+    }
+}
+
 /// The whole metrics file, as a string. **Pure** — every input is a parameter.
 ///
 /// LF line endings and no BOM, unlike the `.ps1`'s CRLF + PS 5.1 BOM: the file is

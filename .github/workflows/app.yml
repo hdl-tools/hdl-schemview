@@ -60,7 +60,27 @@ jobs:
 
       - name: Tauri shell (compile — exercises the Windows resource/icon embed)
         working-directory: app/src-tauri
+        env:
+          SVX_BUILD_REV: ${{ github.sha }}
         run: cargo build
+
+      # The only automated exercise of the `--bench` self re-exec (#240 tier 1):
+      # the parent spawns `current_exe() --bench-scenario` once per row, so this
+      # fails if argv round-tripping ever breaks. `golden` is the embedded
+      # fixture, so it needs nothing from the runner and takes seconds.
+      - name: Benchmark self re-exec smoke
+        working-directory: app/src-tauri
+        run: |
+          out="$RUNNER_TEMP/bench-smoke.md"
+          ./target/debug/hdl-schemview-app --bench --bases golden --out "$out"
+          grep -q 'Single-shot run' "$out"
+          grep -q 'hdl-schemview --bench' "$out"
+
+      # The lean product shape the issue asks for: no benchmark code compiled in,
+      # and the launch arms refuse instead of opening a window.
+      - name: Tauri shell (compile — no bench feature)
+        working-directory: app/src-tauri
+        run: cargo build --no-default-features
 
   # The bundle path (#240): `cargo build` above never exercises the bundler, so
   # NSIS/AppImage/.app packaging could break unnoticed until release. This job
@@ -149,12 +169,39 @@ jobs:
       # supported isolated-machine artifact; .deb needs repo access.
       - name: Bundle
         working-directory: app
+        env:
+          # Stamped into the metrics file's `build` row by
+          # scale_bench::collect::build_provenance (an `option_env!`, so it must
+          # be set at *compile* time). A packaged run has no git checkout and no
+          # toolchain, so without this the file carries no provenance at all.
+          SVX_BUILD_REV: ${{ github.sha }}
         run: |
           case "${{ runner.os }}" in
             Windows) npm run tauri build -- --config tauri.offline.conf.json --bundles nsis ;;
             Linux)   npm run tauri build -- --bundles appimage,deb ;;
             macOS)   npm run tauri build -- --bundles app,dmg ;;
           esac
+
+      # Tier 1's exit criterion, against the real artifact: copy one file to a
+      # machine with no toolchain and produce a metrics file. `--bench` is
+      # headless, so it needs no display here.
+      #
+      # This is the *only* check of the self re-exec inside a FUSE-mounted
+      # squashfs — `current_exe()` there is /tmp/.mount_XXXX/usr/bin/<app>, and
+      # re-execing it bypasses AppRun (the child relies on inheriting the env
+      # AppRun exported). Note libfuse2 must be installed and the AppImage run
+      # natively: APPIMAGE_EXTRACT_AND_RUN=1 would make current_exe() a plain
+      # directory, i.e. pass without testing the case in question.
+      - name: AppImage self re-exec smoke
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y libfuse2t64
+          app=$(find app/src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
+          test -n "$app" || { echo "::error::no AppImage was produced"; exit 1; }
+          chmod +x "$app"
+          "$app" --bench --bases golden --out "$RUNNER_TEMP/appimage-bench.md"
+          grep -q 'Single-shot run' "$RUNNER_TEMP/appimage-bench.md"
+          grep -q 'hdl-schemview --bench' "$RUNNER_TEMP/appimage-bench.md"
 
       - uses: actions/upload-artifact@v4
         if: always()

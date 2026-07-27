@@ -12,6 +12,17 @@ description = "hdl-schemview desktop app (Tauri shell over svxprobe-gui)"
 name = "hdl_schemview_app_lib"
 crate-type = ["lib", "cdylib"]
 
+# `bench` wires the `--bench` / `--bench-scenario` launch arms to the scenario
+# matrix (#240 tier 1). On by default: producing metrics on the isolated machine
+# is half of what tier 1 ships. Turning it off yields the lean product binary the
+# issue asks for — 2.1 MB smaller, since `scale-bench`'s `golden` feature
+# `include_bytes!`s the fixture — and the launch arms then refuse with the
+# "compiled without the benchmark feature" message, which is only truthful
+# because this feature exists.
+[features]
+default = ["bench"]
+bench = ["dep:scale-bench"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -23,3 +34,12 @@ serde_json = "1"
 svxprobe-gui = { path = "../../core/crates/gui" }
 svxprobe-wave = { path = "../../core/crates/wave" }
 svxprobe-schematic = { path = "../../core/crates/schematic" }
+# `collect` is the matrix driver, `synth` the 665/100K/1M bases, `golden` the
+# embedded fixture — the only basis measured against byte-identical input on
+# every machine, hence the cross-run anchor in docs/benchmarking.md §Findings.
+# criterion is a scale-bench *dev*-dependency, so it is not pulled in here.
+scale-bench = { path = "../../core/crates/scale-bench", optional = true, default-features = false, features = [
+    "collect",
+    "synth",
+    "golden",
+] }
