@@ -268,6 +268,20 @@ pub fn resolve_path(p: &str, cwd: &Path) -> String {
     }
 }
 
+/// Where a `--bench` run writes its metrics file: an explicit `-out` resolved
+/// against the invocation directory, else `metrics-<stamp>.md` in it.
+///
+/// The dev `collect` bin defaults to `<target>/scale-bench/`, which a packaged
+/// app has no analogue for — the invocation directory is the one place the user
+/// can reliably find the file afterwards. Pure (takes the stamp) so the naming
+/// is testable without a clock.
+pub fn bench_out_path(out: Option<&str>, cwd: &Path, stamp: &str) -> PathBuf {
+    match out.filter(|p| !p.is_empty()) {
+        Some(p) => PathBuf::from(resolve_path(p, cwd)),
+        None => cwd.join(format!("metrics-{stamp}.md")),
+    }
+}
+
 impl StartupArgs {
     /// Resolve the designlist/trace/src-root/incdir paths against `cwd` (so
     /// relative paths behave the same under `tauri dev` and a bundled binary),
@@ -583,5 +597,32 @@ mod tests {
         assert!(USAGE.contains("--bench"));
         // The child half is an implementation detail of the re-exec.
         assert!(!USAGE.contains("--bench-scenario"));
+    }
+
+    #[test]
+    fn bench_out_defaults_into_the_invocation_directory() {
+        let cwd = Path::new("/work");
+        assert_eq!(
+            bench_out_path(None, cwd, "20260727-141530"),
+            cwd.join("metrics-20260727-141530.md")
+        );
+        // An empty `-out` is the same as none, not a write to the directory.
+        assert_eq!(
+            bench_out_path(Some(""), cwd, "20260727-141530"),
+            cwd.join("metrics-20260727-141530.md")
+        );
+    }
+
+    #[test]
+    fn bench_out_resolves_a_relative_path_but_keeps_an_absolute_one() {
+        let cwd = Path::new("/work");
+        assert_eq!(
+            bench_out_path(Some("out/m.md"), cwd, "ignored"),
+            PathBuf::from(resolve_path("out/m.md", cwd))
+        );
+        assert_eq!(
+            bench_out_path(Some("/tmp/m.md"), cwd, "ignored"),
+            PathBuf::from("/tmp/m.md")
+        );
     }
 }

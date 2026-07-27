@@ -19,6 +19,7 @@ use svxprobe_gui::{
     StartupError, TreeNode,
 };
 
+mod bench;
 mod console;
 pub use console::attach_parent_console;
 use svxprobe_schematic::SchematicGraph;
@@ -306,20 +307,18 @@ fn startup_args(startup: State<StartupState>) -> Option<StartupArgs> {
     startup.0.clone()
 }
 
-/// Parse (and path-resolve) the CLI launch arguments before any window opens
-/// (#136). Exits the process directly on the terminal cases, EDA-tool style:
-/// `-h`/`--help` prints usage to stdout and exits 0; a usage error prints to
-/// stderr and exits 2; a missing filelist/trace prints to stderr and exits 1.
-/// A normal no-argument launch returns `StartupState(None)`.
-fn resolve_startup() -> StartupState {
-    use svxprobe_gui::startup::{self, Launch, USAGE};
+/// Parse the CLI launch arguments before any window opens (#136). Exits the
+/// process directly on the terminal cases, EDA-tool style: `-h`/`--help` prints
+/// usage to stdout and exits 0; a usage error prints to stderr and exits 2.
+fn parse_launch_or_exit() -> svxprobe_gui::startup::Launch {
+    use svxprobe_gui::startup::{self, USAGE};
     // `args_os` + lossy conversion, not `args()` — the latter panics on a
     // non-UTF-8 argument, which in a release (windows_subsystem) build would
     // make the app vanish with no console output, the worst mode for a CLI.
     let argv = std::env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned());
-    let launch = match startup::parse_launch(argv) {
+    match startup::parse_launch(argv) {
         Ok(l) => l,
         Err(StartupError::Help) => {
             println!("{USAGE}");
@@ -329,18 +328,21 @@ fn resolve_startup() -> StartupState {
             eprintln!("error: {msg}\n\n{USAGE}");
             std::process::exit(2);
         }
-    };
+    }
+}
+
+/// Path-resolve the GUI launch arguments. A missing filelist/trace prints to
+/// stderr and exits 1; a normal no-argument launch yields `StartupState(None)`.
+///
+/// Only ever called with the `Gui` arm — [`bench::intercept`] has already
+/// diverged for the benchmark ones (#240).
+fn gui_startup(launch: svxprobe_gui::startup::Launch) -> StartupState {
+    use svxprobe_gui::startup::{self, Launch};
     let parsed = match launch {
         Launch::Gui(None) => return StartupState(None),
         Launch::Gui(Some(a)) => a,
-        // Wired in the #240 tier-1 benchmark slice. Until then the flags parse
-        // (so the contract and its tests are already fixed) but refuse to run,
-        // rather than falling through and silently opening a window.
         Launch::Bench(_) | Launch::BenchScenario(_) => {
-            eprintln!(
-                "error: this build was compiled without the benchmark feature\n\n{USAGE}"
-            );
-            std::process::exit(2);
+            unreachable!("the benchmark arms exit inside bench::intercept")
         }
     };
     // Resolve relative paths against the directory the user launched from —
@@ -359,11 +361,14 @@ fn resolve_startup() -> StartupState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the builder, deliberately: `--bench` is headless and must construct
+    // no Tauri state at all (#240 tier 1). Diverges for both benchmark arms.
+    let launch = bench::intercept(parse_launch_or_exit());
     tauri::Builder::default()
         // Native file picker for a waveform pane's "Load trace…" (#170).
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .manage(resolve_startup())
+        .manage(gui_startup(launch))
         .invoke_handler(tauri::generate_handler![
             load_design,
             elaborate_and_load,
