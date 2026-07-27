@@ -1,12 +1,13 @@
 //! The scenario matrix driver and metrics renderer (#240).
 //!
-//! This is what `core/scripts/scale-bench-collect.ps1`, `.sh` and
-//! `scale_bench_tables.py` do, in Rust. The reason is packaging: on the machine
-//! this benchmark exists to measure there is no PowerShell, no bash and no
-//! working `python3` (the Windows `python3` shim resolves on PATH and fails on
+//! The matrix used to live in `core/scripts/scale-bench-collect.ps1`, `.sh` and
+//! `scale_bench_tables.py`; it is here instead because of packaging. On the
+//! machine this benchmark exists to measure there is no PowerShell, no bash and
+//! no working `python3` (the Windows `python3` shim resolves on PATH and fails on
 //! execution — it broke the bash collector once already). Folding the logic in
-//! here also collapses the ps1/sh duplication that had already produced two
-//! different failure-row shapes and two different criterion sections.
+//! here also collapsed the ps1/sh duplication that had already produced two
+//! different failure-row shapes and two different criterion sections; those
+//! scripts were retired in #246 once this had a full-matrix parity run.
 //!
 //! Three properties are load-bearing and must survive any edit:
 //!

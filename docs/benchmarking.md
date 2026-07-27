@@ -32,14 +32,10 @@ storage swap. The navigation and `cone()` rows are what make that case if it hol
 
 ## One command
 
-```powershell
-# Windows
-& core/scripts/scale-bench-collect.ps1
-```
-
 ```bash
-# Linux / macOS / git-bash — same three layers, same output shape
-bash core/scripts/scale-bench-collect.sh
+cd core
+cargo build --release -p scale-bench --offline
+./target/release/collect                        # golden + 665 + 100K
 ```
 
 Writes `core/target/scale-bench/metrics-<timestamp>.md` and prints the path. That file
@@ -47,50 +43,49 @@ is the deliverable — paste its contents back for evaluation.
 
 Full run, including the 1M point and a real-design basis:
 
-```powershell
-& core/scripts/scale-bench-collect.ps1 -Full -Model core/target/scale-bench/cvt-hierarchy.json
-```
-
-Useful flags: `-SkipCriterion` (memory axes only, minutes instead of tens of minutes),
-`-SkipReport`, `-Out <path>`. The bash sibling takes `--full`, `--model`,
-`--skip-criterion`, `--skip-report`, `--out`, plus two it alone needs:
-`--bases "golden 665"` to limit the matrix, and `--online` to drop `--offline` from the
-cargo invocations (what CI uses, since a cold registry cache makes `--offline` fail).
-It renders the derived tables with `scale_bench_tables.py` when a working `python3`
-exists; without one the raw JSONL records still carry every number.
-
-**In CI:** the nightly `scale-bench` job runs the bash collector with `--online` and
-uploads the result as the `scale-bench-metrics` artifact. It is `continue-on-error`, so
-benchmark noise never fails the nightly.
-
-### The Rust collector (#240)
-
-The same three layers, driven from Rust instead of a shell:
-
 ```bash
-cd core
-cargo build --release -p scale-bench --offline
-./target/release/collect                        # golden + 665 + 100K
-./target/release/collect --bases "665" --skip-criterion --skip-report
-./target/release/collect --full --model <model.json> --out metrics.md
+./target/release/collect --full --model target/scale-bench/cvt-hierarchy.json
 ```
 
-Flags are the bash collector's superset — `--full`, `--model`, `--bases`,
-`--skip-criterion`, `--skip-report`, `--online`, `--out` — and the default output path is
-unchanged. It exists because a **packaged app** (issue #240 tier 1) has no PowerShell, no
-bash and no working `python3`, so the *matrix* had to move into Rust; `collect` is the
-developer-side front door to the same code the app runs.
+Useful flags: `--skip-criterion` (memory axes only, minutes instead of tens of minutes),
+`--skip-report`, `--out <path>`, `--bases "golden 665"` to limit the matrix, and
+`--online` to drop `--offline` from the cargo invocations (what CI uses, since a cold
+registry cache makes `--offline` fail).
 
-Two intentional differences from the shell collectors:
+`collect` drives all three layers — the scenario matrix, then criterion, then the
+single-shot report bin — into one paste-ready file. The *matrix* itself lives in
+`scale_bench::collect`, not in the bin, because a **packaged app** (issue #240 tier 1) has
+no PowerShell, no bash and no working `python3` yet must run the same matrix; `collect`
+adds only the two layers that inherently need a toolchain. Three properties follow:
 
 - **`golden` is embedded** in the binary rather than resolved through
   `CARGO_MANIFEST_DIR`, so it survives a build whose source tree is gone. It is the only
   basis measured against byte-identical input on every machine, which is what makes it the
   cross-run anchor §Findings compares against.
-- **The Criterion section is the `.ps1`'s shape** — a `| bench | mean ms | median ms | std
-  dev ms |` table parsed from `target/criterion/**/new/estimates.json`, filtered by
-  modification time so a stale estimate cannot leak in. The `.sh` grepped its log into a
-  bare fence instead; that shape goes away when nightly repoints to this bin.
+- **The Criterion section is a table** — `| bench | mean ms | median ms | std dev ms |`,
+  parsed from `target/criterion/**/new/estimates.json` and filtered by modification time
+  so a stale estimate cannot leak in. That directory keeps prior runs around, and a stale
+  estimate silently mixed into the table would be worse than a missing row.
+- **The criterion layer deselects the `collect` feature** — `cargo bench -p scale-bench
+  --benches --no-default-features --features synth,golden`. Cargo builds a crate's *bin*
+  targets for the bench profile too, so a bare `cargo bench` tries to relink `collect.exe`,
+  which is the process running right now; Windows refuses to replace a locked executable
+  and the layer dies with `failed to remove file collect.exe (os error 5)`. `--benches`
+  does **not** help — bins are built regardless of target selection — and the `collect`
+  bin's `required-features = ["collect"]` is the only thing that excludes it. Which
+  benchmarks execute is unchanged.
+
+**In CI:** the nightly `scale-bench` job builds `collect` and runs it with `--online`,
+uploading the result as the `scale-bench-metrics` artifact. It is `continue-on-error`, so
+benchmark noise never fails the nightly.
+
+> **History (#246).** Until 2026-07 this matrix also existed as
+> `core/scripts/scale-bench-collect.{ps1,sh}` plus `scale_bench_tables.py`. Two
+> implementations of one matrix had already drifted — different failure-row fields, two
+> different Criterion sections, one re-serializing the raw records and one not, CRLF+BOM
+> versus LF — so the shell collectors were retired in favour of the single Rust one, whose
+> output format is asserted by `core/crates/scale-bench/tests/collect.rs`. A metrics file
+> produced before that change has a log-fence Criterion section and no `build` row.
 
 Also new: a `build` row (`version @ SVX_BUILD_REV`) in the environment table. On the target
 machine `rustc`, `cargo` and `git` are all absent, so it is the only provenance a metrics
@@ -130,12 +125,6 @@ Same matrix, same `render`, same file. Three things differ from `collect`, all i
 A build made with `--no-default-features` carries no benchmark code at all — 2.1 MB smaller,
 since the `golden` fixture is embedded — and `--bench` then refuses with
 *this build was compiled without the benchmark feature*, exit 2.
-
-The `.ps1` / `.sh` / `scale_bench_tables.py` scripts **stay** for now, and nightly still
-runs the `.sh`. Retiring them and repointing nightly at this bin happen **together, in one
-change** (#246), gated on a full-matrix parity run — splitting them would either leave
-nightly generating its artifact from unmaintained code, or delete the scripts while nightly
-still calls them.
 
 ## The real-design basis (realism anchor)
 

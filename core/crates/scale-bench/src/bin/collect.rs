@@ -6,19 +6,14 @@
 //!         [--skip-criterion] [--skip-report] [--online] [--out <path>]
 //! ```
 //!
-//! Same three layers as `core/scripts/scale-bench-collect.{ps1,sh}`: the scenario
-//! matrix, then criterion, then the single-shot report bin, assembled into one
-//! paste-ready markdown file. The difference is that the *matrix* now lives in
-//! Rust (`scale_bench::collect::run`), so the packaged app can run it with no
-//! shell at all — this bin adds only the two layers that inherently need a
-//! toolchain.
+//! Three layers — the scenario matrix, then criterion, then the single-shot report
+//! bin — assembled into one paste-ready markdown file. The *matrix* lives in
+//! `scale_bench::collect::run`, so the packaged app can run it with no shell at
+//! all; this bin adds only the two layers that inherently need a toolchain.
 //!
 //! Criterion estimates come from walking `target/criterion/**/new/estimates.json`
-//! filtered by modification time, adopting the `.ps1`'s approach: the directory
-//! keeps prior runs around, and a stale estimate silently mixed into the table
-//! would be worse than a missing row. (The `.sh` grepped its log instead, which is
-//! why the two platforms produced differently shaped Criterion sections; this is
-//! the one that survives.)
+//! filtered by modification time: the directory keeps prior runs around, and a
+//! stale estimate silently mixed into the table would be worse than a missing row.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -199,9 +194,27 @@ fn sibling(exe: &Path, name: &str) -> Option<PathBuf> {
 fn run_criterion(core_dir: &Path, target_dir: &Path, online: bool, notes: &mut Notes) {
     // Short warm-up and few samples: this layer is here for the *shape* of the
     // distribution, and the collector already takes minutes.
+    // Deselecting the `collect` feature is what keeps this layer working: cargo
+    // builds a crate's *bin* targets for the bench profile too (so an integration
+    // test can exec them), which means a bare `cargo bench` tries to relink
+    // `collect.exe` — the process running right now. Windows refuses to replace a
+    // locked executable and the whole layer dies with "failed to remove file
+    // collect.exe (os error 5)". `--benches` alone does not help; the bins are built
+    // regardless of target selection. The `collect` bin carries
+    // `required-features = ["collect"]`, so dropping that feature is the one thing
+    // that excludes it. `synth` and `golden` are named explicitly because the three
+    // benches need them — a bench that grows a new dependency gets a compile error
+    // here rather than silently vanishing from the table.
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(core_dir)
-        .args(["bench", "-p", "scale-bench"]);
+    cmd.current_dir(core_dir).args([
+        "bench",
+        "-p",
+        "scale-bench",
+        "--benches",
+        "--no-default-features",
+        "--features",
+        "synth,golden",
+    ]);
     if !online {
         cmd.arg("--offline");
     }
@@ -215,7 +228,7 @@ fn run_criterion(core_dir: &Path, target_dir: &Path, online: bool, notes: &mut N
         "20",
     ]);
 
-    eprintln!("criterion: cargo bench -p scale-bench");
+    eprintln!("criterion: cargo bench -p scale-bench --benches (without the `collect` feature)");
     let started = SystemTime::now();
     let code = match cmd.status() {
         Ok(s) => s.code().unwrap_or(-1),
@@ -225,8 +238,8 @@ fn run_criterion(core_dir: &Path, target_dir: &Path, online: bool, notes: &mut N
         }
     };
     notes.criterion_note = format!(
-        "cargo bench -p scale-bench -- --warm-up-time 1 --measurement-time 3 \
-         --sample-size 20 (exit {code})"
+        "cargo bench -p scale-bench --benches --no-default-features --features synth,golden \
+         -- --warm-up-time 1 --measurement-time 3 --sample-size 20 (exit {code})"
     );
     notes.criterion_ran = true;
     notes.criterion_rows = harvest_criterion(&target_dir.join("criterion"), started);

@@ -6,9 +6,10 @@
 //! caught it. `render` is pure precisely so these can be asserted without
 //! spawning a scenario.
 //!
-//! The numbers below are the parity contract with
-//! `core/scripts/scale_bench_tables.py` — floats to two decimals with thousands
-//! separators, integers ungrouped, absent values as `-`.
+//! The number formatting below was the parity contract with the retired
+//! `core/scripts/scale_bench_tables.py` (#246) and is now the contract outright —
+//! floats to two decimals with thousands separators, integers ungrouped, absent
+//! values as `-`. Metrics files are compared across runs, so it must not drift.
 
 use scale_bench::collect::{self, CriterionRow, EnvFacts, Notes, Record};
 

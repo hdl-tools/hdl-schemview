@@ -69,10 +69,12 @@ jobs:
       # One collector run covers all three layers: the memory/RSS scenarios
       # (#22/#155), a short criterion pass, and the single-shot report. No
       # --full: the 1M basis needs several GB and a hosted runner has ~7.
+      - name: Build the collector
+        run: cargo build --release -p scale-bench
       - name: Scalability metrics
         # --online: the collector defaults to --offline for the isolated-machine
         # case, which would fail here on a cold registry cache.
-        run: bash scripts/scale-bench-collect.sh --online --out "$GITHUB_WORKSPACE/scale-bench-metrics.md"
+        run: ./target/release/collect --online --out "$GITHUB_WORKSPACE/scale-bench-metrics.md"
       # The metrics file is the artifact worth keeping — the numbers that gate
       # the #22 (redb-vs-SQLite) and #155 (zero-copy) decisions.
       - name: Upload metrics
