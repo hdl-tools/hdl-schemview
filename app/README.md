@@ -259,6 +259,11 @@ The **App** workflow (`.github/workflows/app.yml`) has three jobs:
   stages the installers flat, writes `SHA256SUMS`, and opens a **draft** GitHub
   Release for a human to check and publish. See **`docs/releasing.md`**.
 
+> ⚠️ `WEBVIEW2_CAB_URL` is **not set yet**, so the Windows `bundle` leg fails. Since
+> `release` is `needs: [build, bundle]`, a tag pushed today would run the full 3-OS
+> build and publish **nothing** — set the variable first. `docs/releasing.md`
+> §Prerequisites has the details.
+
 The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
 `svxprobe-gui` logic it wraps is what that gate covers.
 

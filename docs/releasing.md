@@ -15,6 +15,29 @@ file is the wrong vehicle. A tag-triggered release is durable, linkable and
 checksummed. It reuses the **same** bundle job — there is deliberately no second
 workflow (#246's precedent: two thin wrappers over one matrix diverge).
 
+## Prerequisites — check these before tagging
+
+A tag push is expensive and mostly unattended, so confirm both first. Neither
+produces a partial release: they produce **no** release.
+
+- **The `WEBVIEW2_CAB_URL` repository variable must be set** (Settings → Secrets
+  and variables → Actions → Variables). The Windows leg of `bundle` vendors a
+  pinned WebView2 fixed-version runtime, and its *Fetch WebView2 fixed runtime*
+  step fails outright when the variable is absent — get the `.cab` URL from
+  <https://developer.microsoft.com/microsoft-edge/webview2/> (Fixed Version). It is
+  pinned on purpose: the runtime version is part of what the bundle ships.
+
+  Because `release` is `needs: [build, bundle]`, **one failed OS leg skips the
+  release job entirely**. That is the intended behaviour — no half-populated
+  releases — but it means an unset variable turns a tag push into a full 3-OS
+  build that publishes nothing. As of #248 this variable is **not yet set**, and
+  the Windows bundle leg is failing on `main` for exactly this reason.
+
+- **Actions quota.** `bundle` builds on all three OSes and macOS bills at 10× on a
+  private repo. A tag pushed with the quota exhausted fails instantly with
+  zero-step jobs and no logs — an unhelpful signature that looks nothing like a
+  code failure, so check the billing page before assuming the workflow is broken.
+
 ## Cutting a release
 
 1. **Bump the version** — the same number in all three manifests:
