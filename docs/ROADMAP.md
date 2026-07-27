@@ -328,9 +328,9 @@ return to the indicated loop-back point rather than proceeding.
 >   generator (665 / 100K / 1M nodes), criterion benches for load/query/matcher, and a
 >   `scenario` bin that runs **one measured operation per process** so peak RSS is
 >   attributable. Bases include the committed golden and any **real** elaborated design.
->   `core/scripts/scale-bench-collect.{ps1,sh}` drives the whole matrix into one
->   paste-ready metrics file; the nightly `scale-bench` job runs the POSIX collector
->   and uploads it. Runbook: [`benchmarking.md`](benchmarking.md).
+>   The `collect` bin drives the whole matrix into one paste-ready metrics file; the
+>   nightly `scale-bench` job builds and runs it, and uploads the result. Runbook:
+>   [`benchmarking.md`](benchmarking.md).
 > - **rkyv load cache (#21)** ✅ — ADR 0003 Phase A. `ingest` caches the parsed
 >   `Document` in `.schemview_data/` and mmaps it on repeat launches; measured **3.8×**
 >   faster warm load at 100K (570 ms → 150 ms).
