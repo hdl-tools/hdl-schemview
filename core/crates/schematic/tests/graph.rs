@@ -1946,6 +1946,39 @@ fn cone_with_fanout_cap_engages() {
 }
 
 #[test]
+fn cone_with_a_zero_fanout_budget_still_reports_what_it_dropped() {
+    // A zero budget used to drop every candidate on every signal, returning an
+    // empty graph with `truncated` set — but with no pin anywhere to carry a
+    // `more` count, which reads in the UI as "nothing found" rather than
+    // "everything was capped". The cap exists to make truncation visible, so the
+    // degenerate budget must still produce something to hang that count on.
+    let d = design();
+    let seed = id(&d, RESETN);
+    let g = cone_with(
+        &d,
+        seed,
+        Dir::Inout,
+        ConeLimits {
+            depth: 1,
+            fanout: 0,
+            boxes: 2000,
+        },
+        Projection::ProcessLevel,
+    );
+    assert!(
+        !g.nodes.is_empty(),
+        "a zero budget must not erase the graph"
+    );
+    assert!(g.truncated, "and must still report itself as truncated");
+    assert!(
+        g.nodes
+            .iter()
+            .any(|n| n.ports.iter().any(|p| p.more.is_some_and(|c| c > 0))),
+        "the dropped connections must surface as a `more` count"
+    );
+}
+
+#[test]
 fn cone_with_depth_cap_engages() {
     let d = design();
     let seed = id(&d, VALID);

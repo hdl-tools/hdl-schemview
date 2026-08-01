@@ -77,7 +77,7 @@ fn column_headers_match_the_python_renderer_verbatim() {
         "| basis | mode | nodes | edges | json MB | cache MB | wall ms | peak RSS MB | end RSS MB | note |",
         "|---|---|--:|--:|--:|--:|--:|--:|--:|---|",
         "| basis | from_slice ms | cache_hit ms | access_checked ms | access_unchecked ms | validate ms | deserialize+index ms | cache_hit peak RSS MB | access peak RSS MB |",
-        "| basis | load ms | RSS after load MB | peak RSS MB | scope_graph p50/p95 us | expand p50/p95 us | path p95 us | source p95 us | cone ms | cone nodes | hot fanout |",
+        "| basis | load ms | RSS after load MB | peak RSS MB | scope_graph p50/p95 us | expand p50/p95 us | path p95 us | source p95 us | cone ms | cone nodes | cone_with ms | cone_with boxes | truncated | hot fanout |",
         "| basis | signals | wall ms | peak RSS MB | hit % | note |",
         "|---|--:|--:|--:|--:|---|",
     ] {
@@ -197,7 +197,10 @@ fn a_failed_nav_row_keeps_the_tables_arity() {
         .lines()
         .find(|l| l.contains("**FAILED** - out of memory") && l.starts_with("| 1M |"))
         .expect("the nav failure row is rendered");
-    assert_eq!(row, "| 1M | **FAILED** - out of memory | | | | | | | | | |");
+    assert_eq!(
+        row,
+        "| 1M | **FAILED** - out of memory | | | | | | | | | | | | |"
+    );
 }
 
 #[test]
@@ -206,7 +209,7 @@ fn a_nav_row_with_no_percentile_samples_degrades_to_dashes() {
     // empty — the record shape is not fixed-arity, so the composite p50/p95 cells
     // have to tolerate absent keys.
     let rec = record(
-        r#"{"nodes":665,"edges":700,"load_ms":12.0000,"rss_after_load_mb":null,"nav_scopes":1,"nav_iters":1,"cone_ms":0.5000,"cone_nodes":3,"hot_fanout":9,"scope_graph_mean_us":null,"expand_mean_us":null,"wall_ms":1.0000,"peak_rss_mb":40.0000,"end_rss_mb":39.0000,"basis":"golden","mode":"nav"}"#,
+        r#"{"nodes":665,"edges":700,"load_ms":12.0000,"rss_after_load_mb":null,"nav_scopes":1,"nav_iters":1,"cone_ms":0.5000,"cone_nodes":3,"cone_with_ms":7.1100,"cone_with_nodes":227,"cone_with_truncated":0,"hot_fanout":9,"scope_graph_mean_us":null,"expand_mean_us":null,"wall_ms":1.0000,"peak_rss_mb":40.0000,"end_rss_mb":39.0000,"basis":"golden","mode":"nav"}"#,
     );
     let text = rendered(&[rec], &Notes::default());
     let row = text
@@ -216,6 +219,27 @@ fn a_nav_row_with_no_percentile_samples_degrades_to_dashes() {
     assert!(row.contains("| - / - | - / - |"), "row: {row}");
     // An unavailable RSS probe is a dash, never a fabricated zero.
     assert!(row.contains("| 12.00 | - |"), "row: {row}");
+}
+
+#[test]
+fn a_nav_row_carries_the_capped_cone_beside_the_legacy_one() {
+    // #244 PR1 measured `cone_with` but rendered only the legacy `cone`, so the
+    // level-of-detail evidence never reached the metrics file the runbook and
+    // nightly publish. Both must sit on the same row to be comparable at all.
+    let rec = record(
+        r#"{"nodes":1000001,"edges":1111111,"load_ms":3836.0000,"rss_after_load_mb":1100.0000,"nav_scopes":32,"nav_iters":3,"cone_ms":559.9050,"cone_nodes":59049,"cone_with_ms":12.5000,"cone_with_nodes":500,"cone_with_truncated":1,"hot_fanout":59049,"wall_ms":1.0000,"peak_rss_mb":1200.0000,"end_rss_mb":1100.0000,"basis":"1M","mode":"nav"}"#,
+    );
+    let text = rendered(&[rec], &Notes::default());
+    let row = text
+        .lines()
+        .find(|l| l.starts_with("| 1M | 3,836.00 |"))
+        .expect("the nav row is rendered");
+    // The uncapped baseline and the capped rebuild, in that order, then the
+    // truncation flag — a `1` is what says the fan-out cap actually engaged.
+    assert!(
+        row.contains("| 559.90 | 59049 | 12.50 | 500 | 1 | 59049 |"),
+        "row: {row}"
+    );
 }
 
 #[test]

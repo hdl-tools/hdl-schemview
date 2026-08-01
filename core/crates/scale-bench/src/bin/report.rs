@@ -86,10 +86,12 @@ fn synth_row(basis: &str, cfg: &SynthConfig) {
         std::hint::black_box(design.nodes_at_source(file, off));
     }) * 1e6;
     let cone_ms = timed(5, || {
+        // `Dir::In` traverses the clock star: the generator wires each flop as a
+        // load of `clk`, and the legacy filter is side-blind.
         std::hint::black_box(svxprobe_schematic::cone(
             &design,
             synth.clock_net,
-            Dir::Out,
+            Dir::In,
             CONE_DEPTH,
         ));
     }) * 1e3;

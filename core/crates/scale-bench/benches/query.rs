@@ -44,10 +44,12 @@ fn bench_query(c: &mut Criterion) {
         );
         g.bench_with_input(BenchmarkId::new("cone_clock", name), &design, |b, d| {
             b.iter(|| {
+                // `Dir::In` traverses the clock star: the generator wires each
+                // flop as a load of `clk`, and the legacy filter is side-blind.
                 black_box(svxprobe_schematic::cone(
                     d,
                     synth.clock_net,
-                    Dir::Out,
+                    Dir::In,
                     CONE_DEPTH,
                 ))
             });

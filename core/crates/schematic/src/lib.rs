@@ -2209,8 +2209,13 @@ pub fn cone_with(
             let mut kept = 0usize;
             let mut dropped = 0u32;
 
+            // `.max(1)` for the same reason as `depth` above: a zero budget would
+            // drop every candidate on every signal, and the graph would come back
+            // empty with `truncated` set but no pin anywhere to hang a `more`
+            // count on — indistinguishable from "nothing found" in the UI, which
+            // is precisely the silent discard this cap exists to prevent.
             for e in cands {
-                if kept >= limits.fanout {
+                if kept >= limits.fanout.max(1) {
                     dropped += 1;
                     continue;
                 }

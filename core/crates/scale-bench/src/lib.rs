@@ -348,8 +348,15 @@ pub fn generate(cfg: &SynthConfig) -> Synth {
         }
     }
 
-    // Global high-fan-out clock net under the root, wired to every leaf Ff with
-    // an `Out` edge so `cone(clk, Dir::Out, _)` traverses the whole frontier.
+    // Global high-fan-out clock net under the root: `clk` drives every leaf Ff,
+    // so the flop is the *load*. `Edge.dir` is relative to `e.port` (the ff
+    // here), which makes the clock edge `In` — the flop receives the clock.
+    //
+    // The legacy `cone`'s direction filter is side-blind (it compares `e.dir`
+    // without regard for which end the walk stands on), so the three baseline
+    // call sites pass `Dir::In` to traverse this star: `scenario.rs`'s `nav`,
+    // `benches/query.rs` and `bin/report.rs`. `cone_with`'s corrected filter
+    // walks the same frontier from `Dir::Out`, which is the true fan-out.
     let clock_net = b.push(
         NodeKind::Net,
         "clk",
@@ -365,7 +372,7 @@ pub fn generate(cfg: &SynthConfig) -> Synth {
         .map(|n| n.id)
         .collect();
     for ff in ff_ids {
-        b.edge(ff, clock_net, Dir::Out);
+        b.edge(ff, clock_net, Dir::In);
         clock_fanout += 1;
     }
 
