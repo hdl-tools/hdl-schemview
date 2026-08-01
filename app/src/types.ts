@@ -53,6 +53,13 @@ export interface SchPort {
    * beside the pin (so it is traceable at the gate); absent for net-driven pins.
    */
   constant?: string;
+  /**
+   * Connections on this pin a cone's fan-out cap dropped (#244) — the count behind
+   * a "N more…" affordance. Absent on every scope-graph pin and on any cone pin
+   * whose whole fan-out fit; a capped signal always reports its remainder here
+   * rather than dropping it silently.
+   */
+  more?: number;
 }
 export interface SchNode {
   id: number;
@@ -108,6 +115,11 @@ export interface SchematicGraph {
   root: string;
   nodes: SchNode[];
   edges: SchEdge[];
+  /**
+   * Set when a cone traversal cap engaged (#244), so a view can show a banner even
+   * when the truncated pin is scrolled off canvas. Absent for scope graphs.
+   */
+  truncated?: boolean;
 }
 
 export interface NodeRef {

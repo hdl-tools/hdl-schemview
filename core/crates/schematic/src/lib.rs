@@ -110,6 +110,13 @@ pub struct SchPort {
     /// instead of a separate source node. `None` for a net-driven pin.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constant: Option<String>,
+    /// Connections on this pin a cone's fan-out cap dropped (#244) — the count
+    /// behind a "N more…" affordance. `None` on every scope-graph pin and on any
+    /// cone pin whose whole fan-out fit. Truncation is a *rendering* policy, so
+    /// what it drops is always reported: a capped signal records its remainder
+    /// here and sets [`SchematicGraph::truncated`], never silently vanishing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub more: Option<u32>,
 }
 
 /// A box in the schematic (an instance), carrying its model identity.
@@ -219,6 +226,11 @@ pub struct SchematicGraph {
     pub root: String,
     pub nodes: Vec<SchNode>,
     pub edges: Vec<SchEdge>,
+    /// Set when a cone traversal cap engaged (#244), so a view can show a banner
+    /// even when the specific truncated pin is scrolled off canvas. Always
+    /// `false` for `scope_graph`/`expand` and for the legacy uncapped `cone`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
 }
 
 fn side_of(dir: Dir) -> Side {
@@ -654,6 +666,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
                 .map(if mirror { boundary_side } else { side_of })
                 .unwrap_or(Side::West);
             SchPort {
+                more: None,
                 id: pid,
                 name: node.map(|n| n.name.clone()).unwrap_or_default(),
                 side,
@@ -674,6 +687,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         let (views, raw) = access_ports(design, bx);
         for (vid, name, side) in views {
             ports.push(SchPort {
+                more: None,
                 id: vid,
                 name,
                 side,
@@ -687,6 +701,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
         }
         if let Some(side) = raw {
             ports.push(SchPort {
+                more: None,
                 id: RAW_PORT_BASE + bx,
                 name: module_of(design, n).unwrap_or_else(|| n.name.clone()),
                 side,
@@ -731,6 +746,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
             None => format!("{} ({view})", cn.name),
         };
         ports.push(SchPort {
+            more: None,
             id: c,
             name,
             side,
@@ -779,6 +795,7 @@ fn make_const_node(lit: &str, port: NodeId) -> SchNode {
         expandable: false,
         // East-facing pin: drives rightward into the design.
         ports: vec![SchPort {
+            more: None,
             id,
             name: lit.to_string(),
             side: Side::East,
@@ -820,6 +837,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
                 None
             };
             SchPort {
+                more: None,
                 id: pins.pin(ff, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
@@ -872,6 +890,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
                 && sig.map(|s| s.path.as_str()) == n.enable.as_deref())
             .then_some(PinRole::Enable);
             SchPort {
+                more: None,
                 id: pins.pin(bx, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
@@ -934,6 +953,7 @@ fn make_memory_box(
                 None => None,
             };
             SchPort {
+                more: None,
                 id: pins.pin(mem, e.endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: side_of(e.dir),
@@ -993,6 +1013,7 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
                 None
             };
             SchPort {
+                more: None,
                 id: pins.pin(gate, endpoint),
                 name: sig.map(|s| s.name.clone()).unwrap_or_default(),
                 side: Side::West,
@@ -1010,6 +1031,7 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
     // wires resolve to it in the signal-join pass. Carries the gate's own path so a
     // right-click cross-probes to its sub-expression `def_range`.
     ports.push(SchPort {
+        more: None,
         id: pins.pin(gate, gate),
         name: String::new(),
         side: Side::East,
@@ -1057,6 +1079,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
         path: n.path.clone(),
         expandable: false,
         ports: vec![SchPort {
+            more: None,
             id: port,
             name: n.name.clone(),
             side,
@@ -1087,6 +1110,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
 fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> SchematicGraph {
     let Some(ifnode) = design.node(iface) else {
         return SchematicGraph {
+            truncated: false,
             root: scope_path.to_string(),
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -1141,6 +1165,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
             let signode = design.node(sig);
             let pin = pins.pin(mp, sig);
             ports.push(SchPort {
+                more: None,
                 id: pin,
                 name: m.name.clone(),
                 side: side_of(m.dir),
@@ -1248,6 +1273,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
             path: mn.path.clone(),
             expandable: false,
             ports: vec![SchPort {
+                more: None,
                 id: fid,
                 name: mn.name.clone(),
                 side,
@@ -1281,6 +1307,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
     }
 
     SchematicGraph {
+        truncated: false,
         root: scope_path.to_string(),
         nodes,
         edges,
@@ -1687,6 +1714,7 @@ pub fn scope_graph_with(
                 if let Some(node) = nodes.iter_mut().find(|n| n.id == b) {
                     if !node.ports.iter().any(|p| p.id == pid) {
                         node.ports.push(SchPort {
+                            more: None,
                             id: pid,
                             name: design.node(b).map(|n| n.name.clone()).unwrap_or_default(),
                             side: Side::East,
@@ -1709,33 +1737,15 @@ pub fn scope_graph_with(
             let (Some(ds), Some(ls)) = (drivers.get(&sig), loads.get(&sig)) else {
                 continue;
             };
-            let label = design.node(sig).map(|n| relative_to(&n.path, scope_path));
-            let net_path = design.node(sig).map(|n| n.path.clone());
-            for &(dpin, ref dsel) in ds {
-                for &(lpin, ref lsel) in ls {
-                    // No self-loop (a box reading and writing the same signal); a
-                    // driver and a load touching *different* bits of a vector are
-                    // not connected (#116: core 0 drives core_trap[0], lane 1's FF
-                    // reads [1]); dedup against the shared `seen` set last so a
-                    // skipped pair doesn't block a legitimate one.
-                    if dpin == lpin
-                        || matches!((dsel, lsel), (Some(a), Some(b)) if a != b)
-                        || !seen.insert((dpin.min(lpin), dpin.max(lpin)))
-                    {
-                        continue;
-                    }
-                    let select = dsel.clone().or_else(|| lsel.clone());
-                    let net = label.clone().map(|b| with_select(b, &select));
-                    edges.push(SchEdge {
-                        id: next_edge,
-                        source: dpin,
-                        target: lpin,
-                        net,
-                        net_path: net_path.clone(),
-                    });
-                    next_edge += 1;
-                }
-            }
+            join_signal(
+                design.node(sig),
+                scope_path,
+                ds,
+                ls,
+                &mut seen,
+                &mut next_edge,
+                &mut edges,
+            );
         }
     }
 
@@ -1804,6 +1814,7 @@ pub fn scope_graph_with(
     }
 
     Some(SchematicGraph {
+        truncated: false,
         root: scope_path.to_string(),
         nodes,
         edges,
@@ -1825,6 +1836,54 @@ pub fn expand_with(
 ) -> Option<SchematicGraph> {
     let path = design.node(instance)?.path.clone();
     scope_graph_with(design, &path, projection)
+}
+
+/// Cross one signal's drivers with its loads into wires.
+///
+/// The shared join used by the scope graph's signal pass and, from #244, by the
+/// cone extractor — so the two cannot drift on what counts as a connection. Each
+/// pin pair is deduped against `seen` on `(min, max)`, which is what collapses a
+/// high-fan-out net instead of emitting one wire per load.
+///
+/// `sig` is the signal node itself (`None` when it is not in the model), used
+/// only for the wire's label and `net_path`; `scope_path` is what the label is
+/// made relative to.
+fn join_signal(
+    sig: Option<&Node>,
+    scope_path: &str,
+    drivers: &[(NodeId, Option<String>)],
+    loads: &[(NodeId, Option<String>)],
+    seen: &mut std::collections::HashSet<(NodeId, NodeId)>,
+    next_edge: &mut u32,
+    out: &mut Vec<SchEdge>,
+) {
+    let label = sig.map(|n| relative_to(&n.path, scope_path));
+    let net_path = sig.map(|n| n.path.clone());
+    for &(dpin, ref dsel) in drivers {
+        for &(lpin, ref lsel) in loads {
+            // No self-loop (a box reading and writing the same signal); a
+            // driver and a load touching *different* bits of a vector are
+            // not connected (#116: core 0 drives core_trap[0], lane 1's FF
+            // reads [1]); dedup against the shared `seen` set last so a
+            // skipped pair doesn't block a legitimate one.
+            if dpin == lpin
+                || matches!((dsel, lsel), (Some(a), Some(b)) if a != b)
+                || !seen.insert((dpin.min(lpin), dpin.max(lpin)))
+            {
+                continue;
+            }
+            let select = dsel.clone().or_else(|| lsel.clone());
+            let net = label.clone().map(|b| with_select(b, &select));
+            out.push(SchEdge {
+                id: *next_edge,
+                source: dpin,
+                target: lpin,
+                net,
+                net_path: net_path.clone(),
+            });
+            *next_edge += 1;
+        }
+    }
 }
 
 /// Fan-in/out cone of a node (typically a net or port): the boxes directly
@@ -1881,7 +1940,12 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
         .node(start)
         .map(|n| n.path.clone())
         .unwrap_or_default();
-    SchematicGraph { root, nodes, edges }
+    SchematicGraph {
+        root,
+        nodes,
+        edges,
+        truncated: false,
+    }
 }
 
 fn incident_edges(design: &Design, node: NodeId) -> Vec<Edge> {
