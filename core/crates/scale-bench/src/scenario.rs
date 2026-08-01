@@ -445,6 +445,18 @@ fn run_nav(args: &ScenarioArgs) -> Result<String, String> {
     let t_cone = Instant::now();
     let cone = svxprobe_schematic::cone(&design, handles.hot_net, Dir::Out, CONE_DEPTH);
     let cone_ms = t_cone.elapsed().as_secs_f64() * 1e3;
+    // The capped rebuild (#244) on the same seed, so the fan-out cliff and the
+    // level-of-detail answer to it sit in one row. `cone` above stays the
+    // uncapped baseline ADR 0003's 190.8 ms finding is measured against.
+    let t_cw = Instant::now();
+    let cone_w = svxprobe_schematic::cone_with(
+        &design,
+        handles.hot_net,
+        Dir::Out,
+        svxprobe_schematic::ConeLimits::depth(CONE_DEPTH),
+        svxprobe_schematic::Projection::ProcessLevel,
+    );
+    let cone_with_ms = t_cw.elapsed().as_secs_f64() * 1e3;
     let wall = t.elapsed().as_secs_f64();
 
     let mut rec = Record::default();
@@ -456,6 +468,9 @@ fn run_nav(args: &ScenarioArgs) -> Result<String, String> {
         .int("nav_iters", args.nav_iters as u64)
         .num("cone_ms", cone_ms)
         .int("cone_nodes", cone.nodes.len() as u64)
+        .num("cone_with_ms", cone_with_ms)
+        .int("cone_with_nodes", cone_w.nodes.len() as u64)
+        .int("cone_with_truncated", u64::from(cone_w.truncated))
         .int("hot_fanout", handles.hot_fanout as u64);
     summarize(&mut rec, "scope_graph", scope_us);
     summarize(&mut rec, "expand", expand_us);

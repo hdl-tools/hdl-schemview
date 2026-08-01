@@ -1919,11 +1919,15 @@ impl Default for ConeLimits {
             // 11 box loads — so no real fixture net truncates at the default,
             // while the 1M synthetic's 59,049-load clock caps at the first hop.
             fanout: 32,
-            // ~16 ms (one frame) at the ~8 us/box this walk is budgeted at,
-            // extrapolated from the 2.4-3.2 us/box the legacy cone measures in
-            // docs/benchmarking.md. Extrapolated, not measured — recheck against
-            // the `nav` scenario before treating it as settled.
-            boxes: 2000,
+            // ~16 ms (one frame) at the 31 us/box measured on the `golden`
+            // basis of the `nav` scenario (227 boxes in 7.11 ms, 2026-08-01).
+            // An earlier 2000 was extrapolated from the legacy cone's 2.4-3.2
+            // us/box and was ~4x too generous: this walk synthesizes pins and
+            // resolves a box per endpoint, so it costs far more per box than
+            // the instance-only one it replaces. Measured on golden rather
+            // than a synthetic basis deliberately — docs/benchmarking.md
+            // warns that synthetic absolute latencies are not user-facing.
+            boxes: 500,
         }
     }
 }
