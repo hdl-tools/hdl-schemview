@@ -576,6 +576,15 @@ fn access_ports(design: &Design, iface: NodeId) -> (Vec<(NodeId, String, Side)>,
         {
             continue;
         }
+        // A gate primitive's tap is an internal detail of a dissolved combinational
+        // block, not a structural connection to the bundle — and it only exists when
+        // the model was elaborated with the opt-in `--gate-level` pass. Counting it
+        // would let that pass move a pin in the *process-level* graph, which draws no
+        // gates at all (#215: `if`/`else` muxes reading `bus.ready`/`bus.rdata`
+        // outvoted the real drivers and flipped the raw port east).
+        if is_gate(design, e.port) {
+            continue;
+        }
         match view_of(e.port) {
             Some(v) => {
                 used.insert(v);

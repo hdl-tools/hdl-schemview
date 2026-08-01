@@ -1399,13 +1399,14 @@ class Elaborator:
         feeding the block's assigned signals. Runs *in addition* to `_logic_edges`;
         the root primitive of each RHS wires out to that assignment's l-value.
 
-        A `case`/`casez`/`casex` statement is first lowered structurally into a
-        priority-mux chain (#207, `_lower_cases`); the branch assignments it consumes
-        are then skipped by the flat pass below so they are not double-wired."""
+        A `case`/`casez`/`casex` (#207) or `if`/`else` (#215) statement is first
+        lowered structurally into a mux chain (`_lower_stmts`); the branch
+        assignments it consumes are then skipped by the flat pass below so they are
+        not double-wired."""
         consumed: set = set()
         body = getattr(sym, "body", None)
         if body is not None:
-            self._lower_cases(body, logic_id, seen, consumed)
+            self._lower_stmts(body, logic_id, seen, consumed)
         for node, lhs, rhs in self._block_assignments(sym):
             key = self._assign_key(node)
             if key is not None and key in consumed:
@@ -1435,22 +1436,33 @@ class Elaborator:
             ):
                 seen.add((root_id, sid, "out", None, None, None))
 
-    # -- case -> priority-mux lowering (#207) ---------------------------------
+    # -- statement -> mux-tree lowering (#207 `case`, #215 `if`/`else`) --------
     #
-    # The flat `_block_assignments` visit throws away the enclosing `case`
+    # The flat `_block_assignments` visit throws away the enclosing statement
     # structure, so a branch like `alu_out = alu_add_sub;` arrives as a bare-signal
-    # RHS and emits no gate — leaving the read signal's producer readerless. This
-    # pass walks the block's top-level statements in order, tracks each l-value's
-    # most-recent prior assignment (the case fall-through default), and rewrites
-    # every `case` into a right-leaning Mux chain (ADR 0005; reuses the existing
-    # `Mux` kind + `mux_port` sel/d0/d1 roles, so no schema change). Scope is `case`
-    # only — `if`/`else` statements stay flat (tracked as a separate follow-up).
+    # RHS and emits no gate — leaving the read signal's producer readerless, and an
+    # `if (c) y = a; else y = b;` arrives as two independent writes to `y` with the
+    # condition `c` dropped entirely. This pass walks the block's statements in
+    # source order, tracks each l-value's most-recent value (the fall-through
+    # default), and rewrites every `case` (#207) and every `if`/`else` (#215) into a
+    # right-leaning Mux chain (ADR 0005 §1; reuses the existing `Mux` kind +
+    # `mux_port` sel/d0/d1 roles, so no schema change).
+    #
+    # An l-value's pending value is one of:
+    #   ("assign", node, rhs)  — a source assignment not yet emitted, so it can be
+    #                            marked `consumed` only if the lowering actually
+    #                            uses it (see `_resolve_pending`);
+    #   an endpoint tuple      — ("node", nid) / ("sig", path) / ("const", ...),
+    #                            already emitted by a nested lowering.
+    # The wire-out to the real signal happens once, at the end of `_lower_stmts`,
+    # from each l-value's *final* value — so a `case` nested inside an `if` feeds
+    # the outer Mux instead of driving the signal a second time.
 
     def _flatten_stmts(self, stmt: Any) -> list[Any]:
-        """The block's top-level statements in source order, peeling the structural
-        wrappers (`Timed` timing controls, `Block` begin/end, `List`) — mirrors the
-        peeling in `_gating_condition_refs`. Does *not* descend into `if`/`case`
-        branches (their bodies are handled by the lowering itself)."""
+        """The statement sequence in source order, peeling the structural wrappers
+        (`Timed` timing controls, `Block` begin/end, `List`) — mirrors the peeling in
+        `_gating_condition_refs`. Does *not* descend into `if`/`case` branches; the
+        lowering recurses into those itself (`_lower_branch`)."""
         out: list[Any] = []
 
         def rec(s: Any) -> None:
@@ -1493,14 +1505,42 @@ class Elaborator:
         if key is not None:
             consumed.add(key)
 
-    def _lower_cases(
+    def _resolve_pending(
+        self, pending: Optional[tuple], logic_id: int, seen: set, consumed: set
+    ) -> Optional[tuple]:
+        """Turn an l-value's pending value into a wireable endpoint. An
+        ``("assign", node, rhs)`` is emitted now and its source assignment marked
+        `consumed` — only here, so an assignment the lowering never actually uses
+        still reaches the flat pass. An already-emitted endpoint passes through."""
+        if pending is None:
+            return None
+        if pending[0] == "assign":
+            _, node, rhs = pending
+            self._mark_consumed(node, consumed)
+            return self._emit_expr(rhs, logic_id, seen) if rhs is not None else None
+        return pending
+
+    def _lower_stmts(
         self, body: Any, logic_id: int, seen: set, consumed: set
     ) -> None:
-        """Lower each top-level `case` in `body` into a Mux chain, recording the
-        `id()` of every assignment node it consumes so the flat pass skips them."""
-        # lhs path -> (assignment node, rhs expr) of the most-recent prior write,
-        # used as a case's fall-through default (e.g. picorv32's `alu_out = 'bx;`).
-        prior: dict[str, tuple[Any, Any]] = {}
+        """Lower `body`'s `case` (#207) and `if`/`else` (#215) statements into Mux
+        trees, then wire each l-value's final lowered root out to its signal."""
+        # lhs path -> pending value of the most-recent write, used as the next
+        # structure's fall-through default (e.g. picorv32's `alu_out = 'bx;`).
+        values: dict[str, tuple] = {}
+        self._lower_seq(body, logic_id, seen, values, consumed)
+        # Wire out once, from the final value — sorted for deterministic output.
+        for lp in sorted(values):
+            v = values[lp]
+            if v is not None and v[0] == "node":
+                self._wire_out(v[1], ("path", lp), seen)
+
+    def _lower_seq(
+        self, body: Any, logic_id: int, seen: set, values: dict, consumed: set
+    ) -> None:
+        """Fold one statement sequence into `values` in source order: a plain
+        assignment becomes that l-value's pending value, a `case`/`if` rewrites its
+        l-values into Mux chains over whatever they held coming in."""
         for s in self._flatten_stmts(body):
             k = self._stmt_kind(s)
             if k == "ExpressionStatement":
@@ -1508,15 +1548,134 @@ class Elaborator:
                 if assign is not None and "Assignment" in _kind_name(assign):
                     rhs = getattr(assign, "right", None)
                     for lp in self._lvalue_bases(getattr(assign, "left", None)):
-                        prior[lp] = (assign, rhs)
+                        values[lp] = ("assign", assign, rhs)
             elif k == "Case":
-                self._emit_case_stmt(s, logic_id, seen, prior, consumed)
+                self._emit_case_stmt(s, logic_id, seen, values, consumed)
+            elif k == "Conditional":
+                self._emit_cond_stmt(s, logic_id, seen, values, consumed)
+
+    # -- if/else -> mux tree (#215) -------------------------------------------
+
+    def _cond_chain(self, stmt: Any) -> tuple[list[tuple[Any, Any]], Any]:
+        """Flatten an `if` / `else if` cascade into ``([(cond, body), ...], else)``.
+        slang nests an `else if` as the parent's `ifFalse`, so the chain is walked
+        rather than recursed — giving the same priority-ordered branch list
+        `_emit_case_stmt` builds, and a final `else` body (None if absent)."""
+        branches: list[tuple[Any, Any]] = []
+        s = stmt
+        while s is not None and self._stmt_kind(s) == "Conditional":
+            conds = getattr(s, "conditions", None) or []
+            # A `&&&`-joined / pattern condition is rare in RTL; take the first as
+            # the select rather than guess a gate for the rest (mirrors `_emit_mux`).
+            cexpr = getattr(conds[0], "expr", None) if conds else None
+            branches.append((cexpr, getattr(s, "ifTrue", None)))
+            s = getattr(s, "ifFalse", None)
+        return branches, s
+
+    def _assigned_lvalues(self, bodies: list[Any]) -> list[str]:
+        """Every l-value path assigned anywhere under `bodies`, in first-seen order.
+        Descends through nested `if`/`case` so one pass over the construct knows all
+        the signals it writes — each is then given its own Mux chain."""
+        order: list[str] = []
+        found: set[str] = set()
+
+        def rec(stmt: Any) -> None:
+            for s in self._flatten_stmts(stmt):
+                k = self._stmt_kind(s)
+                if k == "ExpressionStatement":
+                    assign = getattr(s, "expr", None)
+                    if assign is not None and "Assignment" in _kind_name(assign):
+                        for lp in sorted(
+                            self._lvalue_bases(getattr(assign, "left", None))
+                        ):
+                            if lp not in found:
+                                found.add(lp)
+                                order.append(lp)
+                elif k == "Case":
+                    for grp in getattr(s, "items", None) or []:
+                        rec(getattr(grp, "stmt", None))
+                    rec(getattr(s, "defaultCase", None))
+                elif k == "Conditional":
+                    rec(getattr(s, "ifTrue", None))
+                    rec(getattr(s, "ifFalse", None))
+
+        for b in bodies:
+            rec(b)
+        return order
+
+    def _lower_branch(
+        self,
+        body: Any,
+        seeds: dict,
+        logic_id: int,
+        seen: set,
+        consumed: set,
+    ) -> dict:
+        """The endpoint each l-value holds after one branch body runs. Seeded with
+        `seeds` so a branch that does *not* write an l-value falls through to the
+        value it had coming in (rather than to the `else`'s), and so a nested `if`
+        with no `else` inherits the enclosing default. Recurses through nested
+        `if`/`case` via `_lower_seq`, which is how a `case` inside an `if` — never
+        reachable under #207's top-level-only pre-pass — gets lowered at all."""
+        local = dict(seeds)
+        if body is not None:
+            self._lower_seq(body, logic_id, seen, local, consumed)
+        return {
+            lp: self._resolve_pending(local.get(lp), logic_id, seen, consumed)
+            for lp in local
+        }
+
+    def _emit_cond_stmt(
+        self, stmt: Any, logic_id: int, seen: set, values: dict, consumed: set
+    ) -> None:
+        """Lower one `if`/`else if`/`else` into a right-leaning Mux chain per
+        assigned l-value: the branch condition is the select, the branch's value D1,
+        and the rest of the chain (next branch, then the `else` or the fall-through
+        prior write) D0 — the statement form of `_emit_mux`."""
+        branches, else_body = self._cond_chain(stmt)
+        order = self._assigned_lvalues(
+            [b for _, b in branches] + ([else_body] if else_body is not None else [])
+        )
+        if not order:
+            return
+        # Each l-value's incoming value, resolved once and shared by every branch
+        # that does not overwrite it (so the default's gates are emitted once).
+        seeds = {
+            lp: self._resolve_pending(values.pop(lp, None), logic_id, seen, consumed)
+            for lp in order
+        }
+        # An absent `else` leaves every l-value at its incoming value — the same
+        # fall-through model a `case` without `default:` uses, so a combinational
+        # `if` does not read as a latch in the view.
+        else_vals = (
+            self._lower_branch(else_body, seeds, logic_id, seen, consumed)
+            if else_body is not None
+            else dict(seeds)
+        )
+        branch_vals = [
+            (cond, self._lower_branch(body, seeds, logic_id, seen, consumed))
+            for cond, body in branches
+        ]
+        for lp in order:
+            acc = else_vals.get(lp)
+            for cond, vals in reversed(branch_vals):
+                nid = self._add_gate("Mux", cond, logic_id, "Conditional")
+                self._wire_input(
+                    nid, self._emit_expr(cond, logic_id, seen), seen, "sel"
+                )
+                self._wire_input(nid, vals.get(lp), seen, "d1")
+                self._wire_input(nid, acc, seen, "d0")
+                acc = ("node", nid)
+            if acc is not None and acc[0] == "node":
+                values[lp] = acc
 
     def _emit_case_stmt(
-        self, case: Any, logic_id: int, seen: set, prior: dict, consumed: set
+        self, case: Any, logic_id: int, seen: set, values: dict, consumed: set
     ) -> None:
         """Lower one `case` statement: build a priority-mux chain per assigned
-        l-value and wire its root out to that l-value."""
+        l-value and record its root as that l-value's new value (`_lower_stmts`
+        wires the final one out, so a nested `case` feeds its enclosing Mux
+        instead of driving the signal twice)."""
         case_expr = getattr(case, "expr", None)
         const_idiom = self._is_case_true(case_expr)
         # Per-l-value branches in source (priority) order: [(labels, rhs), ...].
@@ -1546,18 +1705,17 @@ class Elaborator:
                     default_rhs[lp] = getattr(dassign, "right", None)
         for lp in order:
             drhs = default_rhs.get(lp)
-            if drhs is None and lp in prior:
-                pnode, drhs = prior.pop(lp)
-                self._mark_consumed(pnode, consumed)
-            default_ep = (
-                self._emit_expr(drhs, logic_id, seen) if drhs is not None else None
-            )
+            if drhs is not None:
+                default_ep = self._emit_expr(drhs, logic_id, seen)
+            else:
+                default_ep = self._resolve_pending(
+                    values.pop(lp, None), logic_id, seen, consumed
+                )
             root = self._emit_case_chain(
                 per_lhs[lp], case_expr, const_idiom, default_ep, logic_id, seen
             )
             if root is not None:
-                # `_wire_out` accepts a ("path", str) l-value directly.
-                self._wire_out(root, ("path", lp), seen)
+                values[lp] = ("node", root)
 
     def _emit_case_chain(
         self,
