@@ -288,8 +288,8 @@ return to the indicated loop-back point rather than proceeding.
   drawn as IEEE distinctive glyphs, with inverter folding, inline constant/parameter
   tie values, `Concat` primitives, memory-array read operands, and `case` statements
   lowered to priority-mux trees. Harness side is `--gate-level`; frontend side is a
-  Settings toggle. **Open follow-up: #215** (`if`/`else` statement lowering — the
-  `case` sibling; not implemented).
+  Settings toggle. `if`/`else` statements lower into the same Mux chains (#215),
+  which also makes a `case` nested inside an `if` reachable.
 - **Memory glyph** (#112; **ADR 0004 amendment**) — an unpacked-array `Var` re-kinds
   to `Memory` and renders as a MEMORY glyph with `Addr`/`Din`/`Dout` pins from typed
   `mem_port` edges, plus depth and an INIT marker from `$readmemh`/`$readmemb`.

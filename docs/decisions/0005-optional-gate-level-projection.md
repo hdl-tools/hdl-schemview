@@ -1,6 +1,6 @@
 # ADR 0005 — Optional gate-level projection over the model spine
 
-- **Status:** Accepted; implemented (#157 PR1–PR5, #199, #206, #207). One follow-up open: #215
+- **Status:** Accepted; implemented (#157 PR1–PR5, #199, #206, #207, #215)
 - **Date:** 2026-07-18
 - **Deciders:** project maintainers
 - **Relates to:** ROADMAP Phase 3d; issue #157 (this change); **amends/extends** [ADR 0004](0004-internal-logic-schematic-granularity.md); builds on #112/#160 (memory glyph, landed)
@@ -136,8 +136,20 @@ extending the existing `_add_logic` `$ff{nid}` scheme.
   flat expression pass via a `consumed` set keyed on **source-range offsets**, never pyslang
   wrapper `id()`: pyslang re-wraps a node per traversal, so `id()` is unstable across the two
   passes and its reuse made node output hash-seed dependent.
-  §1's `if`/`else` → `Mux` remains a tracked follow-up (**#215, still open** — no
-  `ConditionalStatement` pre-pass exists in the harness).
+- **Follow-up (#215) — LANDED**: §1's `if`/`else` → `Mux` completes the same pre-pass. An
+  `if`/`else if`/`else` cascade folds into the same right-leaning `Mux` chain (condition →
+  `sel`, branch value → `d1`, rest-of-chain → `d0`), and an `if` with no `else` falls through
+  to the prior write, so a combinational `if` does not read as a latch. Two structural
+  consequences: the pre-pass now **recurses into branch bodies**, which is what makes a `case`
+  nested inside an `if` reachable at all (#207's walk was top-level only); and the wire-out
+  moved to the *end* of the block, keyed on each l-value's final value, so a nested construct
+  feeds its enclosing `Mux` instead of driving the signal a second time. Still additive —
+  `schema_version` stays `1` and the flag-off output is byte-identical.
+- A consequence worth recording: because the tally in `access_ports` counted *any* edge into a
+  bare interface's members, the extra gate reads #215 surfaced flipped a bundle's access-port
+  side **in the process-level graph**, which draws no gates. The tally now skips gate
+  primitives, so a bundle's pin placement is projection-independent — the invariant #157
+  claimed but had never been forced.
 
 ### As built — three refinements beyond the original slice
 

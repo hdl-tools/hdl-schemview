@@ -516,6 +516,53 @@ fn bare_interface_exposes_one_access_port_per_connection_style() {
     assert!(fanout >= 5, "raw port fans out to core pins, got {fanout}");
 }
 
+// A bare interface's access-port side is a *structural* fact about who connects to
+// the bundle, so it must not shift when the opt-in gate-level pass (#157) dissolves
+// a block into primitives that happen to read a member. #215 made this visible: once
+// `if`/`else` lowered to muxes, gate reads of `bus.ready`/`bus.rdata` outvoted the
+// real drivers and flipped the raw port east — in the *process-level* graph, which
+// draws no gates at all. The tally skips gate primitives so the two projections agree.
+#[test]
+fn interface_raw_access_port_ignores_gate_primitive_taps() {
+    let d = design();
+    let raw_side = |proj| {
+        let g = scope_graph_with(&d, "picorv32_soc.g_lane[0]", proj).expect("scope graph");
+        let bus = g.nodes.iter().find(|n| n.label == "bus").expect("bus box");
+        bus.ports
+            .iter()
+            .find(|p| p.name == "mem_if")
+            .expect("raw access port")
+            .side
+    };
+    assert_eq!(
+        raw_side(Projection::ProcessLevel),
+        raw_side(Projection::GateLevel),
+        "the bundle's access-port side is projection-independent"
+    );
+    assert_eq!(
+        raw_side(Projection::ProcessLevel),
+        Side::West,
+        "the bundle is mostly driven into by its real structural connections"
+    );
+
+    // Non-vacuity: gate primitives really do tap the bundle's members here, so the
+    // assertions above exercise the skip rather than passing for lack of gates.
+    let bus = id(&d, "picorv32_soc.g_lane[0].bus");
+    let members: std::collections::HashSet<NodeId> =
+        d.node(bus).expect("bus").children.iter().copied().collect();
+    let gate_taps = d
+        .edges()
+        .iter()
+        .filter(|e| {
+            members.contains(&e.endpoint) && d.node(e.port).is_some_and(|n| n.kind == NodeKind::Mux)
+        })
+        .count();
+    assert!(
+        gate_taps > 0,
+        "expected gate-level muxes tapping bus members, else this test is vacuous"
+    );
+}
+
 #[test]
 fn modport_interface_port_has_directional_pins() {
     // Inside the consumer, its modport-qualified interface port renders as a
@@ -1618,16 +1665,20 @@ fn dangling_gate_output_is_labelled_with_its_floating_net() {
     let g = scope_graph_with(&d, "picorv32_soc.g_lane[0].core", Projection::GateLevel)
         .expect("gate-level graph");
     // `wire mem_busy = |{…}` is assigned but never read → its reduction-or dangles.
-    let or = g
+    // Anchored on the driven net rather than the gate's synthetic id (`$orNNN`),
+    // which renumbers whenever the gate pass emits more primitives (#207, #215).
+    let (or, out) = g
         .nodes
         .iter()
-        .find(|n| n.path == "picorv32_soc.g_lane[0].core.$assign202.$or812")
+        .find_map(|n| {
+            let p = n
+                .ports
+                .iter()
+                .find(|p| p.side == Side::East && p.path.ends_with(".mem_busy"))?;
+            Some((n, p))
+        })
         .expect("mem_busy reduction-or gate");
-    let out = or
-        .ports
-        .iter()
-        .find(|p| p.side == Side::East)
-        .expect("gate output pin");
+    assert_eq!(or.kind, NodeKind::Or, "`|{{…}}` is a reduction-or");
     assert!(
         out.dangling,
         "mem_busy has no reader, so the output dangles"
@@ -1653,16 +1704,22 @@ fn mux_reading_a_memory_element_wires_to_the_array() {
         .expect("gate-level graph");
     // `cpuregs_rs1 = decoded_rs1 ? cpuregs[decoded_rs1] : 0` — the true branch reads the
     // register-file array, dissolved into `.core` from its `$comb376` process.
-    let mux = g
+    // Anchored on the array read rather than the mux's synthetic id (`$muxNNN`),
+    // which renumbers whenever the gate pass emits more primitives (#207, #215).
+    let (mux, d1) = g
         .nodes
         .iter()
-        .find(|n| n.path == "picorv32_soc.g_lane[0].core.$comb376.$mux1305")
+        .filter(|n| n.kind == NodeKind::Mux)
+        .find_map(|n| {
+            let p = n.ports.iter().find(|p| p.path.ends_with(".cpuregs"))?;
+            Some((n, p))
+        })
         .expect("cpuregs read mux");
-    let d1 = mux
-        .ports
-        .iter()
-        .find(|p| p.path.ends_with(".cpuregs"))
-        .expect("data input wired to the cpuregs array");
+    assert!(
+        mux.path.contains(".$mux"),
+        "the reader is a synthesized mux primitive: {}",
+        mux.path
+    );
     assert_eq!(d1.side, Side::West, "a data branch is a west input");
     // The input is really wired to the cpuregs Memory box, not left dangling.
     assert!(

@@ -425,6 +425,152 @@ def test_multi_label_case_item_ors_its_selects(tmp_path: Path) -> None:
     assert _check_invariants(model) == []
 
 
+# --- if/else -> mux tree lowering (#215) --------------------------------------
+
+
+def test_if_else_becomes_mux(tmp_path: Path) -> None:
+    """`if (c) y = a; else y = b;` lowers to one Mux — the condition is the select,
+    the true branch D1 and the false branch D0. Before #215 the flat pass collected
+    both branch assignments independently and dropped `c` entirely."""
+    model = _model(
+        tmp_path,
+        "  input logic c, a, b, output logic y);\n"
+        "  always_comb begin\n"
+        "    if (c) y = a;\n"
+        "    else y = b;\n"
+        "  end",
+    )
+    assert len(_gates(model, "Mux")) == 1, [n["kind"] for n in model["nodes"]]
+    by = _by_id(model)
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "sel")["endpoint"]]["name"] == "c"
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["name"] == "a"
+    assert by[_mux_edge(model, root["id"], "d0")["endpoint"]]["name"] == "b"
+    assert _check_invariants(model) == []
+
+
+def test_else_if_chain_nests_right_leaning(tmp_path: Path) -> None:
+    """An `else if` cascade nests into a right-leaning Mux chain, the same shape
+    `_emit_case_chain` builds for a priority `case`."""
+    model = _model(
+        tmp_path,
+        "  input logic c0, c1, a, b, d, output logic y);\n"
+        "  always_comb begin\n"
+        "    if (c0) y = a;\n"
+        "    else if (c1) y = b;\n"
+        "    else y = d;\n"
+        "  end",
+    )
+    assert len(_gates(model, "Mux")) == 2, [n["kind"] for n in model["nodes"]]
+    by = _by_id(model)
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "sel")["endpoint"]]["name"] == "c0"
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["name"] == "a"
+    inner = by[_mux_edge(model, root["id"], "d0")["endpoint"]]
+    assert inner["kind"] == "Mux"
+    assert by[_mux_edge(model, inner["id"], "sel")["endpoint"]]["name"] == "c1"
+    assert by[_mux_edge(model, inner["id"], "d1")["endpoint"]]["name"] == "b"
+    assert by[_mux_edge(model, inner["id"], "d0")["endpoint"]]["name"] == "d"
+    assert _check_invariants(model) == []
+
+
+def test_if_without_else_folds_the_prior_assignment(tmp_path: Path) -> None:
+    """An `if` with no `else` takes the most-recent prior write as its D0, so a
+    combinational `if` does not imply a latch in the view — the same fall-through
+    default model #207 uses for a `case` with no `default:`."""
+    model = _model(
+        tmp_path,
+        "  input logic s, a, c, output logic y);\n"
+        "  always_comb begin\n"
+        "    y = c;\n"
+        "    if (s) y = a;\n"
+        "  end",
+    )
+    by = _by_id(model)
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "sel")["endpoint"]]["name"] == "s"
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["name"] == "a"
+    assert by[_mux_edge(model, root["id"], "d0")["endpoint"]]["name"] == "c"
+    assert _check_invariants(model) == []
+
+
+def test_if_branch_read_wires_its_producer(tmp_path: Path) -> None:
+    """The #202/#207 regression in its `if` form: a signal read *only* inside an
+    `if` branch is wired into the Mux, so its producer is no longer a readerless
+    dangling output."""
+    model = _model(
+        tmp_path,
+        "  input logic s, a, b, c, output logic y);\n"
+        "  logic prod;\n"
+        "  assign prod = a & b;\n"
+        "  always_comb begin\n"
+        "    y = c;\n"
+        "    if (s) y = prod;\n"
+        "  end",
+    )
+    by = _by_id(model)
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["name"] == "prod"
+    prod = next(n for n in model["nodes"] if n["name"] == "prod")
+    assert any(e["endpoint"] == prod["id"] and e["dir"] == "out"
+               and by[e["port"]]["kind"] == "And" for e in model["edges"])
+    assert _check_invariants(model) == []
+
+
+def test_lowered_branch_gate_is_not_also_wired_out(tmp_path: Path) -> None:
+    """The `consumed` guard: a branch RHS that *does* build a gate feeds the Mux
+    and must not additionally be wired straight to the l-value by the flat pass —
+    otherwise the signal would show two drivers, which is what the pre-#215 output
+    did for every `if`/`else`."""
+    model = _model(
+        tmp_path,
+        "  input logic c, a, b, d, output logic y);\n"
+        "  always_comb begin\n"
+        "    if (c) y = a & b;\n"
+        "    else y = d;\n"
+        "  end",
+    )
+    by = _by_id(model)
+    # Keyed on the endpoint's *name*: a port and its backing net are two nodes
+    # (the whitelisted dual-node pattern) and the gate edge lands on the net.
+    # The process-level `Comb` edge coexists by design — only gate drivers matter.
+    drivers = [by[e["port"]] for e in model["edges"]
+               if e["dir"] == "out" and by[e["endpoint"]]["name"] == "y"]
+    gate_drivers = [n["kind"] for n in drivers if n["kind"] in GATE_KINDS]
+    assert gate_drivers == ["Mux"], [(n["kind"], n["path"]) for n in drivers]
+    # The And still exists — it feeds the Mux's D1 rather than the signal.
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "d1")["endpoint"]]["kind"] == "And"
+    assert _check_invariants(model) == []
+
+
+def test_case_nested_inside_if_is_lowered(tmp_path: Path) -> None:
+    """#207's pre-pass was top-level only, so a `case` inside an `if` was never
+    lowered. Descending into the branches makes it reachable."""
+    model = _model(
+        tmp_path,
+        "  input logic en, s0, a, b, output logic y);\n"
+        "  always_comb begin\n"
+        "    y = 1'b0;\n"
+        "    if (en) begin\n"
+        "      case (1'b1)\n"
+        "        s0: y = a;\n"
+        "      endcase\n"
+        "    end else y = b;\n"
+        "  end",
+    )
+    by = _by_id(model)
+    # Outer if-mux on `en`, inner case-mux on `s0`.
+    root = _root_mux_for(model, "y")
+    assert by[_mux_edge(model, root["id"], "sel")["endpoint"]]["name"] == "en"
+    assert by[_mux_edge(model, root["id"], "d0")["endpoint"]]["name"] == "b"
+    inner = by[_mux_edge(model, root["id"], "d1")["endpoint"]]
+    assert inner["kind"] == "Mux", [n["kind"] for n in model["nodes"]]
+    assert by[_mux_edge(model, inner["id"], "sel")["endpoint"]]["name"] == "s0"
+    assert by[_mux_edge(model, inner["id"], "d1")["endpoint"]]["name"] == "a"
+    assert _check_invariants(model) == []
+
+
 # --- the byte-identical guarantee: flag OFF changes nothing --------------------
 
 REPO = Path(__file__).resolve().parents[2]
