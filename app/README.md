@@ -196,7 +196,7 @@ collaborators only.
 
 | OS | Artifact | Webview runtime |
 | --- | --- | --- |
-| Windows | NSIS installer, built with `--config tauri.offline.conf.json` | **Vendored.** `webviewInstallMode: fixedRuntime` puts a pinned WebView2 inside the install directory — no network, no admin rights, no dependency on what the machine already has (~180 MB). |
+| Windows | NSIS installer, built with `--config tauri.offline.conf.json` | **Vendored.** `webviewInstallMode: fixedRuntime` puts a pinned WebView2 inside the install directory — no network, no admin rights, no dependency on what the machine already has (the pinned 150.0.4078.99 cab is ~284 MB, more once expanded). |
 | Linux | **AppImage** | Bundled inside the AppImage. |
 | macOS | `.app` / `.dmg` | WKWebView is part of the OS. |
 
@@ -210,7 +210,10 @@ bundle is an overlay:
 ```bash
 # One-time: download the "Fixed Version" runtime .cab from
 #   https://developer.microsoft.com/microsoft-edge/webview2/
-# and expand it to app/src-tauri/webview2-runtime/ (gitignored, ~180 MB).
+# and expand it to app/src-tauri/webview2-runtime/ (gitignored; the cab is
+#   ~284 MB for the pinned 150.0.4078.99, more once expanded). On Windows use
+#   expand.exe by full path — in Git Bash a bare `expand` is GNU coreutils'
+#   tabs-to-spaces filter, not the cab extractor.
 npm run tauri build -- --config tauri.offline.conf.json --bundles nsis
 ```
 
@@ -259,10 +262,9 @@ The **App** workflow (`.github/workflows/app.yml`) has three jobs:
   stages the installers flat, writes `SHA256SUMS`, and opens a **draft** GitHub
   Release for a human to check and publish. See **`docs/releasing.md`**.
 
-> ⚠️ `WEBVIEW2_CAB_URL` is **not set yet**, so the Windows `bundle` leg fails. Since
-> `release` is `needs: [build, bundle]`, a tag pushed today would run the full 3-OS
-> build and publish **nothing** — set the variable first. `docs/releasing.md`
-> §Prerequisites has the details.
+`release` is `needs: [build, bundle]`, so **one failed OS leg publishes nothing**
+rather than a partial release. `docs/releasing.md` §Prerequisites lists what to
+confirm before pushing a tag (`WEBVIEW2_CAB_URL`, Actions quota).
 
 The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
 `svxprobe-gui` logic it wraps is what that gate covers.

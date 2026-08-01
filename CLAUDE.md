@@ -360,9 +360,12 @@ fast PR signal) and **`bundle`** (#240 — a real `tauri build` on Ubuntu + Wind
 **macOS**, uploading each artifact; `cargo build` never exercises the bundler, so
 NSIS/AppImage/`.app` breakage would otherwise surface only at release). `bundle` skips
 pull requests, since macOS bills at 10× minutes on a private repo, and needs the
-`WEBVIEW2_CAB_URL` repo variable for the Windows fixed-runtime payload — **still
-unset**, so the Windows leg currently fails, which (see `release` below) means a tag
-push would publish nothing until it is set. The third,
+`WEBVIEW2_CAB_URL` repo variable for the Windows fixed-runtime payload (set
+2026-08-01; since `release` is `needs: [build, bundle]`, an unset variable fails the
+Windows leg and publishes nothing rather than a partial release). Extracting that
+`.cab` **must call `expand.exe` by full path**: the step runs under Git Bash, where a
+bare `expand` resolves to GNU coreutils' tabs-to-spaces filter and dies on `-F:`,
+which is what broke every Windows bundle up to 2026-08-01. The third,
 **`release`** (#248), fires only on a `v*` **tag** push — the trigger added alongside
 `branches: [main]`, which the `paths:` filter does not suppress because GitHub does not
 evaluate path filters for tag pushes. It `needs: [build, bundle]` (so a red test suite

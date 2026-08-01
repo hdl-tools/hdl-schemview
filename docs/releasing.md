@@ -30,8 +30,12 @@ produces a partial release: they produce **no** release.
   Because `release` is `needs: [build, bundle]`, **one failed OS leg skips the
   release job entirely**. That is the intended behaviour — no half-populated
   releases — but it means an unset variable turns a tag push into a full 3-OS
-  build that publishes nothing. As of #248 this variable is **not yet set**, and
-  the Windows bundle leg is failing on `main` for exactly this reason.
+  build that publishes nothing.
+
+  Set as of 2026-08-01, pinning
+  `Microsoft.WebView2.FixedVersionRuntime.150.0.4078.99.x64` (a ~284 MB `.cab`).
+  Re-pinning is an ordinary edit of the variable; the cache key includes the URL,
+  so a new one invalidates the cached runtime automatically.
 
 - **Actions quota.** `bundle` builds on all three OSes and macOS bills at 10× on a
   private repo. A tag pushed with the quota exhausted fails instantly with
