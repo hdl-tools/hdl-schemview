@@ -193,7 +193,7 @@ Three layers, because no single tool covers all the axes:
    | `cache_hit` | warm path (#21): mmap + validating access + **deserialize** + index build |
    | `access_checked` | mmap + bytecheck validation only — no deserialize (#155) |
    | `access_unchecked` | same without validation, to price validation separately (#155) |
-   | `nav` | load, then walk 32 scopes × 3 iterations (`scope_graph`/`expand`/`nodes_at_path`/`nodes_at_source`) plus one high-fan-out `cone()`; reports the latency spread **and** the sustained working set |
+   | `nav` | load, then walk 32 scopes × 3 iterations (`scope_graph`/`expand`/`nodes_at_path`/`nodes_at_source`) plus one high-fan-out cone on the hottest net — measured **twice**, as the uncapped legacy `cone()` (`cone_ms`/`cone_nodes`, ADR 0003's baseline) and as #244's capped `cone_with()` (`cone_with_ms`/`cone_with_nodes`/`cone_with_truncated`), so the fan-out cliff and the level-of-detail answer to it sit on one row; reports the latency spread **and** the sustained working set |
    | `match` | matcher wall + RSS at 1K / 10K / 100K signals |
 
    The model JSON is **copied into a temp dir** before loading, so `from_path`'s
@@ -329,6 +329,50 @@ Two things to read here:
 in the matrix that misses the sub-second-and-comfortable bar, and it is a *fan-out traversal*
 cost — no storage backend makes a 59K-node cone cheap. This is the concrete target for the
 level-of-detail work, and it is exactly ADR 0003's "third outcome".
+
+### The level-of-detail answer to that cliff (#244)
+
+`cone_with` is the capped rebuild. `nav` now walks **both** on the same seed, so the two are
+directly comparable within a run. Measured 2026-08-01 on a slower machine than the table above
+— compare rows *within* this table, never against the 2026-07-26 absolutes:
+
+| basis | hot fanout | legacy `cone` | boxes | `cone_with` | boxes | truncated |
+|---|--:|--:|--:|--:|--:|--:|
+| golden | 111 | 0.08 ms | 1 | 5.08 ms | 227 | yes |
+| 100K | 10,000 | 40.6 ms | 10,000 | 0.55 ms | 90 | yes |
+| 1M | 59,049 | 522.6 ms | 59,049 | **3.12 ms** | 90 | yes |
+
+**The cliff is answered.** At 1M the same seed goes 522.6 ms → **3.12 ms**, inside the one-frame
+(16 ms) budget `ConeLimits` was chosen against, with the truncation reported rather than hidden
+(`SchPort.more` / `SchematicGraph.truncated`). The defaults are `depth: 4` / `fanout: 32` /
+`boxes: 500` — the box budget was corrected from an extrapolated 2000 once `golden` gave a
+measured **31 µs/box** (227 boxes in 7.11 ms), roughly 4× the ~8 µs the extrapolation assumed. The capped walk is flat at 90 boxes from 100K to
+1M because `fanout: 32` binds at the first hop — which is the behaviour #244 PR1 asserted but,
+until this run, had never measured (see the fixture note below).
+
+Two caveats worth keeping:
+
+- **`truncated` is set on `golden` too.** #244 PR1's description reasoned that no committed
+  fixture net would truncate at the defaults, counting `resetn`'s 11 *box* loads; the flag says
+  otherwise at its 111 raw degree. Nothing is lost — truncation is visible by construction — but
+  the "no fixture net truncates" claim does not hold.
+- Legacy `cone` and `cone_with` answer *different questions* on the same seed (the legacy
+  direction filter is side-blind; see below), so the box counts are not two measurements of one
+  quantity. The comparison that matters is cost-to-usable-answer.
+
+#### Fixture note: the synthetic clock edge direction
+
+The generator used to wire every flop as a **driver** of `clk` (`b.edge(ff, clock_net,
+Dir::Out)`; `Edge.dir` is relative to `e.port`, the flop). That is backwards — a flop *receives*
+its clock — and it only looked right because the legacy filter ignores which end of an edge the
+walk stands on. `cone_with`'s corrected filter therefore found nothing downstream and reported
+**zero boxes** on every synthetic basis, which is why the cap went unmeasured at scale.
+
+The fixture now emits `Dir::In`. Because the legacy filter is side-blind, `nav`, `benches/query.rs`
+and `bin/report.rs` pass `Dir::In` for a synthetic basis to traverse the identical star at the
+identical cost — `cone_nodes` is unchanged at every size (59,049 at 1M before and after), which is
+the check that keeps ADR 0003's baseline intact. A `golden` or `real` model encodes directions
+normally and keeps `Dir::Out` on both walks, so those rows are untouched.
 
 ### Matcher
 
