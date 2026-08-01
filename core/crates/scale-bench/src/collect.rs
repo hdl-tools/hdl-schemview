@@ -732,25 +732,29 @@ pub fn render(env: &EnvFacts, records: &[Record], notes: &Notes) -> String {
 
     out.push("## Scripted navigation (working set + query spread) (#22)".into());
     out.push(String::new());
+    // `cone` is the uncapped legacy baseline (ADR 0003's fan-out finding);
+    // `cone_with` is #244's capped rebuild on the same seed, so the cliff and the
+    // level-of-detail answer to it read off one row.
     out.push(
         "| basis | load ms | RSS after load MB | peak RSS MB | scope_graph p50/p95 us \
-         | expand p50/p95 us | path p95 us | source p95 us | cone ms | cone nodes | hot fanout |"
+         | expand p50/p95 us | path p95 us | source p95 us | cone ms | cone nodes \
+         | cone_with ms | cone_with boxes | truncated | hot fanout |"
             .into(),
     );
-    out.push("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|".into());
+    out.push("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|".into());
     for r in records.iter().filter(|r| r.mode() == "nav") {
         if !r.ok() {
             // The error takes the `load ms` column and the rest stay empty, so
             // the row keeps the table's arity.
             out.push(format!(
-                "| {} | **FAILED** - {} | | | | | | | | | |",
+                "| {} | **FAILED** - {} | | | | | | | | | | | | |",
                 r.basis(),
                 r.error()
             ));
             continue;
         }
         out.push(format!(
-            "| {} | {} | {} | {} | {} / {} | {} / {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} / {} | {} / {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             r.basis(),
             r.cell("load_ms"),
             r.cell("rss_after_load_mb"),
@@ -763,6 +767,9 @@ pub fn render(env: &EnvFacts, records: &[Record], notes: &Notes) -> String {
             r.cell("nodes_at_source_p95_us"),
             r.cell("cone_ms"),
             r.cell("cone_nodes"),
+            r.cell("cone_with_ms"),
+            r.cell("cone_with_nodes"),
+            r.cell("cone_with_truncated"),
             r.cell("hot_fanout"),
         ));
     }
