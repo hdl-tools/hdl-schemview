@@ -203,8 +203,13 @@ jobs:
           fi
           curl -fsSL -o wv2.cab "$CAB_URL"
           mkdir -p wv2
-          expand wv2.cab -F:* wv2/ >/dev/null
-          # The cab expands to a single versioned directory; normalize the name
+          # Call the Windows cab extractor by FULL PATH. This step runs under Git
+          # Bash, where a bare `expand` resolves to /usr/bin/expand — GNU
+          # coreutils' tabs-to-spaces filter — which rejects -F: with
+          # "expand: unknown option -- F" and takes the whole job down.
+          "${SYSTEMROOT:-C:/Windows}/System32/expand.exe" wv2.cab '-F:*' wv2/ >/dev/null
+          # The cab expands to a single versioned directory
+          # (Microsoft.WebView2.FixedVersionRuntime.<ver>.x64); normalize the name
           # so tauri.offline.conf.json can reference a stable path.
           inner=$(find wv2 -maxdepth 1 -mindepth 1 -type d | head -1)
           mv "$inner" app/src-tauri/webview2-runtime
