@@ -188,6 +188,12 @@ The deployment target is an **isolated machine: no network, no toolchain, no
 package manager** (#240, ADR 0009). An engineer copies one artifact across and
 runs it. Elaboration is *not* part of that — see "Getting a design in" below.
 
+Built artifacts come from a **tagged release** (#248): pushing a `v*` tag publishes
+a draft GitHub Release carrying these bundles plus a `SHA256SUMS` file, so a
+hand-carried installer can be integrity-checked on arrival. **`docs/releasing.md`**
+is the runbook — including the caveat that a private repo's release assets reach
+collaborators only.
+
 | OS | Artifact | Webview runtime |
 | --- | --- | --- |
 | Windows | NSIS installer, built with `--config tauri.offline.conf.json` | **Vendored.** `webviewInstallMode: fixedRuntime` puts a pinned WebView2 inside the install directory — no network, no admin rights, no dependency on what the machine already has (~180 MB). |
@@ -238,20 +244,25 @@ This is already how the #22/#155 benchmark's real-design basis was produced.
 
 ## CI
 
-The **App** workflow (`.github/workflows/app.yml`) has two jobs:
+The **App** workflow (`.github/workflows/app.yml`) has three jobs:
 
 - **`build`** — the fast signal on every PR/push touching `app/**` or
   `core/crates/**`: `npm test`, `npm run build`, then `cargo build` on
   **Ubuntu + Windows**. The Windows leg exercises the `tauri-build` Windows
   Resource/icon embed.
-- **`bundle`** — the packaging path, on **push to `main` and manual dispatch
-  only**, across **Ubuntu + Windows + macOS**. It runs a real `tauri build`
+- **`bundle`** — the packaging path, on **push to `main`, a `v*` tag, and manual
+  dispatch**, across **Ubuntu + Windows + macOS**. It runs a real `tauri build`
   (which `cargo build` never exercises, so NSIS/AppImage/`.app` breakage would
   otherwise surface at release time) and uploads each bundle as an artifact.
   It skips pull requests because macOS bills at 10× minutes on a private repo.
+- **`release`** — on a **`v*` tag only** (#248): downloads the bundle artifacts,
+  stages the installers flat, writes `SHA256SUMS`, and opens a **draft** GitHub
+  Release for a human to check and publish. See **`docs/releasing.md`**.
 
-The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
-`svxprobe-gui` logic it wraps is what that gate covers.
+> ⚠️ `WEBVIEW2_CAB_URL` is **not set yet**, so the Windows `bundle` leg fails. Since
+> `release` is `needs: [build, bundle]`, a tag pushed today would run the full 3-OS
+> build and publish **nothing** — set the variable first. `docs/releasing.md`
+> §Prerequisites has the details.
 
 The fast PR gate (`ci.yml`) does **not** build the app (no webkit); the
 `svxprobe-gui` logic it wraps is what that gate covers.

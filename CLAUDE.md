@@ -31,11 +31,12 @@ core/        Rust workspace — model, ingest, matching, cross-probe, schematic,
 app/         Tauri 2 desktop app — vanilla TS + Vite frontend + thin Rust shell
 elaborate/   Python (pyslang) elaboration harness — produces the golden model JSON
 fixtures/    Committed golden hierarchy + VCD/FST traces (picorv32_soc)
-docs/        ROADMAP, fixtures policy, benchmarking runbook, ADRs (docs/decisions/*)
+docs/        ROADMAP, fixtures policy, benchmarking runbook, release runbook,
+             ADRs (docs/decisions/*)
              ADRs: 0001 RTL-vs-netlist · 0002 open-vs-FSDB · 0003 storage backend ·
              0004 internal-logic granularity · 0005 gate-level projection ·
              0006 HLS C↔RTL tracing · 0007 semantic name coloring ·
-             0008 lexical source highlighting
+             0008 lexical source highlighting · 0009 packaging for isolation
 ```
 
 Data flow (end to end):
@@ -353,13 +354,28 @@ pytest, schema validation, an **RTL `always_ff` driver lint** — VCS rejects a 
 written by `always_ff` that has any other procedural driver, IEEE 1800 §9.2.2.4, while
 slang and Verilator accept it — and **golden reproducibility**, which re-elaborates
 `fixtures/picorv32_soc/golden/hierarchy.json` with **`--gate-level --name-refs`** and
-diffs it), Ubuntu, on push/PR. `app.yml` — **two** jobs, when `app/` or `core/crates/`
+diffs it), Ubuntu, on push/PR. `app.yml` — **three** jobs, when `app/` or `core/crates/`
 change: `build` (`npm test` + `npm run build` + `cargo build` on Ubuntu + Windows, the
 fast PR signal) and **`bundle`** (#240 — a real `tauri build` on Ubuntu + Windows +
 **macOS**, uploading each artifact; `cargo build` never exercises the bundler, so
 NSIS/AppImage/`.app` breakage would otherwise surface only at release). `bundle` skips
 pull requests, since macOS bills at 10× minutes on a private repo, and needs the
-`WEBVIEW2_CAB_URL` repo variable for the Windows fixed-runtime payload.
+`WEBVIEW2_CAB_URL` repo variable for the Windows fixed-runtime payload — **still
+unset**, so the Windows leg currently fails, which (see `release` below) means a tag
+push would publish nothing until it is set. The third,
+**`release`** (#248), fires only on a `v*` **tag** push — the trigger added alongside
+`branches: [main]`, which the `paths:` filter does not suppress because GitHub does not
+evaluate path filters for tag pushes. It `needs: [build, bundle]` (so a red test suite
+or one failed OS leg blocks it — no partial releases), downloads every bundle artifact,
+stages just the installers flat (`.exe`/`.AppImage`/`.deb`/`.dmg` — the macOS `.app` is
+a directory of thousands of files), writes `SHA256SUMS`, and creates a **draft** release
+for a human to check and publish (macOS stays unverified end-to-end, ADR 0009). Its
+`contents: write` is **job-level**, so the PR-running jobs keep the workflow's default
+read token; `bundle`'s first step on a tag asserts the tag and all three manifests
+(`tauri.conf.json`, `app/package.json`, `app/src-tauri/Cargo.toml`, all `0.1.0`) carry
+one version — a tag/`tauri.conf.json` mismatch *breaks* the release, since the bundle
+*filenames* come from that config, while the other two are cosmetic; both are reported
+in one run and both fail. Runbook: `docs/releasing.md`.
 `nightly.yml` — **three** jobs: `repro-tier1` (Verilator trace regeneration),
 `stress-tier2` (Ibex, `continue-on-error`), and `scale-bench` (the scalability
 collector, `continue-on-error`, uploads a `scale-bench-metrics` artifact).
