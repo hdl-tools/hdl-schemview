@@ -69,6 +69,16 @@ enum Cmd {
         /// Cone depth.
         #[arg(long, default_value_t = 2)]
         depth: usize,
+        /// Use the rebuilt cone extractor (#244) at this projection
+        /// (process-level | gate-level). Selecting either this or --fanout
+        /// switches away from the legacy extractor, whose output is kept as a
+        /// stable contract.
+        #[arg(long)]
+        projection: Option<String>,
+        /// Max boxes reached through one signal per hop; implies the rebuilt
+        /// extractor. Truncation is reported, never silent.
+        #[arg(long)]
+        fanout: Option<usize>,
         /// Emit the graph as JSON.
         #[arg(long)]
         json: bool,
@@ -117,10 +127,21 @@ fn main() -> Result<()> {
             model,
             scope,
             cone,
+            projection,
+            fanout,
             dir,
             depth,
             json,
-        } => graph_cmd(&model, &scope, cone, &dir, depth, json),
+        } => graph_cmd(GraphArgs {
+            model,
+            scope,
+            cone,
+            dir,
+            depth,
+            projection,
+            fanout,
+            json,
+        }),
         Cmd::Probe {
             model,
             trace,
@@ -257,15 +278,32 @@ fn match_cmd(
     Ok(())
 }
 
-fn graph_cmd(
-    model: &str,
-    scope: &str,
+/// Arguments for `graph`, grouped like [`ProbeArgs`] so the subcommand can grow
+/// flags without tripping the argument-count lint.
+struct GraphArgs {
+    model: String,
+    scope: String,
     cone: Option<String>,
-    dir: &str,
+    dir: String,
     depth: usize,
+    projection: Option<String>,
+    fanout: Option<usize>,
     json: bool,
-) -> Result<()> {
+}
+
+fn graph_cmd(args: GraphArgs) -> Result<()> {
     use svxprobe_model::Dir;
+    let GraphArgs {
+        model,
+        scope,
+        cone,
+        dir,
+        depth,
+        projection,
+        fanout,
+        json,
+    } = args;
+    let (model, scope, dir) = (model.as_str(), scope.as_str(), dir.as_str());
     let design = svxprobe_ingest::from_path(model)?;
 
     let graph = if let Some(net) = cone {
@@ -278,7 +316,25 @@ fn graph_cmd(
             "out" => Dir::Out,
             _ => Dir::Inout,
         };
-        svxprobe_schematic::cone(&design, start, d, depth)
+        // Either new flag opts into the rebuilt extractor (#244). Absent both,
+        // the legacy one runs untouched: it is this command's output contract
+        // and the scale-bench fan-out baseline ADR 0003 is measured against.
+        if projection.is_some() || fanout.is_some() {
+            let proj = match projection.as_deref() {
+                Some("gate-level") => svxprobe_schematic::Projection::GateLevel,
+                Some("process-level") | None => svxprobe_schematic::Projection::ProcessLevel,
+                Some(other) => {
+                    anyhow::bail!("unknown projection {other:?} (process-level | gate-level)")
+                }
+            };
+            let mut limits = svxprobe_schematic::ConeLimits::depth(depth);
+            if let Some(f) = fanout {
+                limits.fanout = f;
+            }
+            svxprobe_schematic::cone_with(&design, start, d, limits, proj)
+        } else {
+            svxprobe_schematic::cone(&design, start, d, depth)
+        }
     } else {
         svxprobe_schematic::scope_graph(&design, scope)
             .with_context(|| format!("scope not found: {scope}"))?
