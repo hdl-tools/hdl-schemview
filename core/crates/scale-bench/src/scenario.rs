@@ -209,6 +209,31 @@ fn synth_config(basis: &str) -> Option<crate::SynthConfig> {
     }
 }
 
+/// Whether a basis is one of the generated synthetic sizes.
+///
+/// This decides the direction the **legacy** `cone` is walked in `nav`. The
+/// generator wires each flop as a *load* of `clk` (the flop receives the clock,
+/// so the edge's `dir` — which is relative to `e.port`, the flop — is `In`), and
+/// the legacy filter is side-blind, so it needs `Dir::In` to traverse that star.
+/// A golden or real model encodes directions normally and keeps `Dir::Out`.
+///
+/// Both walk the same edge set at the same cost as before the fixture was
+/// corrected, so the ADR 0003 fan-out baseline is preserved on every basis.
+/// `cone_with`'s corrected filter needs no such split — `Dir::Out` is the true
+/// fan-out on both.
+///
+/// Without the `synth` feature no synthetic basis can be materialized at all
+/// (`source_bytes` rejects it), so `false` is the right answer there.
+#[cfg(feature = "synth")]
+fn is_synthetic_basis(basis: &str) -> bool {
+    synth_config(basis).is_some()
+}
+
+#[cfg(not(feature = "synth"))]
+fn is_synthetic_basis(_basis: &str) -> bool {
+    false
+}
+
 /// Produce the model JSON bytes for a basis: generated for a synthetic size,
 /// embedded for `golden`, read from disk for `real`.
 ///
@@ -442,8 +467,17 @@ fn run_nav(args: &ScenarioArgs) -> Result<String, String> {
             src_us.push(t0.elapsed().as_secs_f64() * 1e6);
         }
     }
+    // See `is_synthetic_basis`: the legacy filter is side-blind, so the synthetic
+    // clock star is traversed from `Dir::In` and a real/golden model from
+    // `Dir::Out`. Either way this is the uncapped baseline ADR 0003's fan-out
+    // finding is measured against, walking the same edges at the same cost.
+    let legacy_dir = if is_synthetic_basis(&args.basis) {
+        Dir::In
+    } else {
+        Dir::Out
+    };
     let t_cone = Instant::now();
-    let cone = svxprobe_schematic::cone(&design, handles.hot_net, Dir::Out, CONE_DEPTH);
+    let cone = svxprobe_schematic::cone(&design, handles.hot_net, legacy_dir, CONE_DEPTH);
     let cone_ms = t_cone.elapsed().as_secs_f64() * 1e3;
     // The capped rebuild (#244) on the same seed, so the fan-out cliff and the
     // level-of-detail answer to it sit in one row. `cone` above stays the
