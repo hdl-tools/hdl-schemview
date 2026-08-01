@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 
 use svxprobe_model::{Design, Dir, NodeId, NodeKind};
-use svxprobe_schematic::{cone, scope_graph, scope_graph_with, PinRole, Projection, Side};
+use svxprobe_schematic::{
+    cone, cone_with, scope_graph, scope_graph_with, ConeLimits, PinRole, Projection,
+    SchematicGraph, Side,
+};
 
 fn design() -> Design {
     let golden = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1727,5 +1730,321 @@ fn mux_reading_a_memory_element_wires_to_the_array() {
             .iter()
             .any(|e| e.source == d1.id || e.target == d1.id),
         "the memory-read branch connects into the scope"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cone_with (#244) — the rebuilt trace extractor. Structural anchors only:
+// seeds resolve by path, assertions are on kinds and set relations, never ids.
+// ---------------------------------------------------------------------------
+
+const RESETN: &str = "picorv32_soc.g_lane[0].core.resetn";
+const VALID: &str = "picorv32_soc.g_lane[0].bus.valid";
+const MEM_VALID: &str = "picorv32_soc.g_lane[0].core.mem_valid";
+
+fn kinds(g: &SchematicGraph) -> std::collections::HashSet<NodeKind> {
+    g.nodes.iter().map(|n| n.kind).collect()
+}
+
+fn pin_ids(g: &SchematicGraph) -> std::collections::HashSet<NodeId> {
+    g.nodes
+        .iter()
+        .flat_map(|n| n.ports.iter().map(|p| p.id))
+        .collect()
+}
+
+fn gateish(k: &NodeKind) -> bool {
+    matches!(
+        k,
+        NodeKind::And
+            | NodeKind::Or
+            | NodeKind::Xor
+            | NodeKind::Xnor
+            | NodeKind::Nand
+            | NodeKind::Nor
+            | NodeKind::Not
+            | NodeKind::Buf
+            | NodeKind::Mux
+            | NodeKind::Add
+            | NodeKind::Sub
+            | NodeKind::Mul
+            | NodeKind::Cmp
+            | NodeKind::Shift
+            | NodeKind::Concat
+    )
+}
+
+#[test]
+fn cone_with_emits_every_box_kind() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, RESETN),
+        Dir::Inout,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let k = kinds(&g);
+    // The whole point: the legacy cone matched Instance only, so a cone into a
+    // leaf module's internal logic returned edges with no nodes at all.
+    assert_ne!(
+        k,
+        std::collections::HashSet::from([NodeKind::Instance]),
+        "a process-level cone must emit more than instances: {k:?}"
+    );
+    assert!(
+        k.contains(&NodeKind::Ff),
+        "expected a flip-flop box, got {k:?}"
+    );
+}
+
+#[test]
+fn cone_with_endpoints_resolve_to_emitted_pins() {
+    let d = design();
+    for seed in [RESETN, VALID, MEM_VALID] {
+        for proj in [Projection::ProcessLevel, Projection::GateLevel] {
+            let g = cone_with(&d, id(&d, seed), Dir::Inout, ConeLimits::depth(2), proj);
+            let pins = pin_ids(&g);
+            for e in &g.edges {
+                // The layout precondition: nothing can anchor an edge whose
+                // endpoints are not pins of the graph's own nodes.
+                assert!(
+                    pins.contains(&e.source),
+                    "{seed} {proj:?}: edge {} source {} is not an emitted pin",
+                    e.id,
+                    e.source
+                );
+                assert!(
+                    pins.contains(&e.target),
+                    "{seed} {proj:?}: edge {} target {} is not an emitted pin",
+                    e.id,
+                    e.target
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cone_with_dedups_pin_pairs() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, RESETN),
+        Dir::Inout,
+        ConeLimits::depth(3),
+        Projection::ProcessLevel,
+    );
+    let mut seen = std::collections::HashSet::new();
+    for e in &g.edges {
+        assert!(
+            seen.insert((e.source.min(e.target), e.source.max(e.target))),
+            "duplicate wire between one pin pair: {} -> {}",
+            e.source,
+            e.target
+        );
+    }
+}
+
+#[test]
+fn cone_with_root_is_an_openable_scope() {
+    let d = design();
+    for seed in [RESETN, VALID] {
+        let g = cone_with(
+            &d,
+            id(&d, seed),
+            Dir::Inout,
+            ConeLimits::depth(1),
+            Projection::ProcessLevel,
+        );
+        assert!(
+            scope_graph(&d, &g.root).is_some(),
+            "{seed}: root {:?} is not a scope the schematic can open",
+            g.root
+        );
+    }
+}
+
+#[test]
+fn cone_with_honours_projection() {
+    let d = design();
+    let seed = id(&d, RESETN);
+    let proc = cone_with(
+        &d,
+        seed,
+        Dir::Inout,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let gate = cone_with(
+        &d,
+        seed,
+        Dir::Inout,
+        ConeLimits::depth(2),
+        Projection::GateLevel,
+    );
+    assert!(
+        kinds(&gate).iter().any(gateish),
+        "a gate-level cone must decompose combinational logic: {:?}",
+        kinds(&gate)
+    );
+    assert!(
+        !kinds(&proc).iter().any(gateish),
+        "a process-level cone must not expose gate primitives: {:?}",
+        kinds(&proc)
+    );
+}
+
+#[test]
+fn cone_with_fanout_cap_engages() {
+    let d = design();
+    let seed = id(&d, RESETN);
+    for proj in [Projection::ProcessLevel, Projection::GateLevel] {
+        let capped = cone_with(
+            &d,
+            seed,
+            Dir::Inout,
+            ConeLimits {
+                depth: 1,
+                fanout: 4,
+                boxes: 2000,
+            },
+            proj,
+        );
+        let uncapped = cone_with(
+            &d,
+            seed,
+            Dir::Inout,
+            ConeLimits {
+                depth: 1,
+                fanout: usize::MAX,
+                boxes: 2000,
+            },
+            proj,
+        );
+        assert!(capped.truncated, "{proj:?}: the cap must report itself");
+        assert!(
+            capped
+                .nodes
+                .iter()
+                .any(|n| n.ports.iter().any(|p| p.more.is_some_and(|c| c > 0))),
+            "{proj:?}: a dropped connection must surface as a `more` count, not vanish"
+        );
+        // Non-vacuous: without this, an extractor returning an empty graph
+        // would satisfy every assertion above.
+        assert!(
+            uncapped.nodes.len() > capped.nodes.len(),
+            "{proj:?}: capping must actually remove boxes ({} vs {})",
+            uncapped.nodes.len(),
+            capped.nodes.len()
+        );
+        assert!(
+            !uncapped.truncated,
+            "{proj:?}: an uncapped walk is not truncated"
+        );
+    }
+}
+
+#[test]
+fn cone_with_depth_cap_engages() {
+    let d = design();
+    let seed = id(&d, VALID);
+    let shallow = cone_with(
+        &d,
+        seed,
+        Dir::Inout,
+        ConeLimits::depth(1),
+        Projection::ProcessLevel,
+    );
+    let deep = cone_with(
+        &d,
+        seed,
+        Dir::Inout,
+        ConeLimits::depth(3),
+        Projection::ProcessLevel,
+    );
+    assert!(
+        deep.nodes.len() > shallow.nodes.len(),
+        "more hops must reach more boxes ({} vs {})",
+        deep.nodes.len(),
+        shallow.nodes.len()
+    );
+}
+
+#[test]
+fn cone_with_box_budget_engages() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, RESETN),
+        Dir::Inout,
+        ConeLimits {
+            depth: 4,
+            fanout: 32,
+            boxes: 2,
+        },
+        Projection::ProcessLevel,
+    );
+    assert!(g.truncated, "the box budget must report itself");
+    // Bounded is not empty: the budget caps boxes, and the anchor stub is still
+    // emitted so surviving wires keep both endpoints.
+    assert!(
+        !g.edges.is_empty(),
+        "a budgeted cone still draws what it kept"
+    );
+}
+
+#[test]
+fn cone_with_does_not_mark_frontier_pins_dangling() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, RESETN),
+        Dir::Inout,
+        ConeLimits::depth(1),
+        Projection::ProcessLevel,
+    );
+    // In a cone an unwired pin means "beyond the frontier", not "floating in
+    // the design" — dimming it would state a falsehood that the scope graph is
+    // entitled to state and this view is not.
+    assert!(
+        g.nodes.iter().all(|n| n.ports.iter().all(|p| !p.dangling)),
+        "no cone pin may be marked dangling"
+    );
+}
+
+#[test]
+fn cone_with_crosses_hierarchy() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, MEM_VALID),
+        Dir::Inout,
+        ConeLimits::depth(3),
+        Projection::ProcessLevel,
+    );
+    assert!(
+        g.nodes
+            .iter()
+            .any(|n| !n.path.is_empty() && !n.path.starts_with("picorv32_soc.g_lane[0].core.")),
+        "a trace must leave the seed's own scope: {:?}",
+        g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn cone_is_unchanged() {
+    // The legacy extractor is the `svxprobe graph --cone` output contract and
+    // the scale-bench fan-out baseline; cone_with must not have perturbed it.
+    let d = design();
+    let g = cone(&d, id(&d, RESETN), Dir::Inout, 2);
+    assert!(!g.truncated, "the legacy cone never caps");
+    assert!(
+        g.nodes.iter().all(|n| n.kind == NodeKind::Instance),
+        "legacy cone emits instance boxes only"
+    );
+    assert!(
+        !g.edges.is_empty(),
+        "legacy cone still finds the connections"
     );
 }

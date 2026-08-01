@@ -1886,8 +1886,469 @@ fn join_signal(
     }
 }
 
+/// Traversal budget for [`cone_with`] (#244).
+///
+/// Every cap is a *rendering* policy: what it drops is reported back through
+/// [`SchPort::more`] and [`SchematicGraph::truncated`], never silently
+/// discarded. Defaults come from the `nav` benchmark rather than from feel —
+/// see each field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConeLimits {
+    /// Maximum hops from the seed. One hop is signal → box → that box's other
+    /// signals.
+    pub depth: usize,
+    /// Maximum boxes reached through any one signal, per hop. This is the cap
+    /// that tames a global clock/reset: fan-out, not node count, is what makes
+    /// a cone expensive (ADR 0003).
+    pub fanout: usize,
+    /// Maximum boxes in the whole returned graph — the only cap that bounds
+    /// `fanout^depth`.
+    pub boxes: usize,
+}
+
+impl Default for ConeLimits {
+    fn default() -> Self {
+        Self {
+            // A real debug chain is signal → driving process → its register →
+            // that register's clock/enable source. `nav` uses 6; depth alone
+            // cannot bound the walk (4 hops at fanout 32 is ~1.0M boxes),
+            // which is why `boxes` exists.
+            depth: 4,
+            // Above every process-level box fan-out in the committed golden —
+            // its hottest net (`g_lane[0].core.resetn`) has degree 110 but only
+            // 11 box loads — so no real fixture net truncates at the default,
+            // while the 1M synthetic's 59,049-load clock caps at the first hop.
+            fanout: 32,
+            // ~16 ms (one frame) at the ~8 us/box this walk is budgeted at,
+            // extrapolated from the 2.4-3.2 us/box the legacy cone measures in
+            // docs/benchmarking.md. Extrapolated, not measured — recheck against
+            // the `nav` scenario before treating it as settled.
+            boxes: 2000,
+        }
+    }
+}
+
+impl ConeLimits {
+    /// Default caps with an explicit hop count.
+    pub fn depth(depth: usize) -> Self {
+        Self {
+            depth,
+            ..Self::default()
+        }
+    }
+}
+
+/// Whether `e` leaves `sig` in the requested direction.
+///
+/// `Edge.dir` is relative to `e.port`, not to whichever end the walk is
+/// standing on — the signal join reads `is_logic_box(e.port) && e.dir ==
+/// Dir::Out` as *"this box drives `e.endpoint`"*. So the test has to flip
+/// depending on which side `sig` sits on. The legacy [`cone`] omits that flip,
+/// which is why it reports a net's fan-in when asked for fan-out.
+fn follows(e: &Edge, sig: NodeId, dir: Dir) -> bool {
+    let near_is_port = e.port == sig;
+    match dir {
+        // Fan-out: something reads the signal.
+        Dir::Out => {
+            if near_is_port {
+                e.dir == Dir::Out
+            } else {
+                e.dir != Dir::Out
+            }
+        }
+        // Fan-in: something drives it.
+        Dir::In => {
+            if near_is_port {
+                e.dir != Dir::Out
+            } else {
+                e.dir == Dir::Out
+            }
+        }
+        Dir::Inout => true,
+    }
+}
+
+/// Whether the box end of `e` drives `sig` (rather than reading it).
+fn edge_drives(e: &Edge, sig: NodeId) -> bool {
+    if e.port == sig {
+        e.dir != Dir::Out
+    } else {
+        e.dir == Dir::Out
+    }
+}
+
+/// The signals a cone starts from.
+///
+/// A box seed starts at the signals it touches. A signal seed folds in its
+/// same-path siblings, because a port and its backing net are two nodes for one
+/// wire (the golden's `bus.valid` is a `Var` *and* a `Port`) and a seed on
+/// either must reach both.
+fn seed_signals(design: &Design, seed: NodeId) -> Vec<NodeId> {
+    let Some(n) = design.node(seed) else {
+        return Vec::new();
+    };
+    if is_logic_box(design, seed)
+        || is_gate(design, seed)
+        || is_kind(design, seed, NodeKind::Memory)
+    {
+        let mut out: Vec<NodeId> = design
+            .edges_of(seed)
+            .iter()
+            .map(|e| if e.port == seed { e.endpoint } else { e.port })
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        return out;
+    }
+    let mut out = design.nodes_at_path(&n.path).to_vec();
+    if out.is_empty() {
+        out.push(seed);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// The box a reached node belongs to, plus the scope that box lives in.
+///
+/// The generalization of `nearest_instance` that every box kind needs: walk up
+/// until an ancestor is one of its own parent's [`child_boxes`]. Because the
+/// predicate *is* the scope graph's, `GenBlock` dissolution, [`Projection`] and
+/// every box kind fall out for free — the two views cannot disagree on what a
+/// box is. `None` for a node under no box (a scope-level net, or a module port).
+fn cone_box_of(
+    design: &Design,
+    node: NodeId,
+    projection: Projection,
+    cache: &mut std::collections::HashMap<NodeId, std::collections::HashSet<NodeId>>,
+) -> Option<(NodeId, NodeId)> {
+    // Under GateLevel a primitive *is* a box, but it is a flat child of its
+    // process block rather than of the scope `child_boxes` dissolves, so the
+    // walk below would step straight past it and land on the enclosing block.
+    if projection == Projection::GateLevel && is_gate(design, node) {
+        let scope = design.node(node).and_then(|n| n.parent).unwrap_or(node);
+        return Some((node, scope));
+    }
+    let mut cur = node;
+    loop {
+        let parent = design.node(cur)?.parent?;
+        let set = cache.entry(parent).or_insert_with(|| {
+            child_boxes(design, parent, projection)
+                .into_iter()
+                .collect()
+        });
+        if set.contains(&cur) {
+            return Some((cur, parent));
+        }
+        cur = parent;
+    }
+}
+
+/// Build the `SchNode` for a reached box, dispatching to the same `make_*`
+/// builders the scope graph uses so pin keying is identical.
+fn cone_box_node(
+    design: &Design,
+    bx: NodeId,
+    scope_path: &str,
+    pins: &mut PinAlloc,
+) -> Option<SchNode> {
+    let kind = design.node(bx)?.kind;
+    match kind {
+        NodeKind::Ff => make_ff_box(design, bx, scope_path, pins),
+        NodeKind::Comb | NodeKind::Latch | NodeKind::Assign => make_logic_box(design, bx, pins),
+        NodeKind::Memory => make_memory_box(design, bx, scope_path, pins),
+        k if is_gate_kind(k) => make_gate_box(design, bx, pins),
+        _ => make_box(design, bx, scope_path),
+    }
+}
+
+/// The pin on `bx` that `e` lands on, keyed exactly as that box's builder keyed
+/// it — so the id is guaranteed to exist in the emitted node.
+fn cone_pin_for(design: &Design, bx: NodeId, e: &Edge, pins: &mut PinAlloc) -> NodeId {
+    let kind = design.node(bx).map(|n| n.kind);
+    match kind {
+        Some(NodeKind::Instance) | Some(NodeKind::Interface) => {
+            for cand in [e.port, e.endpoint] {
+                if is_kind(design, cand, NodeKind::Port)
+                    && design.node(cand).and_then(|n| n.parent) == Some(bx)
+                {
+                    return cand;
+                }
+            }
+            bx
+        }
+        Some(k) if is_gate_kind(k) => {
+            if e.port == bx && e.dir == Dir::Out {
+                pins.pin(bx, bx)
+            } else {
+                pins.pin(bx, fold_inverter(design, e.endpoint).0)
+            }
+        }
+        _ => pins.pin(bx, e.endpoint),
+    }
+}
+
+/// A one-pin node standing in for a signal the trace reaches but that no box on
+/// canvas owns — the seed itself, or a module port where the walk crosses a
+/// hierarchy wall. Keyed on the model id like [`make_boundary_pin`], so the pin
+/// cross-probes the real signal.
+fn make_signal_stub(design: &Design, sig: NodeId, side: Side) -> Option<SchNode> {
+    let n = design.node(sig)?;
+    Some(SchNode {
+        id: sig,
+        kind: n.kind,
+        label: n.name.clone(),
+        path: n.path.clone(),
+        expandable: false,
+        ports: vec![SchPort {
+            id: sig,
+            name: n.name.clone(),
+            side,
+            path: n.path.clone(),
+            width: pin_width(design, &n.type_),
+            role: None,
+            bundle: false,
+            dangling: false,
+            constant: None,
+            more: None,
+        }],
+        module: None,
+        constant: None,
+        modport: None,
+        mem_depth: None,
+        init_source: None,
+    })
+}
+
+/// The scope a cone's breadcrumb binds to: the nearest enclosing navigable
+/// scope, so `root` is a path `scope_graph` can actually open.
+fn cone_root(design: &Design, seed: NodeId) -> String {
+    let mut cur = seed;
+    loop {
+        if is_navigable_scope(design, cur) {
+            if let Some(n) = design.node(cur) {
+                return n.path.clone();
+            }
+        }
+        match design.node(cur).and_then(|n| n.parent) {
+            Some(p) => cur = p,
+            None => {
+                return design
+                    .node(seed)
+                    .map(|n| n.path.clone())
+                    .unwrap_or_default()
+            }
+        }
+    }
+}
+
+/// Fan-in/out cone of a `seed` (a net, port, or logic/instance node), built on
+/// the scope graph's own box/pin machinery (#244).
+///
+/// Unlike the legacy [`cone`] this emits **every** box kind the scope graph
+/// draws, gives both ends of every wire a real [`PinAlloc`] pin id so a layout
+/// engine can anchor them, crosses hierarchy walls by path lookup, and enforces
+/// `limits` *visibly* — a capped signal reports its remainder on
+/// [`SchPort::more`] and sets [`SchematicGraph::truncated`].
+///
+/// It is deliberately **not** output-compatible with [`cone`]: besides the pin
+/// ids, the direction filter is corrected (see [`follows`]). New callers want
+/// this one; `cone` is retained as the `svxprobe graph --cone` contract and the
+/// `scale-bench` fan-out baseline.
+///
+/// Pin ids are stable within one call, in allocation order — they are *not*
+/// comparable across calls, so a future incremental merge must re-key rather
+/// than assume.
+pub fn cone_with(
+    design: &Design,
+    seed: NodeId,
+    dir: Dir,
+    limits: ConeLimits,
+    projection: Projection,
+) -> SchematicGraph {
+    let root = cone_root(design, seed);
+    let mut pins = PinAlloc::new();
+    let mut nodes: Vec<SchNode> = Vec::new();
+    let mut emitted: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    // Anchor stubs are tracked apart from boxes: their pin id is the model id,
+    // which is only valid for a node this function synthesized.
+    let mut stubs: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    let mut emitted_pins: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    let mut edges: Vec<SchEdge> = Vec::new();
+    let mut seen_pairs: std::collections::HashSet<(NodeId, NodeId)> =
+        std::collections::HashSet::new();
+    let mut next_edge = design.edges().len() as u32;
+    let mut truncated = false;
+    let mut box_cache: std::collections::HashMap<NodeId, std::collections::HashSet<NodeId>> =
+        std::collections::HashMap::new();
+    let mut more_on: std::collections::HashMap<NodeId, u32> = std::collections::HashMap::new();
+
+    let mut frontier = seed_signals(design, seed);
+    let mut visited: std::collections::HashSet<NodeId> = frontier.iter().copied().collect();
+
+    for _hop in 0..limits.depth.max(1) {
+        let mut next: Vec<NodeId> = Vec::new();
+        for &sig in &frontier {
+            let mut drivers: Vec<(NodeId, Option<String>)> = Vec::new();
+            let mut loads: Vec<(NodeId, Option<String>)> = Vec::new();
+            let mut sig_pins: Vec<NodeId> = Vec::new();
+
+            // Ascending model-edge order, so the kept set — and therefore pin
+            // allocation and the wire sequence — is byte-stable across runs.
+            let cands: Vec<&Edge> = design
+                .edge_indices_of(sig)
+                .iter()
+                .map(|&i| &design.edges()[i as usize])
+                .filter(|e| follows(e, sig, dir))
+                .collect();
+            let total = cands.len();
+            let mut kept = 0usize;
+            let mut dropped = 0u32;
+
+            for e in cands {
+                if kept >= limits.fanout {
+                    dropped += 1;
+                    continue;
+                }
+                let other = if e.port == sig { e.endpoint } else { e.port };
+                let Some((bx, scope)) = cone_box_of(design, other, projection, &mut box_cache)
+                else {
+                    // No enclosing box: a module port or free net. Emit it as a
+                    // stub so the wire has a real endpoint, and keep walking —
+                    // this is how the trace crosses a hierarchy wall.
+                    if other != sig && visited.insert(other) {
+                        next.push(other);
+                    }
+                    continue;
+                };
+                if !emitted.contains(&bx) {
+                    if nodes.len() >= limits.boxes {
+                        truncated = true;
+                        dropped += 1;
+                        continue;
+                    }
+                    let scope_path = design
+                        .node(scope)
+                        .map(|n| n.path.clone())
+                        .unwrap_or_else(|| root.clone());
+                    let Some(node) = cone_box_node(design, bx, &scope_path, &mut pins) else {
+                        continue;
+                    };
+                    emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                    nodes.push(node);
+                    emitted.insert(bx);
+                }
+                let pin = cone_pin_for(design, bx, e, &mut pins);
+                // A pin the box did not actually emit cannot anchor a wire (an
+                // instance edge that resolves to no port child, say). Drop the
+                // connection rather than emit an edge pointing at nothing.
+                if !emitted_pins.contains(&pin) {
+                    continue;
+                }
+                kept += 1;
+                sig_pins.push(pin);
+                if edge_drives(e, sig) {
+                    drivers.push((pin, e.select.clone()));
+                } else {
+                    loads.push((pin, e.select.clone()));
+                }
+                // Next hop: this box's other signals.
+                for be in design.edges_of(bx) {
+                    let bsig = if be.port == bx { be.endpoint } else { be.port };
+                    if bsig != sig && visited.insert(bsig) {
+                        next.push(bsig);
+                    }
+                }
+            }
+
+            // A signal with reached boxes on only one side needs an anchor for
+            // its wires — the seed net itself, most often. Added only when the
+            // complementary side is empty, so it never duplicates a real
+            // box-to-box wire.
+            let mut stub_pin = None;
+            // A signal that is itself a box (a `Memory` array is both) already
+            // has real pins from its own builder; synthesizing a stub pin keyed
+            // on its model id would name a pin that box never emitted.
+            if (drivers.is_empty() != loads.is_empty()) && !emitted.contains(&sig) {
+                let stub_side = if drivers.is_empty() {
+                    Side::East
+                } else {
+                    Side::West
+                };
+                if !stubs.contains(&sig) {
+                    if let Some(node) = make_signal_stub(design, sig, stub_side) {
+                        emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                        nodes.push(node);
+                        stubs.insert(sig);
+                    }
+                }
+                if stubs.contains(&sig) {
+                    stub_pin = Some(sig);
+                    if drivers.is_empty() {
+                        drivers.push((sig, None));
+                    } else {
+                        loads.push((sig, None));
+                    }
+                }
+            }
+
+            if dropped > 0 {
+                truncated = true;
+                // Report the remainder where the user can see it: on the
+                // signal's own anchor when it has one, else on every pin the
+                // hop did emit for it.
+                match stub_pin {
+                    Some(p) => *more_on.entry(p).or_default() += dropped,
+                    None => {
+                        for p in &sig_pins {
+                            *more_on.entry(*p).or_default() += dropped;
+                        }
+                    }
+                }
+            }
+            debug_assert!(kept + dropped as usize <= total);
+
+            join_signal(
+                design.node(sig),
+                &root,
+                &drivers,
+                &loads,
+                &mut seen_pairs,
+                &mut next_edge,
+                &mut edges,
+            );
+        }
+        frontier = next;
+        if frontier.is_empty() {
+            break;
+        }
+    }
+
+    if !more_on.is_empty() {
+        for n in &mut nodes {
+            for p in &mut n.ports {
+                if let Some(&c) = more_on.get(&p.id) {
+                    p.more = Some(c);
+                }
+            }
+        }
+    }
+
+    SchematicGraph {
+        root,
+        nodes,
+        edges,
+        truncated,
+    }
+}
+
 /// Fan-in/out cone of a node (typically a net or port): the boxes directly
 /// connected to it, following edge direction up to `depth` hops.
+///
+/// Phase-3b extractor, retained deliberately: it is the `svxprobe graph --cone`
+/// output contract and the `scale-bench` fan-out baseline that ADR 0003's
+/// level-of-detail argument is measured against. New callers want [`cone_with`],
+/// which fixes this one's direction filter and emits anchorable pin ids.
 pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> SchematicGraph {
     let mut frontier = vec![start];
     let mut seen_boxes = std::collections::BTreeSet::new();
