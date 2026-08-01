@@ -227,7 +227,10 @@ jobs:
           SVX_BUILD_REV: ${{ github.sha }}
         run: |
           case "${{ runner.os }}" in
-            Windows) npm run tauri build -- --config tauri.offline.conf.json --bundles nsis ;;
+            # --config is resolved relative to the CWD (here app/), not to the
+            # tauri dir — so the overlay needs its src-tauri/ prefix or the CLI
+            # rejects the flag outright.
+            Windows) npm run tauri build -- --config src-tauri/tauri.offline.conf.json --bundles nsis ;;
             Linux)   npm run tauri build -- --bundles appimage,deb ;;
             macOS)   npm run tauri build -- --bundles app,dmg ;;
           esac

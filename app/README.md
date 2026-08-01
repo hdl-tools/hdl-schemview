@@ -214,7 +214,8 @@ bundle is an overlay:
 #   ~284 MB for the pinned 150.0.4078.99, more once expanded). On Windows use
 #   expand.exe by full path — in Git Bash a bare `expand` is GNU coreutils'
 #   tabs-to-spaces filter, not the cab extractor.
-npm run tauri build -- --config tauri.offline.conf.json --bundles nsis
+# --config is relative to the CWD (app/), not to src-tauri/ — hence the prefix.
+npm run tauri build -- --config src-tauri/tauri.offline.conf.json --bundles nsis
 ```
 
 In CI that URL is the `WEBVIEW2_CAB_URL` repository variable — pinned on
