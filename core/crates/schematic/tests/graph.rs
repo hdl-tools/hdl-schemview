@@ -2065,6 +2065,174 @@ fn cone_with_crosses_hierarchy() {
     );
 }
 
+/// Every seed x projection x depth a cone invariant is checked against — one
+/// place to widen the sweep, since the assertions below are all "for every cone".
+fn every_cone(mut f: impl FnMut(&SchematicGraph, &str, Projection, usize)) {
+    let d = design();
+    for seed in [RESETN, VALID, MEM_VALID] {
+        for proj in [Projection::ProcessLevel, Projection::GateLevel] {
+            for depth in [1, 2, 3] {
+                let g = cone_with(&d, id(&d, seed), Dir::Inout, ConeLimits::depth(depth), proj);
+                f(&g, seed, proj, depth);
+            }
+        }
+    }
+}
+
+#[test]
+fn cone_with_wires_every_box_it_emits() {
+    // #269: a box reached but never wired is an orphan on canvas. The older
+    // assertions (root openable, endpoints resolve to emitted pins) both pass
+    // on an under-connected graph, which is how the bare-bundle bug survived.
+    every_cone(|g, seed, proj, depth| {
+        let wired: std::collections::HashSet<NodeId> =
+            g.edges.iter().flat_map(|e| [e.source, e.target]).collect();
+        let orphans: Vec<&str> = g
+            .nodes
+            .iter()
+            // A pin carrying a `more` count is the reported remainder of a
+            // capped fan-out — connectivity stated, not missing.
+            .filter(|n| {
+                !n.ports
+                    .iter()
+                    .any(|p| wired.contains(&p.id) || p.more.is_some())
+            })
+            .map(|n| n.path.as_str())
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "{seed} {proj:?} depth {depth}: emitted boxes with no wire: {orphans:?}"
+        );
+    });
+}
+
+#[test]
+fn cone_with_agrees_with_the_scope_graph_on_what_is_a_box() {
+    // The general form of #268: `cone_with` picks boxes with `cone_box_of`, the
+    // scope graph with `child_boxes`. Any node kind one special-cases and the
+    // other does not shows up here — the guard both bugs lacked.
+    let d = design();
+    // One scope graph per (scope, projection) — the walk below revisits the same
+    // scopes for hundreds of boxes, and each rebuild is the expensive part.
+    let mut cache: std::collections::HashMap<(String, bool), Option<SchematicGraph>> =
+        std::collections::HashMap::new();
+    every_cone(|g, seed, proj, depth| {
+        for n in &g.nodes {
+            let is_box = gateish(&n.kind)
+                || matches!(
+                    n.kind,
+                    NodeKind::Instance
+                        | NodeKind::Interface
+                        | NodeKind::Ff
+                        | NodeKind::Memory
+                        | NodeKind::Comb
+                        | NodeKind::Latch
+                        | NodeKind::Assign
+                );
+            // Signal stubs (the seed, a hierarchy-crossing port) are the cone's
+            // own anchors and have no scope-graph counterpart by design.
+            if !is_box {
+                continue;
+            }
+            // Walk to the box's own nearest openable scope — the one the
+            // frontend would render it in. Under GateLevel that is the enclosing
+            // *module* for a gate, since `child_boxes` dissolves its block; that
+            // walk is what makes a folded inverter or a const tie visible here.
+            let mut scope = d.node(n.id).and_then(|x| x.parent);
+            let found = loop {
+                let Some(s) = scope else { break None };
+                let path = d.node(s).map(|x| x.path.clone()).unwrap_or_default();
+                let key = (path.clone(), proj == Projection::GateLevel);
+                let sg = cache
+                    .entry(key)
+                    .or_insert_with(|| scope_graph_with(&d, &path, proj));
+                if sg.is_some() {
+                    break Some(path);
+                }
+                scope = d.node(s).and_then(|x| x.parent);
+            };
+            let Some(path) = found else { continue };
+            let sg = cache[&(path.clone(), proj == Projection::GateLevel)]
+                .as_ref()
+                .unwrap();
+            assert!(
+                sg.nodes.iter().any(|m| m.id == n.id),
+                "{seed} {proj:?} depth {depth}: cone drew {} ({:?}) as a box, \
+                 but the scope graph of {path} does not",
+                n.path,
+                n.kind
+            );
+        }
+    });
+}
+
+#[test]
+fn cone_with_draws_no_inline_operand_as_a_box() {
+    // #268: a literal tie renders inline on `SchPort.constant` and a folded
+    // inverter as an `Inv` bubble on its consumer's pin. Before the fix a
+    // gate-level cone re-materialized both as phantom one-pin boxes — 178
+    // `Const` and 100 `Not` boxes on a depth-3 trace from `resetn`.
+    every_cone(|g, seed, proj, depth| {
+        let consts: Vec<&str> = g
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Const)
+            .map(|n| n.path.as_str())
+            .collect();
+        assert!(
+            consts.is_empty(),
+            "{seed} {proj:?} depth {depth}: Const is never a box, got {consts:?}"
+        );
+    });
+    // The inverters that remain must be the ones the scope graph also draws: a
+    // root `~signal` with an `out` edge, never a folded single-fanout operand.
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, RESETN),
+        Dir::Inout,
+        ConeLimits::depth(3),
+        Projection::GateLevel,
+    );
+    for n in g.nodes.iter().filter(|n| n.kind == NodeKind::Not) {
+        assert!(
+            d.edges_of(n.id)
+                .iter()
+                .any(|e| e.port == n.id && e.dir == Dir::Out),
+            "{} has no out edge, so it is a folded inverter and must be drawn \
+             as a bubble on its consumer's pin, not as a box",
+            n.path
+        );
+    }
+}
+
+#[test]
+fn cone_with_anchors_a_bare_interface_on_its_raw_access_port() {
+    // #269 verbatim: the bare bundle was emitted with none of its three pins
+    // wired, because `cone_pin_for` only looked for a `Port` child — and a raw
+    // member is a `Var`, so it fell back to an id `make_box` never allocated.
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, VALID),
+        Dir::Inout,
+        ConeLimits::depth(1),
+        Projection::ProcessLevel,
+    );
+    let bundle = g
+        .nodes
+        .iter()
+        .find(|n| n.path == "picorv32_soc.g_lane[0].bus")
+        .expect("the bare interface bundle is reached from its own member");
+    let wired: std::collections::HashSet<NodeId> =
+        g.edges.iter().flat_map(|e| [e.source, e.target]).collect();
+    assert!(
+        bundle.ports.iter().any(|p| wired.contains(&p.id)),
+        "the bundle must carry the wire that reached it; its pins are {:?}",
+        bundle.ports.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn cone_is_unchanged() {
     // The legacy extractor is the `svxprobe graph --cone` output contract and
