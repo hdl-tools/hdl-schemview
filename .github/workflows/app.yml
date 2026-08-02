@@ -17,7 +17,19 @@ on:
     paths: ["app/**", "core/crates/**", ".github/workflows/app.yml"]
   pull_request:
     paths: ["app/**", "core/crates/**", ".github/workflows/app.yml"]
+  # `bundle` skips pull_request, so a packaging change can only be proven by
+  # dispatching this workflow on the branch — and a full matrix bills ~49
+  # minutes, nearly all of it the 10x macOS leg, to test something Linux-only.
+  # This input narrows the matrix for that case. It applies to dispatch ONLY:
+  # a push to main and a `v*` tag always build all three, so no release can be
+  # cut from a partial matrix.
   workflow_dispatch:
+    inputs:
+      bundle_os:
+        description: "Limit the bundle matrix (verification runs only)"
+        default: all
+        type: choice
+        options: [all, ubuntu-latest, windows-latest, macos-latest]
 
 permissions:
   contents: read
@@ -102,7 +114,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Reads as `(dispatch && narrowed && [one]) || [all three]`. `&&` binds
+        # tighter than `||` and yields its right operand only when the left is
+        # truthy, so every non-dispatch event — push, tag — short-circuits to
+        # the full list. Do not reorder the operands: putting the fallback
+        # first makes it win unconditionally.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.bundle_os != 'all' && format('["{0}"]', inputs.bundle_os) || '["ubuntu-latest","windows-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -214,9 +231,16 @@ jobs:
           inner=$(find wv2 -maxdepth 1 -mindepth 1 -type d | head -1)
           mv "$inner" app/src-tauri/webview2-runtime
 
-      # `targets: "all"` would also attempt .rpm on Ubuntu, which can fail and
-      # take the job down — name the bundles explicitly instead. AppImage is the
-      # supported isolated-machine artifact; .deb needs repo access.
+      # The bundles are named explicitly rather than via `targets: "all"`, so
+      # each leg produces exactly the artifacts the release stages — `all` on
+      # Linux would also build formats nothing ships or smoke-tests.
+      #
+      # .rpm joined the Linux leg in #260. It needs no rpmbuild: Tauri 2 writes
+      # the archive itself through the pure-Rust `rpm` crate, so ubuntu-latest
+      # needs no extra toolchain. (The previous comment here excluded .rpm on
+      # the theory that it would take the job down — that premise did not hold.)
+      # AppImage remains the supported isolated-machine artifact (ADR 0009);
+      # .deb and .rpm are the "Linux (connected)" tier and need repo access.
       - name: Bundle
         working-directory: app
         env:
@@ -231,7 +255,7 @@ jobs:
             # tauri dir — so the overlay needs its src-tauri/ prefix or the CLI
             # rejects the flag outright.
             Windows) npm run tauri build -- --config src-tauri/tauri.offline.conf.json --bundles nsis ;;
-            Linux)   npm run tauri build -- --bundles appimage,deb ;;
+            Linux)   npm run tauri build -- --bundles appimage,deb,rpm ;;
             macOS)   npm run tauri build -- --bundles app,dmg ;;
           esac
 
@@ -255,6 +279,66 @@ jobs:
           "$app" --bench --bases golden --out "$RUNNER_TEMP/appimage-bench.md"
           grep -q 'Single-shot run' "$RUNNER_TEMP/appimage-bench.md"
           grep -q 'hdl-schemview --bench' "$RUNNER_TEMP/appimage-bench.md"
+
+      # #260. The .rpm cannot be tested on the runner itself: the *Install Tauri
+      # Linux deps* step above already put WebKitGTK and GTK there, so a local
+      # install would pass no matter what `rpm.depends` declares. A clean
+      # container is the only place the declaration is actually load-bearing.
+      #
+      # Two distinct failures are checked, because they need different fixes:
+      #
+      #   1. `rpm -qp --requires` — the package declares WebKitGTK at all.
+      #      Without a `bundle.linux.rpm` key Tauri emits an RPM with no
+      #      dependencies whatsoever, which installs cleanly and then cannot
+      #      launch. That is the worst outcome here, and it is silent.
+      #   2. `dnf install` + a real headless run — the declared names resolve on
+      #      a current Fedora *and* nothing undeclared is missing at load time.
+      #      The binary links WebKitGTK as a NEEDED library, so the loader
+      #      resolves it even though `--bench` never opens a window.
+      #
+      # The image is deliberately unpinned: a package rename (the 4.0 -> 4.1
+      # churn already happened once) should surface here, not in a user's
+      # install. --nogpgcheck because the RPM is unsigned (ADR 0009). The mount
+      # is read-only so the root-owned container cannot write into the workspace
+      # and break the upload step below.
+      - name: RPM install smoke (Fedora container)
+        if: runner.os == 'Linux'
+        run: |
+          rpmdir="$PWD/app/src-tauri/target/release/bundle/rpm"
+          rpm=$(find "$rpmdir" -name '*.rpm' 2>/dev/null | head -1)
+          test -n "$rpm" || { echo "::error::no .rpm was produced"; exit 1; }
+          echo "testing $(basename "$rpm")"
+          docker run --rm -i -v "$rpmdir:/rpm:ro" fedora:latest bash -s <<'EOF'
+          set -euo pipefail
+          pkg=$(find /rpm -name '*.rpm' | head -1)
+
+          echo "--- declared requires ---"
+          rpm -qp --requires "$pkg"
+          rpm -qp --requires "$pkg" | grep -q 'webkit2gtk4.1' || {
+            echo "::error::the .rpm declares no WebKitGTK dependency — check bundle.linux.rpm.depends"
+            exit 1
+          }
+
+          # Resolve the launcher from the package rather than assuming it is
+          # named after productName: Tauri installs the *crate* binary
+          # (hdl-schemview-app), so a hardcoded `hdl-schemview` is not found.
+          # Reading it back from the payload also means a future rename fails
+          # loudly here instead of silently testing nothing.
+          echo "--- payload ---"
+          rpm -qpl "$pkg"
+          bin=$(rpm -qpl "$pkg" | grep -E '^/usr/bin/[^/]+$' | head -1)
+          test -n "$bin" || {
+            echo "::error::the .rpm installs no /usr/bin launcher"
+            exit 1
+          }
+
+          dnf install -y --nogpgcheck "$pkg"
+
+          test -x "$bin" || { echo "::error::$bin missing after install"; exit 1; }
+          "$bin" --bench --bases golden --out /tmp/rpm-bench.md
+          grep -q 'Single-shot run' /tmp/rpm-bench.md
+          grep -q 'hdl-schemview --bench' /tmp/rpm-bench.md
+          EOF
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -298,7 +382,8 @@ jobs:
         run: |
           mkdir -p assets
           find dist -type f \( -name '*.exe' -o -name '*.AppImage' \
-            -o -name '*.deb' -o -name '*.dmg' \) -exec cp {} assets/ \;
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' \) \
+            -exec cp {} assets/ \;
           if [ -z "$(ls -A assets)" ]; then
             echo "::error::no installer artifacts found in the bundle uploads" >&2
             exit 1

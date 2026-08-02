@@ -76,7 +76,7 @@ not suppress this: GitHub does not evaluate path filters for pushes of tags.
 | Job | On a tag | What it contributes |
 | --- | --- | --- |
 | `build` | ✅ | `npm test`, `npm run build`, `cargo build` (Ubuntu + Windows). A red test suite **blocks the release**. |
-| `bundle` | ✅ | The real `tauri build` on Ubuntu + Windows + macOS. Windows uses the `tauri.offline.conf.json` overlay, so WebView2 is vendored. |
+| `bundle` | ✅ | The real `tauri build` on Ubuntu + Windows + macOS. Windows uses the `tauri.offline.conf.json` overlay, so WebView2 is vendored. Linux additionally installs the `.rpm` in a Fedora container and runs it headlessly (#260). |
 | `release` | ✅ | Downloads every bundle artifact, stages the installers flat, writes `SHA256SUMS`, and creates a **draft** release. |
 
 Notes on the `release` job:
@@ -88,9 +88,9 @@ Notes on the `release` job:
 - **`permissions: contents: write` is job-level.** The workflow default stays
   `read`, so `build` and `bundle` — which run on every PR — never hold a write
   token.
-- It selects assets by extension (`.exe`, `.AppImage`, `.deb`, `.dmg`) rather than
-  uploading the bundle trees: macOS's `.app` alone is a directory of thousands of
-  files.
+- It selects assets by extension (`.exe`, `.AppImage`, `.deb`, `.rpm`, `.dmg`)
+  rather than uploading the bundle trees: macOS's `.app` alone is a directory of
+  thousands of files.
 
 ### The version guard
 
@@ -116,7 +116,9 @@ The release is created as a **draft** on purpose: macOS is unverified end-to-end
 1. Open the draft under **Releases**.
 2. Check the assets — the installers plus `SHA256SUMS`, all carrying the expected
    version in their filenames.
-3. Sanity-run at least the Windows installer and the AppImage.
+3. Sanity-run at least the Windows installer and the AppImage. The `.rpm` needs
+   no manual check: `bundle` installs it in a clean Fedora container and runs it
+   headlessly (#260). The `.deb` is still unverified — see #261.
 4. Edit the generated notes if needed, then **Publish**.
 
 ## Verifying an artifact after copying
@@ -145,7 +147,8 @@ Per `app/README.md` §Distribution:
 | --- | --- | --- |
 | Windows | `*-setup.exe` (NSIS) | WebView2 vendored — no network, no admin rights. |
 | Linux (isolated) | `*.AppImage` | Self-contained. **Use this one** on a locked-down box. |
-| Linux (connected) | `*.deb` | Declares WebKitGTK as a system dependency, so it needs a package manager with repo access. |
+| Linux (connected) | `*.deb` | Debian/Ubuntu. Declares WebKitGTK as a system dependency, so it needs a package manager with repo access. |
+| Linux (connected) | `*.rpm` | Fedora/RHEL. Same tier as the `.deb` — declares WebKitGTK, needs repo access. |
 | macOS | `*.dmg` | Ad-hoc signed only — see below. |
 
 macOS is signed ad-hoc (`signingIdentity: "-"`), which does **not** clear Gatekeeper
@@ -178,3 +181,16 @@ spike). Getting a design onto the isolated machine still means elaborating a
 macOS runners bill at **10× minutes** on a private repo, and `bundle` builds on all
 three OSes. That is why the trigger is `tags: ["v*"]` rather than every push to
 `main`, and why tags should be cut deliberately rather than used as scratch markers.
+
+A full matrix costs roughly **49 billed minutes** (macOS ~2 min × 10, Windows
+~12 min × 2, Ubuntu ~5 min × 1). Since `bundle` skips pull requests, a packaging
+change can only be proven by dispatching the workflow on its branch — so
+`workflow_dispatch` takes a `bundle_os` input that narrows the matrix (#260):
+
+```bash
+gh workflow run app.yml --ref feat/my-packaging-branch -f bundle_os=ubuntu-latest
+```
+
+That is ~5 billed minutes instead of ~49. The input affects **dispatch only** — a
+push to `main` and a `v*` tag always build all three, so no release can be cut
+from a partial matrix.

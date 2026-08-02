@@ -200,8 +200,12 @@ collaborators only.
 | Linux | **AppImage** | Bundled inside the AppImage. |
 | macOS | `.app` / `.dmg` | WKWebView is part of the OS. |
 
-The `.deb`/`.rpm` bundles declare WebKitGTK as a system dependency, so they need
-a package manager with repo access — **use the AppImage** on an isolated box.
+The Linux leg also builds a `.deb` (Debian/Ubuntu) and an `.rpm` (Fedora/RHEL,
+#260). Both declare WebKitGTK as a system dependency, so they need a package
+manager with repo access — **use the AppImage** on an isolated box. CI installs
+the `.rpm` in a clean Fedora container and runs it headlessly, which is what
+proves its declared dependency names are real; the `.deb` is not yet covered
+(#261).
 
 The default config deliberately carries **no** WebView2 payload path, so an
 ordinary `npm run tauri build` still works for contributors. The offline Windows
