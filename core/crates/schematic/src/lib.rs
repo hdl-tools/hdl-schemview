@@ -458,6 +458,26 @@ fn is_foldable_not(design: &Design, id: NodeId) -> bool {
     readers.len() == 1 && is_gate(design, readers[0].port) && not_operand(design, id).is_some()
 }
 
+/// The one gate that reads a foldable inverter — the box its bubble is drawn on.
+/// Meaningful only for an id [`is_foldable_not`] accepts, which is what
+/// guarantees the reader exists and is unique.
+fn not_reader(design: &Design, id: NodeId) -> Option<NodeId> {
+    design
+        .edges_of(id)
+        .iter()
+        .find(|e| e.endpoint == id && e.dir == Dir::In)
+        .map(|e| e.port)
+}
+
+/// A node neither view draws as a box of its own, because it renders *inside*
+/// the box that consumes it: a literal tie, carried inline on the consumer's
+/// `SchPort.constant` (#199), and a folded inverter, drawn as an `Inv` bubble on
+/// its consumer's input pin (#157). `child_boxes` makes a box for neither.
+fn is_drawn_inline(design: &Design, id: NodeId, projection: Projection) -> bool {
+    is_kind(design, id, NodeKind::Const)
+        || (projection == Projection::GateLevel && is_foldable_not(design, id))
+}
+
 /// Resolve a gate-input edge endpoint through a foldable `Not` (#157): returns the
 /// un-inverted operand and `true` when the endpoint is a folded inverter, else the
 /// endpoint unchanged and `false`. Used identically by `make_gate_box` (pin build)
@@ -1314,6 +1334,215 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
     }
 }
 
+/// Which box a node in a scope belongs to, and which pin an edge endpoint
+/// anchors on — the scope's whole anchoring vocabulary, built once.
+///
+/// Consulted by **both** views so they cannot disagree about the same network
+/// (#268/#269): [`scope_graph_with`] resolves every edge through
+/// [`Self::resolve`], and [`cone_with`] — which reaches boxes across many scopes
+/// and picks each one itself — resolves the pin through [`Self::pin_in_box`],
+/// the half of `resolve` that stays true once the box is already known.
+///
+/// Deliberately keyed on the *scope*, never on the subset of boxes a caller
+/// happens to have reached: `resolve`'s bundle-member rule anchors only when
+/// **one** bundle views the member, and that arity test gives a different answer
+/// against a subset. A cone caching one of these per scope gets the scope
+/// graph's answer for free; one built from its own emitted set would not.
+struct ScopeAnchors {
+    /// [`child_boxes`] in model order — pin allocation follows it.
+    boxes: Vec<NodeId>,
+    box_set: std::collections::HashSet<NodeId>,
+    /// The scope's own ports, drawn as boundary frame pins.
+    own_ports: Vec<NodeId>,
+    /// Each own port — and its same-path backing net/var — to the frame pin it
+    /// draws on.
+    boundary_of: std::collections::HashMap<NodeId, NodeId>,
+    /// Bundle member -> [(bundle box, pin)]. Several bundles in one scope can
+    /// view the same member, hence the `Vec`; `BTreeMap` keeps the signal-join
+    /// fold deterministic.
+    iface_pin: std::collections::BTreeMap<NodeId, Vec<(NodeId, NodeId)>>,
+    /// A bare interface bundle and its non-`Port` interior, to the owning
+    /// bundle box. `BTreeMap` for the same reason as `iface_pin`.
+    iface_owner: std::collections::BTreeMap<NodeId, NodeId>,
+    /// A bare bundle to its aggregate raw access port (#96), when anything taps
+    /// its members raw. Point-queried only, so a `HashMap` is enough.
+    raw_port: std::collections::HashMap<NodeId, NodeId>,
+}
+
+impl ScopeAnchors {
+    fn for_scope(design: &Design, scope: NodeId, projection: Projection) -> Self {
+        let boxes = child_boxes(design, scope, projection);
+        let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
+
+        // Boundary I/O: the scope's *own* ports, drawn as frame pins (inputs left,
+        // outputs right). An edge that reaches such a port — or its same-path backing
+        // net/var — anchors to that pin so the connection is visible.
+        let own_ports: Vec<NodeId> = design
+            .node(scope)
+            .map(|n| {
+                n.children
+                    .iter()
+                    .copied()
+                    .filter(|&c| is_kind(design, c, NodeKind::Port))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut boundary_of: std::collections::HashMap<NodeId, NodeId> =
+            std::collections::HashMap::new();
+        if let Some(scope_node) = design.node(scope) {
+            for &p in &own_ports {
+                boundary_of.insert(p, p);
+                let ppath = design.node(p).map(|n| n.path.as_str());
+                for &sib in &scope_node.children {
+                    if sib != p && design.node(sib).map(|n| n.path.as_str()) == ppath {
+                        boundary_of.insert(sib, p);
+                    }
+                }
+            }
+        }
+
+        // Modport member pins: an in-scope modport-qualified interface port pins
+        // its bundle members, and each pin's edge points at the underlying member —
+        // a signal that lives *outside* this scope (in the interface instance), so
+        // `box_of` can never anchor it. Map member -> [(bundle box, pin)] so wires
+        // to bundle signals land on the pins instead of being dropped.
+        let mut iface_pin: std::collections::BTreeMap<NodeId, Vec<(NodeId, NodeId)>> =
+            std::collections::BTreeMap::new();
+        for &b in &boxes {
+            let Some(bn) = design.node(b) else { continue };
+            if bn.kind != NodeKind::Interface || bn.modport.is_none() {
+                continue;
+            }
+            for &pid in &bn.children {
+                if !is_kind(design, pid, NodeKind::Port) {
+                    continue;
+                }
+                for e in design.edges_of(pid) {
+                    if e.port == pid {
+                        iface_pin.entry(e.endpoint).or_default().push((b, pid));
+                    }
+                }
+            }
+        }
+
+        // Aggregate access ports on bare interface bundles (#96): map the instance
+        // and its non-Port interior (members, modport views) to the owning bundle,
+        // so edges reaching any of them anchor on the bundle's raw port (member
+        // taps fan out one wire per consumer pin); modport-level connections are
+        // retargeted onto the matching view's port by [`Self::view_port`].
+        let mut iface_owner: std::collections::BTreeMap<NodeId, NodeId> =
+            std::collections::BTreeMap::new();
+        let mut raw_port: std::collections::HashMap<NodeId, NodeId> =
+            std::collections::HashMap::new();
+        for &b in &boxes {
+            let Some(bn) = design.node(b) else { continue };
+            if bn.kind != NodeKind::Interface || bn.modport.is_some() {
+                continue;
+            }
+            iface_owner.insert(b, b);
+            for &c in &bn.children {
+                // Port children stay real pins with their own edges (e.g. clk).
+                if !is_kind(design, c, NodeKind::Port) {
+                    iface_owner.insert(c, b);
+                }
+            }
+            if access_ports(design, b).1.is_some() {
+                raw_port.insert(b, RAW_PORT_BASE + b);
+            }
+        }
+
+        Self {
+            boxes,
+            box_set,
+            own_ports,
+            boundary_of,
+            iface_pin,
+            iface_owner,
+            raw_port,
+        }
+    }
+
+    /// The frame pin a scope-boundary node draws on, if it is one.
+    #[inline]
+    fn boundary_pin(&self, node: NodeId) -> Option<NodeId> {
+        self.boundary_of.get(&node).copied()
+    }
+
+    /// The pin `node` anchors on **within a box already known to own it** — the
+    /// part of [`Self::resolve`] that does not depend on how the box was picked,
+    /// and therefore the part a cone can share.
+    ///
+    /// Draws to the specific pin when the node is a `Port` directly under the
+    /// box; a bare bundle's interior anchors on its raw access port (#96, falling
+    /// back to the box when nothing taps members raw); a modport-qualified
+    /// interface port under the box — or one of its member pins — anchors on the
+    /// box's bundle pin (#106), collapsing the port-level and member-level edges
+    /// onto one anchor; otherwise the box itself.
+    #[inline]
+    fn pin_in_box(&self, design: &Design, node: NodeId, b: NodeId) -> NodeId {
+        let bundle_pin = |id: NodeId| {
+            design.node(id).and_then(|n| {
+                (n.kind == NodeKind::Interface && n.modport.is_some() && n.parent == Some(b))
+                    .then_some(id)
+            })
+        };
+        if is_kind(design, node, NodeKind::Port)
+            && design.node(node).and_then(|n| n.parent) == Some(b)
+        {
+            node
+        } else if let Some(owner) = self.iface_owner.get(&node) {
+            *self.raw_port.get(owner).unwrap_or(owner)
+        } else if let Some(p) = bundle_pin(node).or_else(|| {
+            design
+                .node(node)
+                .filter(|n| n.kind == NodeKind::Port)
+                .and_then(|n| n.parent)
+                .and_then(bundle_pin)
+        }) {
+            p
+        } else {
+            b
+        }
+    }
+
+    /// Map an edge endpoint to (box-in-scope, endpoint-to-draw).
+    #[inline]
+    fn resolve(&self, design: &Design, node: NodeId) -> Option<(NodeId, NodeId)> {
+        if let Some(bp) = self.boundary_pin(node) {
+            return Some((bp, bp));
+        }
+        // Anchor a bundle member on its pin only when one bundle views it —
+        // with several, a structural edge has no single right pin (each pin
+        // still wires by direction via the signal-join fold).
+        if let Some([(b, pin)]) = self.iface_pin.get(&node).map(Vec::as_slice) {
+            return Some((*b, *pin));
+        }
+        let b = box_of(design, node, &self.box_set)?;
+        Some((b, self.pin_in_box(design, node, b)))
+    }
+
+    /// A modport-level connection anchors on the bundle's view port (#96): when
+    /// the far end is a modport-qualified bundle pin, the bare-interface end
+    /// moves from its raw/box anchor onto the port carried by the matching
+    /// `Modport` node — so `.bus(bus.mem)` wires bundle pin to `mem`, directly.
+    #[inline]
+    fn view_port(&self, design: &Design, b: NodeId, far_pin: NodeId) -> Option<NodeId> {
+        if self.iface_owner.get(&b) != Some(&b) {
+            return None; // not a bare interface bundle in this scope
+        }
+        let view = design
+            .node(far_pin)
+            .filter(|x| x.kind == NodeKind::Interface)?
+            .modport
+            .as_deref()?;
+        design.node(b)?.children.iter().copied().find(|&c| {
+            design
+                .node(c)
+                .is_some_and(|m| m.kind == NodeKind::Modport && m.name == view)
+        })
+    }
+}
+
 /// The schematic of one scope at the process level (ADR 0004 default) — the bare
 /// entry point every existing caller uses. Delegates to [`scope_graph_with`] with
 /// [`Projection::ProcessLevel`], so its output is unchanged.
@@ -1346,14 +1575,13 @@ pub fn scope_graph_with(
         return Some(interface_interior(design, scope, scope_path));
     }
 
-    let boxes = child_boxes(design, scope, projection);
-    let box_set: std::collections::HashSet<NodeId> = boxes.iter().copied().collect();
+    let anchors = ScopeAnchors::for_scope(design, scope, projection);
     // Synthesized pins (FF clk/data/Q) are handed out per (box, signal) so boxes
     // sharing a net keep distinct pins. The same allocator is reused by the FF
     // wiring branch below so wires resolve to the pins built here.
     let mut pins = PinAlloc::new();
     let mut nodes: Vec<SchNode> = Vec::new();
-    for &b in &boxes {
+    for &b in &anchors.boxes {
         let node = match design.node(b).map(|n| n.kind) {
             Some(NodeKind::Ff) => make_ff_box(design, b, scope_path, &mut pins),
             Some(NodeKind::Comb) | Some(NodeKind::Latch) | Some(NodeKind::Assign) => {
@@ -1370,152 +1598,14 @@ pub fn scope_graph_with(
 
     // Boundary I/O: the scope's *own* ports, drawn as frame pins (inputs left,
     // outputs right). An edge that reaches such a port — or its same-path backing
-    // net/var — anchors to that pin so the connection is visible.
-    let own_ports: Vec<NodeId> = design
-        .node(scope)
-        .map(|n| {
-            n.children
-                .iter()
-                .copied()
-                .filter(|&c| is_kind(design, c, NodeKind::Port))
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut boundary_of: std::collections::HashMap<NodeId, NodeId> =
-        std::collections::HashMap::new();
-    if let Some(scope_node) = design.node(scope) {
-        for &p in &own_ports {
-            boundary_of.insert(p, p);
-            let ppath = design.node(p).map(|n| n.path.as_str());
-            for &sib in &scope_node.children {
-                if sib != p && design.node(sib).map(|n| n.path.as_str()) == ppath {
-                    boundary_of.insert(sib, p);
-                }
-            }
-        }
-    }
+    // net/var — anchors to that pin so the connection is visible (the mapping is
+    // `anchors.boundary_of`, built with the rest of the scope's anchoring).
     nodes.extend(
-        own_ports
+        anchors
+            .own_ports
             .iter()
             .filter_map(|&p| make_boundary_pin(design, p)),
     );
-
-    // Modport member pins: an in-scope modport-qualified interface port pins
-    // its bundle members, and each pin's edge points at the underlying member —
-    // a signal that lives *outside* this scope (in the interface instance), so
-    // `box_of` can never anchor it. Map member -> [(bundle box, pin)] so wires
-    // to bundle signals land on the pins instead of being dropped; several
-    // bundles in one scope can view the same member, hence the Vec. BTreeMap
-    // keeps the signal-join fold below deterministic.
-    let mut iface_pin: std::collections::BTreeMap<NodeId, Vec<(NodeId, NodeId)>> =
-        std::collections::BTreeMap::new();
-    for &b in &boxes {
-        let Some(bn) = design.node(b) else { continue };
-        if bn.kind != NodeKind::Interface || bn.modport.is_none() {
-            continue;
-        }
-        for &pid in &bn.children {
-            if !is_kind(design, pid, NodeKind::Port) {
-                continue;
-            }
-            for e in design.edges_of(pid) {
-                if e.port == pid {
-                    iface_pin.entry(e.endpoint).or_default().push((b, pid));
-                }
-            }
-        }
-    }
-
-    // Aggregate access ports on bare interface bundles (#96): map the instance
-    // and its non-Port interior (members, modport views) to the owning bundle,
-    // so edges reaching any of them anchor on the bundle's raw port (member
-    // taps fan out one wire per consumer pin); modport-level connections are
-    // retargeted onto the matching view's port in the edge fold below.
-    // BTreeMap keeps the signal-join fold deterministic.
-    let mut iface_owner: std::collections::BTreeMap<NodeId, NodeId> =
-        std::collections::BTreeMap::new();
-    let mut raw_port: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
-    for &b in &boxes {
-        let Some(bn) = design.node(b) else { continue };
-        if bn.kind != NodeKind::Interface || bn.modport.is_some() {
-            continue;
-        }
-        iface_owner.insert(b, b);
-        for &c in &bn.children {
-            // Port children stay real pins with their own edges (e.g. clk).
-            if !is_kind(design, c, NodeKind::Port) {
-                iface_owner.insert(c, b);
-            }
-        }
-        if access_ports(design, b).1.is_some() {
-            raw_port.insert(b, RAW_PORT_BASE + b);
-        }
-    }
-
-    // Map an edge endpoint to (box-in-scope, endpoint-to-draw).
-    let resolve = |node: NodeId| -> Option<(NodeId, NodeId)> {
-        if let Some(&bp) = boundary_of.get(&node) {
-            return Some((bp, bp));
-        }
-        // Anchor a bundle member on its pin only when one bundle views it —
-        // with several, a structural edge has no single right pin (each pin
-        // still wires by direction via the signal-join fold below).
-        if let Some([(b, pin)]) = iface_pin.get(&node).map(Vec::as_slice) {
-            return Some((*b, *pin));
-        }
-        let b = box_of(design, node, &box_set)?;
-        // A modport-qualified interface port directly under the box — or one of
-        // its member pins — anchors on the box's bundle pin (#106), collapsing
-        // the port-level and member-level edges onto one anchor.
-        let bundle_pin = |id: NodeId| {
-            design.node(id).and_then(|n| {
-                (n.kind == NodeKind::Interface && n.modport.is_some() && n.parent == Some(b))
-                    .then_some(id)
-            })
-        };
-        // Draw to the specific pin when the node is a Port directly under the
-        // box; a bare bundle's interior anchors on its raw access port (#96,
-        // falling back to the box when nothing taps members raw); otherwise
-        // anchor to the box.
-        let pin = if is_kind(design, node, NodeKind::Port)
-            && design.node(node).and_then(|n| n.parent) == Some(b)
-        {
-            node
-        } else if let Some(owner) = iface_owner.get(&node) {
-            *raw_port.get(owner).unwrap_or(owner)
-        } else if let Some(p) = bundle_pin(node).or_else(|| {
-            design
-                .node(node)
-                .filter(|n| n.kind == NodeKind::Port)
-                .and_then(|n| n.parent)
-                .and_then(bundle_pin)
-        }) {
-            p
-        } else {
-            b
-        };
-        Some((b, pin))
-    };
-
-    // A modport-level connection anchors on the bundle's view port (#96): when
-    // the far end is a modport-qualified bundle pin, the bare-interface end
-    // moves from its raw/box anchor onto the port carried by the matching
-    // `Modport` node — so `.bus(bus.mem)` wires bundle pin to `mem`, directly.
-    let view_port = |b: NodeId, far_pin: NodeId| -> Option<NodeId> {
-        if iface_owner.get(&b) != Some(&b) {
-            return None; // not a bare interface bundle in this scope
-        }
-        let view = design
-            .node(far_pin)
-            .filter(|x| x.kind == NodeKind::Interface)?
-            .modport
-            .as_deref()?;
-        design.node(b)?.children.iter().copied().find(|&c| {
-            design
-                .node(c)
-                .is_some_and(|m| m.kind == NodeKind::Modport && m.name == view)
-        })
-    };
 
     // Gather the scope-local candidate edges once (the structural and signal-join
     // passes below share it). Every edge those passes act on has its `port`
@@ -1527,13 +1617,13 @@ pub fn scope_graph_with(
     // allocation, and the `next_edge` sequence stay byte-identical to the scan.
     let mut cand: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
     {
-        let mut seed: std::collections::HashSet<NodeId> = box_set.clone();
-        for &b in &boxes {
+        let mut seed: std::collections::HashSet<NodeId> = anchors.box_set.clone();
+        for &b in &anchors.boxes {
             if let Some(bn) = design.node(b) {
                 seed.extend(bn.children.iter().copied());
             }
         }
-        seed.extend(boundary_of.keys().copied());
+        seed.extend(anchors.boundary_of.keys().copied());
         for &id in &seed {
             cand.extend(design.edge_indices_of(id).iter().copied());
         }
@@ -1550,10 +1640,13 @@ pub fn scope_graph_with(
         if is_logic_box(design, e.port) || is_gate(design, e.port) {
             continue;
         }
-        if let (Some((sb, src)), Some((tb, tgt))) = (resolve(e.port), resolve(e.endpoint)) {
+        if let (Some((sb, src)), Some((tb, tgt))) = (
+            anchors.resolve(design, e.port),
+            anchors.resolve(design, e.endpoint),
+        ) {
             let (src, tgt) = (
-                view_port(sb, tgt).unwrap_or(src),
-                view_port(tb, src).unwrap_or(tgt),
+                anchors.view_port(design, sb, tgt).unwrap_or(src),
+                anchors.view_port(design, tb, src).unwrap_or(tgt),
             );
             // Collapse parallel connections that land on the same two anchors
             // (e.g. both lanes' clk meeting one boundary pin).
@@ -1596,8 +1689,8 @@ pub fn scope_graph_with(
             let e = &design.edges()[i as usize];
             // Join a boundary signal under its boundary pin so a port and its
             // backing net share a bucket; other signals key on the signal node.
-            let key = *boundary_of.get(&e.endpoint).unwrap_or(&e.endpoint);
-            if is_logic_box(design, e.port) && box_set.contains(&e.port) {
+            let key = anchors.boundary_pin(e.endpoint).unwrap_or(e.endpoint);
+            if is_logic_box(design, e.port) && anchors.box_set.contains(&e.port) {
                 let anchor = (pins.pin(e.port, e.endpoint), e.select.clone());
                 if e.dir == Dir::Out {
                     drivers.entry(key).or_default().push(anchor);
@@ -1611,7 +1704,7 @@ pub fn scope_graph_with(
             // the assigned signal (key = that signal); each `in` edge loads either
             // a scope signal or a producer gate (key = the endpoint), matched by
             // the producer's self-driver added below.
-            if is_gate(design, e.port) && box_set.contains(&e.port) {
+            if is_gate(design, e.port) && anchors.box_set.contains(&e.port) {
                 if e.dir == Dir::Out {
                     drivers
                         .entry(key)
@@ -1622,7 +1715,7 @@ pub fn scope_graph_with(
                     // dropped Not's input), on the pin `make_gate_box` keyed the same
                     // way — so the wire runs operand -> bubbled pin, no Not box.
                     let (endpoint, _) = fold_inverter(design, e.endpoint);
-                    let key = *boundary_of.get(&endpoint).unwrap_or(&endpoint);
+                    let key = anchors.boundary_pin(endpoint).unwrap_or(endpoint);
                     loads
                         .entry(key)
                         .or_default()
@@ -1646,7 +1739,7 @@ pub fn scope_graph_with(
                 continue;
             }
             let Some(parent) = pn.parent else { continue };
-            if !box_set.contains(&parent) || !is_kind(design, parent, NodeKind::Instance) {
+            if !anchors.box_set.contains(&parent) || !is_kind(design, parent, NodeKind::Instance) {
                 continue;
             }
             let anchor = (e.port, e.select.clone());
@@ -1673,10 +1766,10 @@ pub fn scope_graph_with(
                 loads.entry(key).or_default().push((pin, None));
             }
         };
-        for &p in &own_ports {
+        for &p in &anchors.own_ports {
             fold_anchor(p, p);
         }
-        for (&sig, pins_of_sig) in &iface_pin {
+        for (&sig, pins_of_sig) in &anchors.iface_pin {
             for &(_, pin) in pins_of_sig {
                 fold_anchor(sig, pin);
             }
@@ -1685,11 +1778,11 @@ pub fn scope_graph_with(
         // in-scope logic box reading or driving `bus.valid` wires to the
         // aggregate port. The synthetic pin has no model node, so it folds as
         // both a driver and a load — the aggregate carries traffic both ways.
-        for (&member, &owner) in &iface_owner {
+        for (&member, &owner) in &anchors.iface_owner {
             if member == owner {
                 continue;
             }
-            if let Some(&rp) = raw_port.get(&owner) {
+            if let Some(&rp) = anchors.raw_port.get(&owner) {
                 fold_anchor(member, rp);
             }
         }
@@ -1697,7 +1790,7 @@ pub fn scope_graph_with(
         // gate feeding another gate has no `out` edge, so its output pin is offered
         // here, and the consumer's `in` edge (loaded under the producer's id above)
         // meets it. A root gate's self-key has no loads and is simply skipped.
-        for &b in &boxes {
+        for &b in &anchors.boxes {
             if is_gate(design, b) {
                 drivers.entry(b).or_default().push((pins.pin(b, b), None));
             }
@@ -1708,7 +1801,7 @@ pub fn scope_graph_with(
         // the box a read-out pin here and offer it as the driver — the wire then reaches
         // the memory glyph. Added only when something loads the array, so a memory with
         // no whole-array gate read is unchanged.
-        for &b in &boxes {
+        for &b in &anchors.boxes {
             if is_kind(design, b, NodeKind::Memory) && loads.contains_key(&b) {
                 let pid = pins.pin(b, b);
                 if let Some(node) = nodes.iter_mut().find(|n| n.id == b) {
@@ -1752,7 +1845,7 @@ pub fn scope_graph_with(
     // Constant tie-offs: a small source node outside each box, wired to every
     // input the model records as driven by a literal. ELK lays these out left of
     // the consumer and routes other wires around them.
-    for &b in &boxes {
+    for &b in &anchors.boxes {
         let Some(bn) = design.node(b) else { continue };
         for &pid in &bn.children {
             if !is_kind(design, pid, NodeKind::Port) {
@@ -2024,27 +2117,90 @@ fn cone_box_of(
     design: &Design,
     node: NodeId,
     projection: Projection,
-    cache: &mut std::collections::HashMap<NodeId, std::collections::HashSet<NodeId>>,
+    cache: &mut ScopeCache,
 ) -> Option<(NodeId, NodeId)> {
-    // Under GateLevel a primitive *is* a box, but it is a flat child of its
-    // process block rather than of the scope `child_boxes` dissolves, so the
+    // Under GateLevel a primitive can be a box, but it is a flat child of its
+    // process block rather than of the scope `child_boxes` dissolves — so the
     // walk below would step straight past it and land on the enclosing block.
+    //
+    // "Can be", not "is": `child_boxes` dissolves only `Comb`/`Latch`/`Assign`
+    // (through any `GenBlock`), and `gate_children` drops a foldable inverter.
+    // Ask it rather than assume, or the cone draws boxes the scope graph does
+    // not — a phantom inverter, or the internal mux cloud of an `Ff`, which
+    // stays opaque at both projections (#268).
     if projection == Projection::GateLevel && is_gate(design, node) {
-        let scope = design.node(node).and_then(|n| n.parent).unwrap_or(node);
-        return Some((node, scope));
+        // A single-fanout `~operand` is drawn as an `Inv` bubble on its
+        // consumer's input pin, never as a box. Redirect to that consumer (the
+        // one reader `is_foldable_not` guarantees) so the wire still lands.
+        let bx = if is_foldable_not(design, node) {
+            not_reader(design, node)?
+        } else {
+            node
+        };
+        // The scope a dissolved gate would belong to: past its own block and
+        // any generate wrappers, both of which `child_boxes` sees through.
+        let mut scope = design.node(bx).and_then(|n| n.parent);
+        while matches!(
+            scope.and_then(|s| design.node(s)).map(|n| n.kind),
+            Some(NodeKind::Comb | NodeKind::Latch | NodeKind::Assign | NodeKind::GenBlock)
+        ) {
+            scope = scope.and_then(|s| design.node(s)).and_then(|n| n.parent);
+        }
+        if let Some(s) = scope {
+            if cache.box_set(design, s, projection).contains(&bx) {
+                return Some((bx, s));
+            }
+        }
+        // Not dissolved anywhere — the gate sits inside an opaque box. Fall
+        // through to the ordinary walk, which lands on that box.
     }
     let mut cur = node;
     loop {
         let parent = design.node(cur)?.parent?;
-        let set = cache.entry(parent).or_insert_with(|| {
-            child_boxes(design, parent, projection)
-                .into_iter()
-                .collect()
-        });
-        if set.contains(&cur) {
+        if cache.box_set(design, parent, projection).contains(&cur) {
             return Some((cur, parent));
         }
         cur = parent;
+    }
+}
+
+/// Per-scope box membership and [`ScopeAnchors`], each built on first touch.
+///
+/// A cone walks an arbitrary node set across many scopes, so it cannot hold one
+/// set of anchors the way [`scope_graph_with`] does — but every scope it touches
+/// gets the *same* anchors that view would build for it, which is the whole
+/// point: the two cannot then disagree about which pin a wire lands on.
+///
+/// The two halves are cached apart because they are wanted in very different
+/// volumes. [`cone_box_of`]'s walk-up tests membership at *every* ancestor —
+/// blocks, generate wrappers, instances — while only a box that actually
+/// anchors a wire needs the full anchoring. Building all of it per ancestor
+/// costs a `boundary_of` pass that is quadratic in a scope's ports x children,
+/// which measurably slowed the `nav` benchmark's cone for nothing.
+#[derive(Default)]
+struct ScopeCache {
+    boxes: std::collections::HashMap<NodeId, std::collections::HashSet<NodeId>>,
+    anchors: std::collections::HashMap<NodeId, ScopeAnchors>,
+}
+
+impl ScopeCache {
+    /// Box membership alone — the cheap half, and all the walk-up needs.
+    fn box_set(
+        &mut self,
+        design: &Design,
+        scope: NodeId,
+        projection: Projection,
+    ) -> &std::collections::HashSet<NodeId> {
+        self.boxes
+            .entry(scope)
+            .or_insert_with(|| child_boxes(design, scope, projection).into_iter().collect())
+    }
+
+    /// The full anchoring, built only where a pin must actually be resolved.
+    fn anchors(&mut self, design: &Design, scope: NodeId, projection: Projection) -> &ScopeAnchors {
+        self.anchors
+            .entry(scope)
+            .or_insert_with(|| ScopeAnchors::for_scope(design, scope, projection))
     }
 }
 
@@ -2066,17 +2222,60 @@ fn cone_box_node(
     }
 }
 
+/// Whether `id` is `bx` or lives somewhere under it.
+fn within_box(design: &Design, id: NodeId, bx: NodeId) -> bool {
+    let mut cur = id;
+    loop {
+        if cur == bx {
+            return true;
+        }
+        match design.node(cur).and_then(|n| n.parent) {
+            Some(p) => cur = p,
+            None => return false,
+        }
+    }
+}
+
 /// The pin on `bx` that `e` lands on, keyed exactly as that box's builder keyed
 /// it — so the id is guaranteed to exist in the emitted node.
-fn cone_pin_for(design: &Design, bx: NodeId, e: &Edge, pins: &mut PinAlloc) -> NodeId {
+///
+/// `inner` is the edge end that [`cone_box_of`] resolved to `bx`, i.e. the node
+/// actually inside the box; `scope` is the scope that box lives in. Only the
+/// instance/interface arm needs the scope's full anchoring, so the cache is
+/// passed rather than the anchors — the other arms must not pay to build them.
+#[allow(clippy::too_many_arguments)]
+fn cone_pin_for(
+    design: &Design,
+    cache: &mut ScopeCache,
+    scope: NodeId,
+    projection: Projection,
+    bx: NodeId,
+    inner: NodeId,
+    e: &Edge,
+    pins: &mut PinAlloc,
+) -> NodeId {
     let kind = design.node(bx).map(|n| n.kind);
     match kind {
+        // `make_box` keys these on real model ids — a child `Port`, a `Modport`
+        // view, or the synthesized `RAW_PORT_BASE + bx` raw access port — so the
+        // scope graph's own rule is the only thing that names them correctly
+        // (#269: a bare bundle's raw member is a `Var`, and guessing "a Port
+        // child of the box" left it anchored on an id `make_box` never emitted).
         Some(NodeKind::Instance) | Some(NodeKind::Interface) => {
-            for cand in [e.port, e.endpoint] {
-                if is_kind(design, cand, NodeKind::Port)
-                    && design.node(cand).and_then(|n| n.parent) == Some(bx)
-                {
-                    return cand;
+            // `inner` first — it is the end `cone_box_of` placed in this box —
+            // then the edge's own ends, because the port/backing-net dual node
+            // means the pin-bearing `Port` is often the *other* end of the same
+            // edge. Each candidate must actually live in `bx`: `pin_in_box`'s
+            // bundle rules are keyed on the scope, so a member of a *different*
+            // bundle would otherwise resolve to that bundle's raw port.
+            let anchors = cache.anchors(design, scope, projection);
+            for cand in [inner, e.port, e.endpoint] {
+                if !within_box(design, cand, bx) {
+                    continue;
+                }
+                let pin = anchors.pin_in_box(design, cand, bx);
+                if pin != bx {
+                    return pin;
                 }
             }
             bx
@@ -2183,8 +2382,7 @@ pub fn cone_with(
         std::collections::HashSet::new();
     let mut next_edge = design.edges().len() as u32;
     let mut truncated = false;
-    let mut box_cache: std::collections::HashMap<NodeId, std::collections::HashSet<NodeId>> =
-        std::collections::HashMap::new();
+    let mut scopes = ScopeCache::default();
     let mut more_on: std::collections::HashMap<NodeId, u32> = std::collections::HashMap::new();
 
     let mut frontier = seed_signals(design, seed);
@@ -2220,8 +2418,7 @@ pub fn cone_with(
                     continue;
                 }
                 let other = if e.port == sig { e.endpoint } else { e.port };
-                let Some((bx, scope)) = cone_box_of(design, other, projection, &mut box_cache)
-                else {
+                let Some((bx, scope)) = cone_box_of(design, other, projection, &mut scopes) else {
                     // No enclosing box: a module port or free net. Emit it as a
                     // stub so the wire has a real endpoint, and keep walking —
                     // this is how the trace crosses a hierarchy wall.
@@ -2230,6 +2427,8 @@ pub fn cone_with(
                     }
                     continue;
                 };
+                // The box built for this hop, not yet committed to `nodes`.
+                let mut fresh: Option<SchNode> = None;
                 if !emitted.contains(&bx) {
                     if nodes.len() >= limits.boxes {
                         truncated = true;
@@ -2243,16 +2442,46 @@ pub fn cone_with(
                     let Some(node) = cone_box_node(design, bx, &scope_path, &mut pins) else {
                         continue;
                     };
-                    emitted_pins.extend(node.ports.iter().map(|p| p.id));
-                    nodes.push(node);
-                    emitted.insert(bx);
+                    // Held back, not committed: the connection that reached this
+                    // box may still fail to resolve to one of its pins, and a box
+                    // pushed before that is known becomes an edge-less orphan on
+                    // canvas (#269). `PinAlloc` memoizes per `(box, signal)`, so
+                    // rebuilding the node on a later hop hands out the same ids —
+                    // discarding one here costs nothing and shifts nothing.
+                    fresh = Some(node);
                 }
-                let pin = cone_pin_for(design, bx, e, &mut pins);
+                let pin = cone_pin_for(
+                    design,
+                    &mut scopes,
+                    scope,
+                    projection,
+                    bx,
+                    other,
+                    e,
+                    &mut pins,
+                );
                 // A pin the box did not actually emit cannot anchor a wire (an
                 // instance edge that resolves to no port child, say). Drop the
                 // connection rather than emit an edge pointing at nothing.
-                if !emitted_pins.contains(&pin) {
+                //
+                // This is a real, load-bearing case, not a should-never-happen
+                // backstop: a cone routinely reaches a signal *inside* an
+                // instance that the instance does not expose as a port, and a
+                // logic box's builder emits pins only for the signals it wires.
+                // Neither has a pin, and neither is a truncation — so this drop
+                // deliberately feeds neither `truncated` nor the `more` counts,
+                // which would misreport it as the fan-out cap engaging.
+                let anchored = emitted_pins.contains(&pin)
+                    || fresh
+                        .as_ref()
+                        .is_some_and(|n| n.ports.iter().any(|p| p.id == pin));
+                if !anchored {
                     continue;
+                }
+                if let Some(node) = fresh {
+                    emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                    nodes.push(node);
+                    emitted.insert(bx);
                 }
                 kept += 1;
                 sig_pins.push(pin);
@@ -2261,10 +2490,20 @@ pub fn cone_with(
                 } else {
                     loads.push((pin, e.select.clone()));
                 }
-                // Next hop: this box's other signals.
+                // Next hop: this box's other signals — but never one the scope
+                // graph draws inline. `child_boxes` makes no box for those, so
+                // the next hop finds nothing on the far side and the one-sided
+                // stub heuristic below re-materializes them as phantom one-pin
+                // boxes duplicating the decoration already drawn (#268). A
+                // parameter tie is inline the same way, but only on a gate's own
+                // operand edge — elsewhere a `Param` is an ordinary signal.
                 for be in design.edges_of(bx) {
                     let bsig = if be.port == bx { be.endpoint } else { be.port };
-                    if bsig != sig && visited.insert(bsig) {
+                    let inline = is_drawn_inline(design, bsig, projection)
+                        || (projection == Projection::GateLevel
+                            && is_gate(design, be.port)
+                            && is_kind(design, bsig, NodeKind::Param));
+                    if bsig != sig && !inline && visited.insert(bsig) {
                         next.push(bsig);
                     }
                 }
@@ -2277,8 +2516,17 @@ pub fn cone_with(
             let mut stub_pin = None;
             // A signal that is itself a box (a `Memory` array is both) already
             // has real pins from its own builder; synthesizing a stub pin keyed
-            // on its model id would name a pin that box never emitted.
-            if (drivers.is_empty() != loads.is_empty()) && !emitted.contains(&sig) {
+            // on its model id would name a pin that box never emitted. A node
+            // the scope graph draws inline gets no stub either — the frontier
+            // filter above keeps those out, and this covers a seed that is one.
+            // Nor does a gate primitive: a stub stands in for a *signal* the
+            // trace reaches, and at ProcessLevel a gate is interior to its block
+            // — stubbing it drew a `Mux` the scope graph never shows (#268).
+            if (drivers.is_empty() != loads.is_empty())
+                && !emitted.contains(&sig)
+                && !is_drawn_inline(design, sig, projection)
+                && !is_gate(design, sig)
+            {
                 let stub_side = if drivers.is_empty() {
                     Side::East
                 } else {
@@ -2342,6 +2590,22 @@ pub fn cone_with(
             }
         }
     }
+
+    // Drop anything left without a wire. A box is emitted as soon as one
+    // connection anchors on it, but the signal-join only draws a wire where a
+    // driver meets a load — so the last hop can leave a box whose every
+    // connection was to a signal with nothing on the other side. Such a box
+    // shows no connectivity at all, which is the whole content of this view;
+    // an edge-less box on canvas reads as a claim about the design that the
+    // model does not make (#269). A pin carrying a `more` count stays: that
+    // count *is* the missing connectivity, reported rather than hidden.
+    let wired: std::collections::HashSet<NodeId> =
+        edges.iter().flat_map(|e| [e.source, e.target]).collect();
+    nodes.retain(|n| {
+        n.ports
+            .iter()
+            .any(|p| wired.contains(&p.id) || p.more.is_some())
+    });
 
     SchematicGraph {
         root,
