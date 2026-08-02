@@ -61,7 +61,11 @@ pkg=$(find /pkg -name "*.$FMT" | head -1)
 case "$FMT" in
   deb)
     apt-get update -qq
-    payload() { dpkg-deb -c "$pkg" | awk '{print $NF}' | sed 's|^\.||'; }
+    # Tauri writes the tar entries as `usr/bin/x`, not the `./usr/bin/x` dpkg
+    # normally emits — so strip a leading `.` if present and then force exactly
+    # one leading slash, rather than assuming either spelling. Getting this
+    # wrong makes every path miss `^/usr/...` and the payload look empty.
+    payload() { dpkg-deb -c "$pkg" | awk '{print $NF}' | sed -e 's|^\.||' -e 's|^/*|/|'; }
     requires() { dpkg-deb -f "$pkg" Depends; }
     # apt resolves dependencies for a local file only when given a PATH, hence
     # the explicit "$pkg" rather than a bare package name.
@@ -86,10 +90,13 @@ requires | grep -qi 'webkit' || {
 
 echo "--- payload ---"
 payload
-bin=$(payload | grep -E '^/usr/bin/[^/]+$' | head -1)
+# `|| true` on every capture below: `set -e` with `pipefail` aborts the whole
+# script when a grep matches nothing, which would skip the explicit guards and
+# fail with no message at all — the exact way the first .deb run died.
+bin=$(payload | grep -E '^/usr/bin/[^/]+$' | head -1 || true)
 test -n "$bin" || { echo "::error::the .$FMT installs no /usr/bin launcher"; exit 1; }
 
-desktop=$(payload | grep -E '^/usr/share/applications/.+\.desktop$' | head -1)
+desktop=$(payload | grep -E '^/usr/share/applications/.+\.desktop$' | head -1 || true)
 test -n "$desktop" || { echo "::error::the .$FMT installs no .desktop entry"; exit 1; }
 
 echo "--- install ---"
@@ -108,7 +115,7 @@ desktop-file-validate "$desktop"
 # Exec= must name something that exists. A .desktop entry pointing at a binary
 # under a different name installs fine and then does nothing when clicked —
 # invisible to every other check here.
-exec_cmd=$(awk -F= '/^Exec=/{print $2; exit}' "$desktop" | awk '{print $1}')
+exec_cmd=$(awk -F= '/^Exec=/{print $2; exit}' "$desktop" | awk '{print $1}' || true)
 command -v "$exec_cmd" >/dev/null || {
   echo "::error::$desktop has Exec=$exec_cmd, which is not on PATH (installed launcher is $bin)"
   exit 1
@@ -117,7 +124,7 @@ command -v "$exec_cmd" >/dev/null || {
 # Icon= is a bare theme name, so at least one hicolor size must carry it.
 icon=$(awk -F= '/^Icon=/{print $2; exit}' "$desktop")
 test -n "$icon" || { echo "::error::$desktop declares no Icon="; exit 1; }
-found=$(find /usr/share/icons/hicolor -name "$icon.png" | sort)
+found=$(find /usr/share/icons/hicolor -name "$icon.png" | sort || true)
 test -n "$found" || { echo "::error::no installed hicolor icon matches Icon=$icon"; exit 1; }
 echo "installed icons for '$icon':"
 echo "$found"
