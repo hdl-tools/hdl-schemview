@@ -121,12 +121,27 @@ Verilator for generating fixture traces.
 ### Option A — Nix (most reproducible)
 
 A flake provides a dev shell with a pinned Verilator plus the Rust and Python
-toolchains:
+toolchains. Its `nixpkgs` is pinned by a committed `flake.lock`, and its Rust
+version is read out of `core/rust-toolchain.toml` at evaluation time — so the
+shell's compiler and the rustup pin cannot drift apart:
 
 ```bash
 nix develop            # full shell: verilator + rust + python + uv + jq
 nix develop .#verilator  # just a pinned Verilator (for trace regen)
 ```
+
+The CLI is also a package, so you can build or run it without a checkout:
+
+```bash
+nix run   github:chuanseng-ng/hdl-schemview#svxprobe -- --help
+nix build .#svxprobe && ./result/bin/svxprobe --help
+nix flake check        # mirrors the Rust PR gate: fmt + clippy + test
+```
+
+Downstream flakes can consume the package via `overlays.default`. The Python
+harness is **not** packaged — the dev shell's `uv sync` fetches `pyslang` from
+PyPI, which is deliberately impure; see
+[#243](https://github.com/chuanseng-ng/hdl-schemview/issues/243).
 
 ### Option B — per-language tools
 
