@@ -76,7 +76,7 @@ not suppress this: GitHub does not evaluate path filters for pushes of tags.
 | Job | On a tag | What it contributes |
 | --- | --- | --- |
 | `build` | ✅ | `npm test`, `npm run build`, `cargo build` (Ubuntu + Windows). A red test suite **blocks the release**. |
-| `bundle` | ✅ | The real `tauri build` on Ubuntu + Windows + macOS. Windows uses the `tauri.offline.conf.json` overlay, so WebView2 is vendored. Linux additionally installs the `.rpm` in a Fedora container and runs it headlessly (#260). |
+| `bundle` | ✅ | The real `tauri build` on Ubuntu + Windows + macOS. Windows uses the `tauri.offline.conf.json` overlay, so WebView2 is vendored. Linux additionally installs the `.deb` and `.rpm` in clean containers, runs each headlessly, and validates its desktop entry and icons (#260, #261). |
 | `release` | ✅ | Downloads every bundle artifact, stages the installers flat, writes `SHA256SUMS`, and creates a **draft** release. |
 
 Notes on the `release` job:
@@ -116,9 +116,11 @@ The release is created as a **draft** on purpose: macOS is unverified end-to-end
 1. Open the draft under **Releases**.
 2. Check the assets — the installers plus `SHA256SUMS`, all carrying the expected
    version in their filenames.
-3. Sanity-run at least the Windows installer and the AppImage. The `.rpm` needs
-   no manual check: `bundle` installs it in a clean Fedora container and runs it
-   headlessly (#260). The `.deb` is still unverified — see #261.
+3. Sanity-run at least the Windows installer and the AppImage. The `.deb` and
+   `.rpm` need no manual check: `bundle` installs each in a clean container,
+   runs it headlessly, and validates its desktop entry and icons (#260, #261).
+   What CI cannot check is whether the launcher entry *looks* right in a desktop
+   environment — if that matters for a release, open it once by hand.
 4. Edit the generated notes if needed, then **Publish**.
 
 ## Verifying an artifact after copying

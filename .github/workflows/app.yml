@@ -280,65 +280,21 @@ jobs:
           grep -q 'Single-shot run' "$RUNNER_TEMP/appimage-bench.md"
           grep -q 'hdl-schemview --bench' "$RUNNER_TEMP/appimage-bench.md"
 
-      # #260. The .rpm cannot be tested on the runner itself: the *Install Tauri
-      # Linux deps* step above already put WebKitGTK and GTK there, so a local
-      # install would pass no matter what `rpm.depends` declares. A clean
-      # container is the only place the declaration is actually load-bearing.
+      # The .deb and .rpm are proven the same way and by the same script:
+      # installed in a clean container, run headlessly, desktop entry and icons
+      # checked. See .github/scripts/linux-package-smoke.sh for why a container
+      # is required (the runner already has WebKitGTK, so a local install would
+      # pass whatever `depends` declares) and what each assertion buys.
       #
-      # Two distinct failures are checked, because they need different fixes:
-      #
-      #   1. `rpm -qp --requires` — the package declares WebKitGTK at all.
-      #      Without a `bundle.linux.rpm` key Tauri emits an RPM with no
-      #      dependencies whatsoever, which installs cleanly and then cannot
-      #      launch. That is the worst outcome here, and it is silent.
-      #   2. `dnf install` + a real headless run — the declared names resolve on
-      #      a current Fedora *and* nothing undeclared is missing at load time.
-      #      The binary links WebKitGTK as a NEEDED library, so the loader
-      #      resolves it even though `--bench` never opens a window.
-      #
-      # The image is deliberately unpinned: a package rename (the 4.0 -> 4.1
-      # churn already happened once) should surface here, not in a user's
-      # install. --nogpgcheck because the RPM is unsigned (ADR 0009). The mount
-      # is read-only so the root-owned container cannot write into the workspace
-      # and break the upload step below.
+      # Two steps rather than a loop so a failure names the format in the job
+      # summary, and so one format going red does not mask the other.
+      - name: DEB install smoke (Ubuntu container)
+        if: runner.os == 'Linux'
+        run: .github/scripts/linux-package-smoke.sh deb
+
       - name: RPM install smoke (Fedora container)
         if: runner.os == 'Linux'
-        run: |
-          rpmdir="$PWD/app/src-tauri/target/release/bundle/rpm"
-          rpm=$(find "$rpmdir" -name '*.rpm' 2>/dev/null | head -1)
-          test -n "$rpm" || { echo "::error::no .rpm was produced"; exit 1; }
-          echo "testing $(basename "$rpm")"
-          docker run --rm -i -v "$rpmdir:/rpm:ro" fedora:latest bash -s <<'EOF'
-          set -euo pipefail
-          pkg=$(find /rpm -name '*.rpm' | head -1)
-
-          echo "--- declared requires ---"
-          rpm -qp --requires "$pkg"
-          rpm -qp --requires "$pkg" | grep -q 'webkit2gtk4.1' || {
-            echo "::error::the .rpm declares no WebKitGTK dependency — check bundle.linux.rpm.depends"
-            exit 1
-          }
-
-          # Resolve the launcher from the package rather than assuming it is
-          # named after productName: Tauri installs the *crate* binary
-          # (hdl-schemview-app), so a hardcoded `hdl-schemview` is not found.
-          # Reading it back from the payload also means a future rename fails
-          # loudly here instead of silently testing nothing.
-          echo "--- payload ---"
-          rpm -qpl "$pkg"
-          bin=$(rpm -qpl "$pkg" | grep -E '^/usr/bin/[^/]+$' | head -1)
-          test -n "$bin" || {
-            echo "::error::the .rpm installs no /usr/bin launcher"
-            exit 1
-          }
-
-          dnf install -y --nogpgcheck "$pkg"
-
-          test -x "$bin" || { echo "::error::$bin missing after install"; exit 1; }
-          "$bin" --bench --bases golden --out /tmp/rpm-bench.md
-          grep -q 'Single-shot run' /tmp/rpm-bench.md
-          grep -q 'hdl-schemview --bench' /tmp/rpm-bench.md
-          EOF
+        run: .github/scripts/linux-package-smoke.sh rpm
 
       - uses: actions/upload-artifact@v4
         if: always()
