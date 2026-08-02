@@ -1,6 +1,7 @@
 # ADR 0009 — Packaging for isolated environments
 
-- **Status:** Accepted — tier 1 in progress (tracked by #240)
+- **Status:** Accepted — tier 1 shipped in `v0.1.0` (2026-08-01), pending offline-install
+  verification on real hardware (#240); tier 2 gated on the PyInstaller spike (#277)
 - **Date:** 2026-07-26
 - **Deciders:** project maintainers
 - **Relates to:** `app/src-tauri` (bundle config), `core/crates/gui` (`elaborate_and_load`),
@@ -51,7 +52,8 @@ metrics file the collector scripts produce.
 **Tier 2 — frozen harness sidecar.** Freeze `svxprobe-elaborate` (CPython + pyslang) into
 one self-contained executable per OS, ship it via `bundle.externalBin`, and resolve it as
 a Tauri sidecar with the existing PATH lookup kept as a fallback. **Gated on a spike**
-proving PyInstaller handles pyslang's compiled extension on all three OSes.
+proving PyInstaller handles pyslang's compiled extension on all three OSes. Tracked
+separately as #277, so a shipped tier 1 is not held open behind an unstarted tier 2.
 
 For the benchmark specifically: **ship the scenario layer only, and move the orchestration
 into Rust.** Criterion stays dev-only.
