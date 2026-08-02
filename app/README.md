@@ -203,9 +203,9 @@ collaborators only.
 The Linux leg also builds a `.deb` (Debian/Ubuntu) and an `.rpm` (Fedora/RHEL,
 #260). Both declare WebKitGTK as a system dependency, so they need a package
 manager with repo access — **use the AppImage** on an isolated box. CI installs
-the `.rpm` in a clean Fedora container and runs it headlessly, which is what
-proves its declared dependency names are real; the `.deb` is not yet covered
-(#261).
+**both** in clean containers (Ubuntu and Fedora) and runs each headlessly, which
+is what proves the declared dependency names are real — the build runner already
+has WebKitGTK, so installing there would pass regardless (#260, #261).
 
 The default config deliberately carries **no** WebView2 payload path, so an
 ordinary `npm run tauri build` still works for contributors. The offline Windows

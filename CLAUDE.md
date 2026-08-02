@@ -376,11 +376,18 @@ fast PR signal) and **`bundle`** (#240 — a real `tauri build` on Ubuntu + Wind
 **macOS**, uploading each artifact; `cargo build` never exercises the bundler, so
 NSIS/AppImage/`.app` breakage would otherwise surface only at release). The Linux leg
 builds `appimage,deb,rpm` — **`.rpm` since #260**, which needs no `rpmbuild` (Tauri 2
-writes the archive through the pure-Rust `rpm` crate), and which is smoke-tested by
-installing it in a **clean Fedora container**: the runner itself already has WebKitGTK
-from the build deps, so a local install would pass whatever `bundle.linux.rpm.depends`
-says — and unset, Tauri emits an RPM with *no* dependencies at all, which installs and
-then cannot launch. `bundle` skips pull requests, since macOS bills at 10× minutes on
+writes the archive through the pure-Rust `rpm` crate). **Both** Linux packages are
+smoke-tested by `.github/scripts/linux-package-smoke.sh <deb|rpm>` (#261), which
+installs each in a **clean container** — Ubuntu 24.04 to match the build host's glibc,
+Fedora unpinned so a package rename surfaces here — and asserts four things: the
+package declares WebKitGTK, it installs, the launcher runs headlessly (`--bench`), and
+its `.desktop`/icons land where a launcher finds them. A container is required because
+the runner itself already has WebKitGTK from the build deps, so a local install would
+pass whatever `depends` declares — and unset, Tauri emits an RPM with *no* dependencies
+at all, which installs and then cannot launch. The launcher is read back out of the
+payload rather than assumed: Tauri installs the **crate** binary (`hdl-schemview-app`),
+not one named after `productName`, so every doc that says `hdl-schemview` names a
+command that does not exist on a package install (#275). `bundle` skips pull requests, since macOS bills at 10× minutes on
 a private repo — so a packaging change is proven by dispatching the workflow on its
 branch instead, and `workflow_dispatch`
 takes a **`bundle_os`** input (#260) narrowing the matrix to one OS (~5 billed minutes

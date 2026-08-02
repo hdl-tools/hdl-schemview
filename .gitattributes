@@ -29,3 +29,8 @@ fixtures/**/*.json text eol=lf
 *.vcd  text eol=lf
 *.fst  binary
 *.ghw  binary
+
+# Shell scripts run on Linux CI runners. A CRLF checkout makes the shebang
+# `#!/usr/bin/env bash`, which dies as "bad interpreter" — so these must be LF
+# on every platform regardless of core.autocrlf (#261).
+*.sh   text eol=lf
