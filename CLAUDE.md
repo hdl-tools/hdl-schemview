@@ -424,7 +424,7 @@ stages just the installers flat (`.exe`/`.AppImage`/`.deb`/`.rpm`/`.dmg` — the
 for a human to check and publish (macOS stays unverified end-to-end, ADR 0009). Its
 `contents: write` is **job-level**, so the PR-running jobs keep the workflow's default
 read token; `bundle`'s first step on a tag asserts the tag and all three manifests
-(`tauri.conf.json`, `app/package.json`, `app/src-tauri/Cargo.toml`, all `0.1.0`) carry
+(`tauri.conf.json`, `app/package.json`, `app/src-tauri/Cargo.toml`) carry
 one version — a tag/`tauri.conf.json` mismatch *breaks* the release, since the bundle
 *filenames* come from that config, while the other two are cosmetic; both are reported
 in one run and both fail. Runbook: `docs/releasing.md`.
