@@ -24,7 +24,9 @@
 //! * `synth` — the deterministic generator, and with it the `665`/`100K`/`1M`
 //!   bases.
 //! * `golden` — embeds the 2.1 MB committed fixture (see [`golden`]).
-//! * `collect` — the matrix driver and markdown renderer (see [`collect`]).
+//! * `collect` — the matrix driver and markdown renderer (see [`collect`]),
+//!   plus the designlist front-end (see [`elaborate`]), which is why this
+//!   feature is the one that pulls in `svxprobe-gui`.
 //!
 //! The `real` basis is deliberately unconditional: a `--no-default-features`
 //! build still benchmarks a user's own elaborated model, which is the one basis
@@ -32,6 +34,8 @@
 
 #[cfg(feature = "collect")]
 pub mod collect;
+#[cfg(feature = "collect")]
+pub mod elaborate;
 pub mod golden;
 pub mod mem;
 #[cfg(feature = "synth")]

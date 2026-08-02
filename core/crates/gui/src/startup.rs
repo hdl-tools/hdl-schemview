@@ -58,6 +58,16 @@ BENCHMARK (#240):
                         run the scalability scenarios, write a metrics file and
                         exit. Single-shot (no criterion layer), so latency
                         figures are order-of-magnitude; memory figures are not.
+    --bench -f <filelist.f> -top <name> [-I <incdir>]... [-model-out <path>]
+                        elaborate a designlist first and measure it as the
+                        `real` basis (#255), instead of passing -model. The
+                        elaborated JSON's path is printed so a later run can
+                        reuse it with -model; -model-out keeps it somewhere
+                        durable. Mutually exclusive with -model.
+
+ENVIRONMENT:
+    SVXPROBE_ELABORATE  path to the elaboration harness, when it is not on PATH
+                        (e.g. elaborate/.venv/Scripts/svxprobe-elaborate.exe)
 
 With no arguments the app opens the normal load form. Long flags accept either
 one dash (-top) or two (--top).";
@@ -98,7 +108,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<StartupArg
         };
         match arg.as_str() {
             "-h" | "--help" => return Err(StartupError::Help),
-            "-f" => {
+            "-f" | "--filelist" => {
                 let v = value("-f")?;
                 if filelist.is_some() {
                     return Err(StartupError::Usage(
@@ -108,7 +118,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<StartupArg
                 filelist = Some(v);
             }
             "-top" | "--top" => top = Some(value("-top")?),
-            "-I" => incdirs.push(value("-I")?),
+            "-I" | "--include" => incdirs.push(value("-I")?),
             "-trace" | "--trace" => trace = Some(value("-trace")?),
             "-src-root" | "--src-root" => src_root = Some(value("-src-root")?),
             other => {
@@ -169,6 +179,16 @@ pub struct BenchRequest {
     pub out: Option<String>,
     /// Override the basis list entirely, e.g. `"665 100K"`.
     pub bases: Option<Vec<String>>,
+    /// A designlist to elaborate into the `real` basis (#255) — a front-end to
+    /// [`BenchRequest::model`], mutually exclusive with it.
+    pub filelist: Option<String>,
+    /// Top module name; required with (and only with) [`BenchRequest::filelist`].
+    pub top: Option<String>,
+    /// Include directories for the elaboration, repeatable.
+    pub incdirs: Vec<String>,
+    /// Keep the elaborated `hierarchy.json` here instead of a temp scratch dir,
+    /// so a second run can skip elaboration entirely.
+    pub model_out: Option<String>,
 }
 
 /// Peel the benchmark modes off argv, else delegate to [`parse`] unchanged.
@@ -212,6 +232,13 @@ fn parse_bench(args: impl IntoIterator<Item = String>) -> Result<BenchRequest, S
             "-full" | "--full" => req.full = true,
             "-model" | "--model" => req.model = Some(value("-model")?),
             "-out" | "--out" => req.out = Some(value("-out")?),
+            // The designlist front-end (#255). Spelled exactly like the GUI
+            // arm's flags, since they mean the same thing and are elaborated by
+            // the same argv builder.
+            "-f" | "--filelist" => req.filelist = Some(value("-f")?),
+            "-top" | "--top" => req.top = Some(value("-top")?),
+            "-I" | "--include" => req.incdirs.push(value("-I")?),
+            "-model-out" | "--model-out" => req.model_out = Some(value("-model-out")?),
             // One shell word, whitespace-separated, mirroring the collector's
             // `--bases "golden 665"`. An all-whitespace value is a typo, not a
             // request for zero bases — reject it rather than run nothing.
@@ -232,7 +259,42 @@ fn parse_bench(args: impl IntoIterator<Item = String>) -> Result<BenchRequest, S
             }
         }
     }
+    check_designlist(&req)?;
     Ok(req)
+}
+
+/// The designlist flags' cross-flag rules (#255), shared in spirit with the
+/// dev collector's `parse_args` — each one exists because the alternative is a
+/// run that silently measures something other than what was asked for.
+fn check_designlist(req: &BenchRequest) -> Result<(), StartupError> {
+    let usage = |m: &str| Err(StartupError::Usage(m.to_string()));
+    if req.filelist.is_some() && req.model.is_some() {
+        // Elaborating and then measuring a *different* model would report
+        // numbers for neither.
+        return usage("-f and -model are mutually exclusive (-f elaborates one for you)");
+    }
+    match (&req.filelist, &req.top) {
+        (Some(_), None) => return usage("-f requires -top <name>"),
+        (None, Some(_)) => return usage("-top requires -f <filelist>"),
+        _ => {}
+    }
+    if req.filelist.is_none() {
+        // Silently ignoring these is how a run ends up measuring the default
+        // matrix while the operator believes it elaborated their design.
+        if !req.incdirs.is_empty() {
+            return usage("-I requires -f <filelist>");
+        }
+        if req.model_out.is_some() {
+            return usage("-model-out requires -f <filelist>");
+        }
+    } else if let Some(bases) = &req.bases {
+        // An explicit -bases replaces the default list, so one without `real`
+        // would elaborate the design and then never measure it.
+        if !bases.iter().any(|b| b == "real") {
+            return usage("-f elaborates the `real` basis, but -bases does not include it");
+        }
+    }
+    Ok(())
 }
 
 /// The directory a relative launch path should resolve against: the directory
@@ -516,6 +578,7 @@ mod tests {
             model: Some("m.json".into()),
             out: Some("o.md".into()),
             bases: None,
+            ..BenchRequest::default()
         });
         assert_eq!(
             launch(&["--bench", "--full", "--model", "m.json", "--out", "o.md"]),
@@ -525,6 +588,95 @@ mod tests {
             launch(&["--bench", "-full", "-model", "m.json", "-out", "o.md"]),
             Ok(want)
         );
+    }
+
+    #[test]
+    fn bench_accepts_the_designlist_flags_under_either_dash_style() {
+        let want = Launch::Bench(BenchRequest {
+            filelist: Some("soc.f".into()),
+            top: Some("soc_top".into()),
+            incdirs: vec!["rtl/inc".into(), "vendor/inc".into()],
+            model_out: Some("keep.json".into()),
+            ..BenchRequest::default()
+        });
+        assert_eq!(
+            launch(&[
+                "--bench",
+                "--filelist",
+                "soc.f",
+                "--top",
+                "soc_top",
+                "--include",
+                "rtl/inc",
+                "--include",
+                "vendor/inc",
+                "--model-out",
+                "keep.json",
+            ]),
+            Ok(want.clone())
+        );
+        assert_eq!(
+            launch(&[
+                "--bench",
+                "-f",
+                "soc.f",
+                "-top",
+                "soc_top",
+                "-I",
+                "rtl/inc",
+                "-I",
+                "vendor/inc",
+                "-model-out",
+                "keep.json",
+            ]),
+            Ok(want)
+        );
+    }
+
+    // Each rule exists because the alternative is a run that silently measures
+    // something other than what was asked for — pin the messages, not just the
+    // variant, since the message is the whole remedy the operator gets.
+    #[test]
+    fn bench_designlist_flags_require_each_other() {
+        let msg = |args: &[&str]| match launch(args) {
+            Err(StartupError::Usage(m)) => m,
+            other => panic!("expected a usage error, got {other:?}"),
+        };
+        assert!(msg(&["--bench", "-f", "soc.f", "-model", "m.json"]).contains("mutually exclusive"));
+        assert_eq!(msg(&["--bench", "-f", "soc.f"]), "-f requires -top <name>");
+        assert_eq!(
+            msg(&["--bench", "-top", "soc_top"]),
+            "-top requires -f <filelist>"
+        );
+        assert_eq!(
+            msg(&["--bench", "-I", "rtl/inc"]),
+            "-I requires -f <filelist>"
+        );
+        assert_eq!(
+            msg(&["--bench", "-model-out", "keep.json"]),
+            "-model-out requires -f <filelist>"
+        );
+        // Elaborating a design and then not measuring it is always a mistake.
+        assert!(msg(&[
+            "--bench",
+            "-f",
+            "soc.f",
+            "-top",
+            "t",
+            "-bases",
+            "golden 665"
+        ])
+        .contains("does not include it"));
+        assert!(launch(&[
+            "--bench",
+            "-f",
+            "soc.f",
+            "-top",
+            "t",
+            "-bases",
+            "golden real"
+        ])
+        .is_ok());
     }
 
     #[test]
@@ -545,8 +697,11 @@ mod tests {
 
     #[test]
     fn bench_rejects_unknown_flags_and_missing_values() {
+        // A flag the bench arm does not take at all. (`-top` used to serve as
+        // this probe; since #255 it is a *recognized* bench flag whose error
+        // comes from the cross-flag rules — covered separately above.)
         assert!(matches!(
-            launch(&["--bench", "-top", "soc"]),
+            launch(&["--bench", "-trace", "sim.vcd"]),
             Err(StartupError::Usage(_))
         ));
         assert!(matches!(
@@ -597,6 +752,10 @@ mod tests {
         assert!(USAGE.contains("--bench"));
         // The child half is an implementation detail of the re-exec.
         assert!(!USAGE.contains("--bench-scenario"));
+        // The designlist front-end (#255) and the harness override it needs on
+        // the isolated machine are both user-facing.
+        assert!(USAGE.contains("--bench -f <filelist.f>"));
+        assert!(USAGE.contains("SVXPROBE_ELABORATE"));
     }
 
     #[test]

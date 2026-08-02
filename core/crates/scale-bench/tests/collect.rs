@@ -28,6 +28,7 @@ fn facts() -> EnvFacts {
         build: "0.0.0 @ deadbee".into(),
         bases: vec!["golden".into(), "665".into()],
         model: "none".into(),
+        elaborated: "none".into(),
     }
 }
 
@@ -323,6 +324,26 @@ fn the_environment_table_names_the_build_even_with_no_toolchain() {
     assert!(text.contains("| build | 0.0.0 @ deadbee |"));
     assert!(text.contains("| bases run | golden, 665 |"));
     assert!(text.contains("Generated 2026-07-26 10:54:48 UTC by `scale-bench collect`."));
+}
+
+// The `real` basis's model is either handed in or elaborated by the run itself
+// (#255). Both rows are always present with an explicit `none`, per this
+// table's "absent, not blank" rule — a missing row would read as a dropped
+// column rather than as "this run did not do that".
+#[test]
+fn the_environment_table_states_where_the_real_basis_came_from() {
+    let text = rendered(&[], &Notes::default());
+    assert!(text.contains("| real model | none |"));
+    assert!(text.contains("| elaborated from | none |"));
+
+    let mut env = facts();
+    env.model = "/tmp/scale_bench_elaborate/hierarchy.json".into();
+    env.elaborated = "design.f (top soc_top), 7,231 nodes, elaborated in 42.3 s \
+                      -> /tmp/scale_bench_elaborate/hierarchy.json"
+        .into();
+    let text = collect::render(&env, &[], &Notes::default());
+    assert!(text.contains("| real model | /tmp/scale_bench_elaborate/hierarchy.json |"));
+    assert!(text.contains("| elaborated from | design.f (top soc_top), 7,231 nodes,"));
 }
 
 #[test]

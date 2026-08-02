@@ -732,6 +732,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "serde_json",
+ "svxprobe-gui",
  "svxprobe-ingest",
  "svxprobe-matcher",
  "svxprobe-model",

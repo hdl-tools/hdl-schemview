@@ -41,16 +41,19 @@ cargo build --release -p scale-bench --offline
 Writes `core/target/scale-bench/metrics-<timestamp>.md` and prints the path. That file
 is the deliverable — paste its contents back for evaluation.
 
-Full run, including the 1M point and a real-design basis:
+Full run, including the 1M point and a real-design basis — either from a designlist,
+which elaborates it for you (#255), or from a model you already have:
 
 ```bash
+./target/release/collect --full --filelist design.f --top soc_top --include rtl/inc
 ./target/release/collect --full --model target/scale-bench/cvt-hierarchy.json
 ```
 
 Useful flags: `--skip-criterion` (memory axes only, minutes instead of tens of minutes),
-`--skip-report`, `--out <path>`, `--bases "golden 665"` to limit the matrix, and
-`--online` to drop `--offline` from the cargo invocations (what CI uses, since a cold
-registry cache makes `--offline` fail).
+`--skip-report`, `--out <path>`, `--bases "golden 665"` to limit the matrix,
+`--model-out <path>` to keep the elaborated JSON somewhere durable, and `--online` to
+drop `--offline` from the cargo invocations (what CI uses, since a cold registry cache
+makes `--offline` fail).
 
 `collect` drives all three layers — the scenario matrix, then criterion, then the
 single-shot report bin — into one paste-ready file. The *matrix* itself lives in
@@ -102,11 +105,13 @@ of any kind — so the app binary *is* the collector:
 
 ```bash
 hdl-schemview --bench                                   # the default matrix
-hdl-schemview --bench --bases "golden 665" --out m.md
-hdl-schemview --bench --full --model <hierarchy.json>
+hdl-schemview --bench -bases "golden 665" -out m.md
+hdl-schemview --bench --full -model <hierarchy.json>
+hdl-schemview --bench --full -f design.f -top soc_top -I rtl/inc
 ```
 
-Same matrix, same `render`, same file. Three things differ from `collect`, all inherent:
+Long flags take one dash (EDA style) or two, interchangeably. Same matrix, same `render`,
+same file. Three things differ from `collect`, all inherent:
 
 - **The output goes to the invocation directory** as `metrics-<stamp>.md` (there is no
   `target/` to default into). `-out` overrides, resolved against that same directory.
@@ -129,23 +134,52 @@ since the `golden` fixture is embedded — and `--bench` then refuses with
 ## The real-design basis (realism anchor)
 
 The synthetic generator owns the 1M point and axis isolation; a real elaborated design
-owns realistic adjacency. Producing one offline, e.g. from `claude_verilog_test`:
+owns realistic adjacency. Write a filelist, then hand it to either entry point (#255):
 
 ```bash
-# 1. filelist — packages first, then the rest, absolute Windows-style paths
+# filelist — packages first, then the rest, absolute Windows-style paths
 cd <path-to>/claude_verilog_test
 { find rtl -name "*_pkg.sv" | sort; find rtl -name "*.sv" ! -name "*_pkg.sv" | sort; } \
   | sed "s|^|$PWD/|" > <repo>/core/target/scale-bench/cvt.f
 
-# 2. elaborate with the same flags the app passes (elaborate_and_load)
+# elaborate + measure in one step
+./target/release/collect --filelist <repo>/core/target/scale-bench/cvt.f --top soc_top
+hdl-schemview --bench -f <repo>/core/target/scale-bench/cvt.f -top soc_top
+```
+
+The elaboration goes through the **same argv builder** as the app's own designlist load
+(`svxprobe_gui::harness_command`), so `--gate-level --name-refs` cannot be forgotten —
+without them you would benchmark a smaller document than the tool actually produces, and
+the numbers would still look valid. That is the whole reason this is a flag rather than a
+runbook step.
+
+The model lands in a temp scratch dir, and its path is **printed twice** — once when
+elaboration starts, once in the closing summary — so a second run can skip elaboration
+with `--model <that path>`. `--model-out <path>` keeps it somewhere durable instead;
+prefer that if `TEMP` is swept between sessions or is on a small volume.
+
+`design element does not have a time scale defined` warnings are non-fatal — the harness
+still elaborates. A `--top` that names no module *is* fatal: the harness exits nonzero
+without writing anything, so the run stops before the matrix rather than measuring a blank
+model.
+
+**Cross-check the result.** The metrics file's `| elaborated from |` row carries the node
+count the harness itself reported; it must equal the `real` row's `nodes` column. A
+mismatch means the matrix picked up a different file. This also catches a *partial* model
+— a missing include dir elaborates most of a design, exits 0, and otherwise reports
+entirely plausible numbers.
+
+**Elaborating separately** is still supported, and is the only route for the bare `report`
+and `scenario` binaries, which read `SCALE_BENCH_MODEL` and have no filelist flag:
+
+```bash
 <repo>/elaborate/.venv/Scripts/svxprobe-elaborate.exe \
   --top soc_top -f <repo>/core/target/scale-bench/cvt.f \
   --gate-level --name-refs -o <repo>/core/target/scale-bench/cvt-hierarchy.json
 ```
 
-`design element does not have a time scale defined` warnings are non-fatal — the harness
-still elaborates. Then pass the JSON via `-Model` / `--model` (or `SCALE_BENCH_MODEL` for
-the bare `report` bin and `scenario` binary).
+Then pass the JSON via `-model` / `--model`. Both flags are required by hand here — that
+is exactly the drift `--filelist` removes.
 
 ### Doing this on an isolated machine
 
@@ -157,22 +191,26 @@ them while the machine still has a network, then verify before disconnecting:
    benchmark runs offline. (`cargo vendor` is the stricter alternative if the cache may
    be pruned.)
 2. **Create the Python venv** — `cd elaborate && uv sync`. Elaboration itself is fully
-   offline afterwards; the runbook calls
+   offline afterwards; point `SVXPROBE_ELABORATE` at
    `elaborate/.venv/Scripts/svxprobe-elaborate.exe` (or `.venv/bin/svxprobe-elaborate`)
-   directly rather than `uv run`, so uv never tries to re-resolve.
+   rather than using `uv run`, so uv never tries to re-resolve. Both entry points honour
+   that variable, so the harness needs no place on `PATH`.
 
 Then, on the isolated machine:
 
 3. **Copy the design in** — the RTL tree only. Nothing else is fetched.
-4. **Write a filelist and elaborate** as above. Use `--gate-level --name-refs` so the
-   model matches what the app actually loads; without them you benchmark a smaller
-   document than the tool produces.
-5. **Run the collector** with `--model <hierarchy.json>`. The model is copied into a
-   temp dir first, so your design directory never grows a `.schemview_data/` cache —
-   budget disk for roughly (JSON size + ~0.4× that for the rkyv archive).
-6. **Sanity-check the row**: the `real` basis should report the node/edge counts the
-   harness printed at elaboration. A mismatch means the collector picked up a different
-   file.
+4. **Write a filelist and run the collector** with `--filelist <design.f> --top <name>`
+   (`-f`/`-top` for the packaged `--bench`). Elaboration and measurement are one step,
+   and the `--gate-level --name-refs` flags come from the app's own argv builder, so
+   they cannot be forgotten.
+5. **Budget disk.** The model is copied into a temp dir before measurement, so your design
+   directory never grows a `.schemview_data/` cache — but that copy is on top of the
+   elaborated JSON itself, so allow roughly 2× the JSON size plus ~0.4× for the rkyv
+   archive. `--model-out <path>` puts the original on a volume you choose. (With a
+   pre-elaborated `--model` the original is already yours, so it is 1× + ~0.4×.)
+6. **Sanity-check the row**: the `| elaborated from |` node count must equal the `real`
+   basis's `nodes` column. A mismatch means the collector picked up a different file, or
+   the design only partly elaborated.
 
 If elaboration fails on the design (unsupported constructs, missing include dirs), the
 synthetic and `golden` bases still run — report which bases completed rather than

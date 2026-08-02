@@ -20,10 +20,13 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use scale_bench::collect::{self, CollectOptions, CriterionRow, Notes, ScenarioRunner};
+use scale_bench::elaborate;
 
 const USAGE: &str = "\
 usage: collect [--full] [--model <hierarchy.json>] [--bases \"golden 665\"]
                [--skip-criterion] [--skip-report] [--online] [--out <path>]
+       collect [...] --filelist <design.f> --top <name> [--include <dir>]...
+               [--model-out <path>]
 
   --full             add the 1M basis (slow; may be killed by the OS — that is a result)
   --model <path>     an elaborated hierarchy.json, measured as the `real` basis
@@ -31,7 +34,19 @@ usage: collect [--full] [--model <hierarchy.json>] [--bases \"golden 665\"]
   --skip-criterion   skip `cargo bench` (the statistical layer)
   --skip-report      skip the single-shot report bin
   --online           allow cargo to reach the network (default is --offline)
-  --out <path>       metrics file (default: <core>/target/scale-bench/metrics-<stamp>.md)";
+  --out <path>       metrics file (default: <core>/target/scale-bench/metrics-<stamp>.md)
+
+  --filelist <f>     elaborate this designlist into the `real` basis (#255),
+                     instead of passing an already-elaborated --model. Uses the
+                     same argv as the app's own designlist load, so the model
+                     measured is the model the tool loads. Needs --top.
+  --top <name>       top module name; required with --filelist
+  --include <dir>    include directory for the elaboration, repeatable
+  --model-out <path> keep the elaborated JSON here instead of a temp scratch
+                     dir, so a later run can skip elaboration with --model
+
+environment:
+  SVXPROBE_ELABORATE  path to the elaboration harness, when it is not on PATH";
 
 struct Args {
     full: bool,
@@ -41,6 +56,10 @@ struct Args {
     skip_report: bool,
     online: bool,
     out: Option<PathBuf>,
+    filelist: Option<String>,
+    top: Option<String>,
+    incdirs: Vec<String>,
+    model_out: Option<PathBuf>,
 }
 
 fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
@@ -52,18 +71,36 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
         skip_report: false,
         online: false,
         out: None,
+        filelist: None,
+        top: None,
+        incdirs: Vec::new(),
+        model_out: None,
     };
     let mut it = argv.into_iter();
     while let Some(arg) = it.next() {
+        // Reject a value that is itself a flag, like `startup.rs`'s parser:
+        // `--model --out x` silently took `--out` as the model path, and the
+        // adjacent `--filelist`/`--top`/`--include` make that far likelier.
+        let mut value = |flag: &str| -> Result<String, String> {
+            match it.next() {
+                Some(v) if !v.starts_with('-') => Ok(v),
+                Some(v) => Err(format!("{flag} expects a value, got flag '{v}'")),
+                None => Err(format!("{flag} needs a value")),
+            }
+        };
         match arg.as_str() {
             "--full" => args.full = true,
             "--skip-criterion" => args.skip_criterion = true,
             "--skip-report" => args.skip_report = true,
             "--online" => args.online = true,
-            "--model" => args.model = Some(it.next().ok_or("--model needs a value")?.into()),
-            "--out" => args.out = Some(it.next().ok_or("--out needs a value")?.into()),
+            "--model" => args.model = Some(value("--model")?.into()),
+            "--out" => args.out = Some(value("--out")?.into()),
+            "--filelist" | "-f" => args.filelist = Some(value("--filelist")?),
+            "--top" => args.top = Some(value("--top")?),
+            "--include" | "-I" => args.incdirs.push(value("--include")?),
+            "--model-out" => args.model_out = Some(value("--model-out")?.into()),
             "--bases" => {
-                let raw = it.next().ok_or("--bases needs a value")?;
+                let raw = value("--bases")?;
                 let list: Vec<String> = raw.split_whitespace().map(str::to_string).collect();
                 if list.is_empty() {
                     return Err("--bases needs at least one basis".into());
@@ -74,7 +111,42 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Result<Args, String> {
             other => return Err(format!("unknown argument '{other}'")),
         }
     }
+    check_designlist(&args)?;
     Ok(args)
+}
+
+/// The designlist flags' cross-flag rules (#255), mirroring
+/// `svxprobe_gui::startup`'s for the packaged `--bench`. Each exists because
+/// the alternative is a run that silently measures something other than what
+/// was asked for.
+fn check_designlist(args: &Args) -> Result<(), String> {
+    if args.filelist.is_some() && args.model.is_some() {
+        return Err("--filelist and --model are mutually exclusive \
+                    (--filelist elaborates one for you)"
+            .into());
+    }
+    match (&args.filelist, &args.top) {
+        (Some(_), None) => return Err("--filelist requires --top <name>".into()),
+        (None, Some(_)) => return Err("--top requires --filelist <design.f>".into()),
+        _ => {}
+    }
+    if args.filelist.is_none() {
+        if !args.incdirs.is_empty() {
+            return Err("--include requires --filelist <design.f>".into());
+        }
+        if args.model_out.is_some() {
+            return Err("--model-out requires --filelist <design.f>".into());
+        }
+    } else if let Some(bases) = &args.bases {
+        // An explicit --bases replaces the default list, so one without `real`
+        // would elaborate the design and then never measure it.
+        if !bases.iter().any(|b| b == "real") {
+            return Err(
+                "--filelist elaborates the `real` basis, but --bases does not include it".into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn main() {
@@ -110,20 +182,14 @@ fn run(args: &Args) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("cannot locate the core directory"))?
         .to_path_buf();
 
-    let model = match &args.model {
-        // Canonicalized because the child scenario inherits it as an env var and
-        // may run with a different working directory.
-        Some(p) => Some(
-            std::fs::canonicalize(p)
-                .map_err(|e| anyhow::anyhow!("--model {} is not readable: {e}", p.display()))?,
-        ),
-        None => None,
-    };
-
+    // Everything cheap that can fail is checked *before* the elaboration:
+    // discovering a missing `scenario` binary after a multi-minute elaboration
+    // would throw the expensive step away.
+    let will_have_model = args.model.is_some() || args.filelist.is_some();
     let bases = args
         .bases
         .clone()
-        .unwrap_or_else(|| collect::default_bases(args.full, model.is_some()));
+        .unwrap_or_else(|| collect::default_bases(args.full, will_have_model));
     if bases.is_empty() {
         anyhow::bail!(
             "no bases to run — this build has neither the `golden` nor the `synth` feature, \
@@ -137,6 +203,29 @@ fn run(args: &Args) -> anyhow::Result<()> {
             exe.display()
         )
     })?;
+
+    let elaborated = match &args.filelist {
+        Some(filelist) => Some(elaborate::elaborate_basis(
+            filelist,
+            args.top.as_deref().unwrap_or_default(),
+            &args.incdirs,
+            args.model_out.as_deref(),
+        )?),
+        None => None,
+    };
+    let model = match elaborated
+        .as_ref()
+        .map(|e| e.model.clone())
+        .or(args.model.clone())
+    {
+        // Canonicalized because the child scenario inherits it as an env var and
+        // may run with a different working directory.
+        Some(p) => Some(
+            std::fs::canonicalize(&p)
+                .map_err(|e| anyhow::anyhow!("model {} is not readable: {e}", p.display()))?,
+        ),
+        None => None,
+    };
 
     eprintln!("scenario matrix: {}", bases.join(", "));
     let runner = ScenarioRunner::new(scenario_exe, Vec::new());
@@ -160,6 +249,9 @@ fn run(args: &Args) -> anyhow::Result<()> {
 
     let mut env = collect::env_facts(&bases, model.as_deref());
     env.generator = "scale-bench collect".into();
+    if let Some(e) = &elaborated {
+        env.elaborated = e.provenance();
+    }
 
     let out = args.out.clone().unwrap_or_else(|| {
         target_dir.join("scale-bench").join(format!(
@@ -174,6 +266,14 @@ fn run(args: &Args) -> anyhow::Result<()> {
 
     println!("Done. Metrics written to:");
     println!("  {}", out.display());
+    // Repeated here on purpose: the elaboration announced this path before a
+    // matrix that scrolls for many screens, and skipping the re-elaboration is
+    // the only reason to know it.
+    if let Some(e) = &elaborated {
+        println!("Elaborated model kept at:");
+        println!("  {}", e.model.display());
+        println!("  reuse it with --model <that path> to skip elaboration next time.");
+    }
     println!("Paste that file's contents back into the conversation for evaluation.");
     Ok(())
 }
@@ -353,5 +453,125 @@ fn run_report(exe: &Path, full: bool, model: Option<&Path>, notes: &mut Notes) {
             ));
         }
         Err(e) => notes.report_note = Some(format!("report bin could not be started: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args;
+
+    fn parse(argv: &[&str]) -> Result<super::Args, String> {
+        parse_args(argv.iter().map(|s| s.to_string()))
+    }
+
+    fn err(argv: &[&str]) -> String {
+        parse(argv).err().expect("expected a usage error")
+    }
+
+    #[test]
+    fn the_designlist_flags_land_in_their_fields() {
+        let args = parse(&[
+            "--filelist",
+            "soc.f",
+            "--top",
+            "soc_top",
+            "--include",
+            "rtl/inc",
+            "--include",
+            "vendor/inc",
+            "--model-out",
+            "keep.json",
+        ])
+        .expect("valid");
+        assert_eq!(args.filelist.as_deref(), Some("soc.f"));
+        assert_eq!(args.top.as_deref(), Some("soc_top"));
+        assert_eq!(args.incdirs, ["rtl/inc", "vendor/inc"]);
+        assert_eq!(args.model_out.unwrap().to_str(), Some("keep.json"));
+    }
+
+    // The EDA-style short spellings the packaged `--bench` arm takes, so a
+    // command line can be moved between the two entry points unchanged.
+    #[test]
+    fn the_short_designlist_spellings_are_accepted_too() {
+        let args = parse(&["-f", "soc.f", "--top", "t", "-I", "rtl/inc"]).expect("valid");
+        assert_eq!(args.filelist.as_deref(), Some("soc.f"));
+        assert_eq!(args.incdirs, ["rtl/inc"]);
+    }
+
+    // Each rule exists because the alternative is a run that silently measures
+    // something other than what was asked for.
+    #[test]
+    fn the_designlist_flags_require_each_other() {
+        assert!(err(&["--filelist", "soc.f", "--model", "m.json"]).contains("mutually exclusive"));
+        assert_eq!(
+            err(&["--filelist", "soc.f"]),
+            "--filelist requires --top <name>"
+        );
+        assert_eq!(
+            err(&["--top", "soc_top"]),
+            "--top requires --filelist <design.f>"
+        );
+        assert_eq!(
+            err(&["--include", "rtl/inc"]),
+            "--include requires --filelist <design.f>"
+        );
+        assert_eq!(
+            err(&["--model-out", "keep.json"]),
+            "--model-out requires --filelist <design.f>"
+        );
+        assert!(
+            err(&["--filelist", "soc.f", "--top", "t", "--bases", "golden 665"])
+                .contains("does not include it")
+        );
+        assert!(parse(&[
+            "--filelist",
+            "soc.f",
+            "--top",
+            "t",
+            "--bases",
+            "golden real"
+        ])
+        .is_ok());
+    }
+
+    // Regression: before #255 these arms took the next token blindly, so
+    // `--model --out x` silently used `--out` as the model path.
+    #[test]
+    fn a_flag_where_a_value_is_expected_is_rejected() {
+        assert!(err(&["--model", "--out", "m.md"]).contains("expects a value"));
+        assert!(err(&["--filelist", "--top"]).contains("expects a value"));
+        assert!(err(&["--model"]).contains("needs a value"));
+    }
+
+    #[test]
+    fn the_pre_existing_flags_still_parse_as_before() {
+        let args = parse(&[
+            "--full",
+            "--model",
+            "m.json",
+            "--bases",
+            "golden 665",
+            "--skip-criterion",
+            "--skip-report",
+            "--online",
+            "--out",
+            "m.md",
+        ])
+        .expect("valid");
+        assert!(args.full && args.skip_criterion && args.skip_report && args.online);
+        assert_eq!(args.model.unwrap().to_str(), Some("m.json"));
+        assert_eq!(args.out.unwrap().to_str(), Some("m.md"));
+        assert_eq!(args.bases.unwrap(), ["golden", "665"]);
+        assert!(parse(&["--bases", "   "]).is_err());
+        assert_eq!(err(&["-h"]), "help requested");
+        assert!(err(&["--nope"]).contains("unknown argument"));
+    }
+
+    #[test]
+    fn usage_documents_the_designlist_flags_and_the_harness_override() {
+        for flag in ["--filelist", "--top", "--include", "--model-out"] {
+            assert!(super::USAGE.contains(flag), "USAGE omits {flag}");
+        }
+        assert!(super::USAGE.contains("SVXPROBE_ELABORATE"));
     }
 }

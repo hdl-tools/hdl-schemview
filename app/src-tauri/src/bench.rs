@@ -55,6 +55,7 @@ mod imp {
     use svxprobe_gui::startup::{self, BenchRequest, Launch};
 
     use scale_bench::collect::{self, CollectOptions, ScenarioRunner};
+    use scale_bench::elaborate;
 
     pub fn dispatch(launch: Launch) -> ! {
         match launch {
@@ -82,23 +83,13 @@ mod imp {
         let cwd =
             startup::invocation_dir(std::env::var_os("INIT_CWD"), std::env::current_dir().ok());
 
-        // Canonicalized because the child inherits it as SCALE_BENCH_MODEL and
-        // may run with a different working directory.
-        let model = match &req.model {
-            Some(p) => {
-                let abs = startup::resolve_path(p, &cwd);
-                Some(
-                    std::fs::canonicalize(&abs)
-                        .map_err(|e| format!("-model {abs} is not readable: {e}"))?,
-                )
-            }
-            None => None,
-        };
-
-        let bases = req
-            .bases
-            .clone()
-            .unwrap_or_else(|| collect::default_bases(req.full, model.is_some()));
+        // Everything cheap that can fail is settled *before* the elaboration
+        // (#255): on a real design that step costs minutes, and a matrix that
+        // then cannot run would have thrown it away. This is also why a missing
+        // harness is reported here rather than mid-run.
+        let bases = req.bases.clone().unwrap_or_else(|| {
+            collect::default_bases(req.full, req.model.is_some() || req.filelist.is_some())
+        });
         if bases.is_empty() {
             return Err(
                 "no bases to run — this build has neither the `golden` nor the \
@@ -109,6 +100,45 @@ mod imp {
 
         let exe = std::env::current_exe()
             .map_err(|e| format!("cannot locate this executable to re-exec it: {e}"))?;
+
+        // A designlist is a front-end to -model: elaborate it once here, then
+        // proceed exactly as the -model path does. Same argv builder as the
+        // app's own designlist load, so the model measured is the model the
+        // tool loads (#255).
+        let elaborated = match &req.filelist {
+            Some(filelist) => Some(
+                elaborate::elaborate_basis(
+                    &startup::resolve_path(filelist, &cwd),
+                    req.top.as_deref().unwrap_or_default(),
+                    &req.incdirs,
+                    req.model_out
+                        .as_ref()
+                        .map(|p| PathBuf::from(startup::resolve_path(p, &cwd)))
+                        .as_deref(),
+                )
+                .map_err(|e| format!("{e:#}"))?,
+            ),
+            None => None,
+        };
+
+        // Canonicalized because the child inherits it as SCALE_BENCH_MODEL and
+        // may run with a different working directory.
+        let model = match elaborated.as_ref().map(|e| e.model.clone()) {
+            Some(p) => Some(
+                std::fs::canonicalize(&p)
+                    .map_err(|e| format!("elaborated model {} is not readable: {e}", p.display()))?,
+            ),
+            None => match &req.model {
+                Some(p) => {
+                    let abs = startup::resolve_path(p, &cwd);
+                    Some(
+                        std::fs::canonicalize(&abs)
+                            .map_err(|e| format!("-model {abs} is not readable: {e}"))?,
+                    )
+                }
+                None => None,
+            },
+        };
 
         // Inherited by every child `collect::run` spawns, which is why the guard
         // needs no change to ScenarioRunner. Sound: single-threaded, before the
@@ -128,6 +158,9 @@ mod imp {
         // `env_facts` leaves this empty on purpose: a packaged run must be
         // identifiable as one from the file alone.
         env.generator = "hdl-schemview --bench".into();
+        if let Some(e) = &elaborated {
+            env.elaborated = e.provenance();
+        }
 
         let out: PathBuf = startup::bench_out_path(
             req.out.as_deref(),
@@ -143,6 +176,14 @@ mod imp {
 
         println!("Done. Metrics written to:");
         println!("  {}", out.display());
+        // Repeated here on purpose: the elaboration announced this path before
+        // a matrix that scrolls for many screens, and skipping the
+        // re-elaboration is the only reason to know it.
+        if let Some(e) = &elaborated {
+            println!("Elaborated model kept at:");
+            println!("  {}", e.model.display());
+            println!("  reuse it with -model <that path> to skip elaboration next time.");
+        }
         println!("Paste that file's contents back into the conversation for evaluation.");
         Ok(())
     }
