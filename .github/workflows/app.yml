@@ -319,9 +319,23 @@ jobs:
             exit 1
           }
 
+          # Resolve the launcher from the package rather than assuming it is
+          # named after productName: Tauri installs the *crate* binary
+          # (hdl-schemview-app), so a hardcoded `hdl-schemview` is not found.
+          # Reading it back from the payload also means a future rename fails
+          # loudly here instead of silently testing nothing.
+          echo "--- payload ---"
+          rpm -qpl "$pkg"
+          bin=$(rpm -qpl "$pkg" | grep -E '^/usr/bin/[^/]+$' | head -1)
+          test -n "$bin" || {
+            echo "::error::the .rpm installs no /usr/bin launcher"
+            exit 1
+          }
+
           dnf install -y --nogpgcheck "$pkg"
 
-          hdl-schemview --bench --bases golden --out /tmp/rpm-bench.md
+          test -x "$bin" || { echo "::error::$bin missing after install"; exit 1; }
+          "$bin" --bench --bases golden --out /tmp/rpm-bench.md
           grep -q 'Single-shot run' /tmp/rpm-bench.md
           grep -q 'hdl-schemview --bench' /tmp/rpm-bench.md
           EOF
