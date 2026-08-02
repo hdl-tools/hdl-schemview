@@ -437,10 +437,35 @@ pub fn env_facts(bases: &[String], model: Option<&Path>) -> EnvFacts {
         git: git_revision(),
         build: build_provenance(),
         bases: bases.to_vec(),
-        model: model
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "none".into()),
+        model: model.map(display_path).unwrap_or_else(|| "none".into()),
         elaborated: "none".into(),
+    }
+}
+
+/// A path as it should *read* in the metrics file.
+///
+/// `canonicalize` on Windows returns an extended-length path — `\\?\C:\...`, or
+/// `\\?\UNC\server\share\...` for a network location. That prefix is an API
+/// detail (it opts the path out of `MAX_PATH` and of `/` normalization), not
+/// something a reader should have to mentally strip. The rows of this file are
+/// read by humans and diffed across runs, so present the ordinary form.
+///
+/// **Display only.** The `PathBuf` handed to each child as `SCALE_BENCH_MODEL`
+/// stays canonical, which is the entire reason it was canonicalized: the child
+/// may run with a different working directory.
+///
+/// Plain string work rather than [`Path::components`], deliberately — the
+/// prefix is only *parsed* as one on Windows, and this must stay assertable
+/// from a Linux CI run.
+pub fn display_path(p: &Path) -> String {
+    let text = p.display().to_string();
+    match text.strip_prefix(r"\\?\") {
+        // `\\?\UNC\server\share` is the extended spelling of `\\server\share`.
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(unc) => format!(r"\\{unc}"),
+            None => rest.to_string(),
+        },
+        None => text,
     }
 }
 

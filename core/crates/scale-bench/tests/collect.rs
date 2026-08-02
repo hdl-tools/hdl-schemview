@@ -346,6 +346,37 @@ fn the_environment_table_states_where_the_real_basis_came_from() {
     assert!(text.contains("| elaborated from | design.f (top soc_top), 7,231 nodes,"));
 }
 
+// The `real model` row names the file the numbers came from, so it is read by
+// humans and diffed across runs. `canonicalize` hands back Windows' extended
+// form; that prefix is an API detail, not part of the file's identity.
+// Asserted as a pure string transform so a Linux CI run still covers the
+// Windows shapes.
+#[test]
+fn a_canonicalized_windows_path_reads_without_its_extended_length_prefix() {
+    use std::path::Path;
+
+    assert_eq!(
+        collect::display_path(Path::new(r"\\?\C:\models\hierarchy.json")),
+        r"C:\models\hierarchy.json"
+    );
+    // The UNC spelling collapses back to the familiar `\\server\share`, not to
+    // a stray `UNC\server\share`.
+    assert_eq!(
+        collect::display_path(Path::new(r"\\?\UNC\build01\models\hierarchy.json")),
+        r"\\build01\models\hierarchy.json"
+    );
+    // Everything else is passed through untouched — including a plain Windows
+    // path, a POSIX one, and a bare `\\server\share` that never had the prefix.
+    for unchanged in [
+        r"C:\models\hierarchy.json",
+        "/var/tmp/hierarchy.json",
+        r"\\build01\models\hierarchy.json",
+        "hierarchy.json",
+    ] {
+        assert_eq!(collect::display_path(Path::new(unchanged)), unchanged);
+    }
+}
+
 #[test]
 fn the_file_is_lf_with_no_bom_and_ends_in_a_newline() {
     let text = rendered(&[load_row("665", "prepare", "1.0000")], &Notes::default());
