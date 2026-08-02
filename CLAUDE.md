@@ -108,7 +108,7 @@ filelist to the benchmark, is no longer stuck; a missing harness fails with
 `--no-default-features` build drops `scale-bench` entirely (2.1 MB, the embedded golden) and
 keeps the "compiled without the benchmark feature" refusal, which is what makes that message
 truthful. Elaboration stays
-out of the bundle (tier 2, gated on a PyInstaller spike): a missing harness now returns
+out of the bundle (#277, tier 2, gated on a PyInstaller spike): a missing harness now returns
 `gui::harness_missing_message()`, which names the copy-a-`hierarchy.json` workflow rather
 than only "install it". The Tauri command layer flattens errors with `fmt_err` (`{:#}`)
 so an anyhow context chain reaches the status pane instead of only its outermost layer.
