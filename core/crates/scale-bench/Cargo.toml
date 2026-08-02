@@ -23,10 +23,18 @@ bench = false
 default = ["synth", "golden", "collect"]
 synth = []
 golden = []
-collect = []
+collect = ["dep:svxprobe-gui"]
 
 [dependencies]
 svxprobe-model = { workspace = true }
+# A *measurement* crate depending on the GUI crate looks backwards, so: #255's
+# designlist mode elaborates through `svxprobe_gui::elaborate_to_file`, the same
+# argv builder the app's own designlist load uses — which is the whole point,
+# since `--gate-level`/`--name-refs` must not drift between the model the tool
+# loads and the model the benchmark measures. Optional, and pulled in only by
+# `collect`, so the lean `--no-default-features` shape never sees it. No cycle:
+# `svxprobe-gui` has no scale-bench edge.
+svxprobe-gui = { workspace = true, optional = true }
 svxprobe-ingest = { workspace = true }
 svxprobe-schematic = { workspace = true }
 svxprobe-matcher = { workspace = true }

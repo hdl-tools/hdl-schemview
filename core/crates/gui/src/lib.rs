@@ -6,6 +6,7 @@
 //! shell in `app/src-tauri` is a thin wrapper that exposes these as commands.
 
 use std::collections::HashSet;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -27,6 +28,15 @@ use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
 /// The name the elaboration harness is resolved under, on `PATH`.
 const HARNESS_BIN: &str = "svxprobe-elaborate";
+
+/// Overrides [`HARNESS_BIN`] with an explicit path to the harness executable.
+///
+/// The isolated-machine runbook (`docs/benchmarking.md`) deliberately invokes
+/// `elaborate/.venv/Scripts/svxprobe-elaborate.exe` **by absolute path** so uv
+/// never tries to re-resolve the environment — which a `PATH`-only lookup
+/// cannot express. Needed by the benchmark's designlist mode (#255) on exactly
+/// the machine that mode exists for.
+pub const HARNESS_ENV: &str = "SVXPROBE_ELABORATE";
 
 /// Message shown when [`HARNESS_BIN`] is not on `PATH` (#240, ADR 0009 tier 1).
 ///
@@ -50,6 +60,146 @@ pub fn harness_missing_message() -> String {
          \n\
          Option 2 is the supported workflow for an isolated environment; see app/README.md."
     )
+}
+
+/// Build the harness invocation shared by *every* elaboration path (#255).
+///
+/// The single argv builder is the point: the desktop app's designlist load and
+/// the benchmark's `real` basis come from this one function, so `--gate-level`
+/// and `--name-refs` cannot drift between them. Before #255 that guarantee was
+/// a sentence in `docs/benchmarking.md` and a manual step for the operator.
+///
+/// `-o` is deliberately *not* set here — it is what the two output shapes
+/// ([`elaborate_to_json`], [`elaborate_to_file`]) differ in.
+fn harness_command(
+    filelist: &str,
+    top: &str,
+    incdirs: &[String],
+    hls_src: &[String],
+) -> Result<std::process::Command> {
+    // Without --top the harness would silently auto-select one; require an
+    // explicit name so the caller's guard compares against the user's intent.
+    anyhow::ensure!(
+        !top.trim().is_empty(),
+        "a top module name is required to elaborate a designlist"
+    );
+    let bin = std::env::var_os(HARNESS_ENV)
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| HARNESS_BIN.into());
+    let mut cmd = std::process::Command::new(bin);
+    cmd.arg("--top").arg(top).arg("-f").arg(filelist);
+    for dir in incdirs {
+        cmd.arg("-I").arg(dir);
+    }
+    // Always emit the gate-level projection (#157), like the committed golden. It is
+    // additive — process-level rendering ignores the primitives — but the frontend's
+    // gate-level toggle switches the view at scope_graph time without re-elaborating,
+    // so the primitives must already be in the model. Without this, a designlist-
+    // loaded design shows combinational logic as opaque Comb/Assign blocks even with
+    // the toggle on, since there are no gates to dissolve.
+    cmd.arg("--gate-level");
+    // Always emit identifier-occurrence spans (#225), like the committed golden, for
+    // the same reason as --gate-level: the frontend's semantic-name coloring and a
+    // source *usage* click resolving to the signal it names both need `name_refs` in
+    // the model. Without this, a designlist-loaded design renders lexically only and a
+    // click on `clk` inside an always_ff resolves to the enclosing Ff block, not clk.
+    cmd.arg("--name-refs");
+    // Declared C/C++ sources (#222) drive the HLS provenance pass. `--hls-map` is
+    // passed *only* when sources are declared: it regex-scans every line of every
+    // RTL file, which a pure-RTL design gains nothing from, and declaring C sources
+    // is itself the opt-in. (Before #222 the flag was never passed at all, so a
+    // designlist-loaded HLS design produced no source_map and could not cross-probe
+    // to its C sources.)
+    if !hls_src.is_empty() {
+        cmd.arg("--hls-map");
+        for path in hls_src {
+            cmd.arg("--hls-src").arg(path);
+        }
+    }
+    Ok(cmd)
+}
+
+/// Discriminate "not installed" from every other spawn failure.
+///
+/// On the isolated target machine (ADR 0009 tier 1) a missing harness is the
+/// *expected* state, not a fault, and it has a concrete way forward — so it
+/// gets its own actionable message instead of a bare OS error. Windows resolves
+/// `.exe` via PATHEXT, so an unactivated venv lands here too, which is the
+/// common developer case.
+fn harness_spawn_error(e: std::io::Error) -> anyhow::Error {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        anyhow::anyhow!("{}", harness_missing_message())
+    } else {
+        anyhow::Error::new(e).context("running svxprobe-elaborate")
+    }
+}
+
+/// Elaborate a designlist and return `(model JSON, harness stderr)`.
+///
+/// The in-memory shape, backing [`Session::elaborate_and_load`]: the model
+/// never lands on disk, which is why that path has no rkyv load cache. The
+/// stderr is returned because the caller's empty-design guard quotes it.
+pub fn elaborate_to_json(
+    filelist: &str,
+    top: &str,
+    incdirs: &[String],
+    hls_src: &[String],
+) -> Result<(Vec<u8>, String)> {
+    let mut cmd = harness_command(filelist, top, incdirs, hls_src)?;
+    cmd.arg("-o").arg("-"); // model JSON on stdout; progress goes to stderr
+    let out = cmd.output().map_err(harness_spawn_error)?;
+    let log = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    anyhow::ensure!(
+        out.status.success(),
+        "svxprobe-elaborate failed ({}): {log}",
+        out.status
+    );
+    Ok((out.stdout, log))
+}
+
+/// Elaborate a designlist straight to `out`, returning the harness stderr.
+///
+/// The on-disk shape (#255), for callers that need a real *file* — the
+/// benchmark matrix copies one into its scratch dir and `ingest::from_path`
+/// builds `.schemview_data/` beside it. Writing from the child also keeps a
+/// possibly-hundreds-of-MB model out of this process entirely, which
+/// [`elaborate_to_json`] cannot avoid.
+pub fn elaborate_to_file(
+    filelist: &str,
+    top: &str,
+    incdirs: &[String],
+    hls_src: &[String],
+    out: &Path,
+) -> Result<String> {
+    let mut cmd = harness_command(filelist, top, incdirs, hls_src)?;
+    cmd.arg("-o").arg(out);
+    // Echo progress as it arrives rather than capturing it and dumping it at
+    // the end: elaborating a real design takes minutes, and `output()` would
+    // show nothing at all until it finished. Reading the one pipe inline is
+    // deadlock-free precisely *because* stdout is not piped — with `-o <path>`
+    // the harness writes the model to disk, so there is no second pipe to fill.
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(harness_spawn_error)?;
+    let mut log = String::new();
+    if let Some(pipe) = child.stderr.take() {
+        for line in std::io::BufReader::new(pipe).lines() {
+            let line = line.context("reading svxprobe-elaborate output")?;
+            eprintln!("{line}");
+            log.push_str(&line);
+            log.push('\n');
+        }
+    }
+    let status = child.wait().context("waiting for svxprobe-elaborate")?;
+    let log = log.trim().to_string();
+    // The harness exits nonzero *without writing the file* when nothing
+    // elaborated for the requested top, so this is an exact guard against a
+    // blank model — no need to re-read what the child just wrote.
+    anyhow::ensure!(
+        status.success(),
+        "svxprobe-elaborate failed ({status}): {log}"
+    );
+    Ok(log)
 }
 
 /// A reference to a model node, for the frontend.
@@ -289,11 +439,12 @@ impl Session {
     }
 
     /// Elaborate a designlist with the external pyslang harness, then load the
-    /// resulting model (#93). Runs `svxprobe-elaborate` (which must be on
-    /// `PATH`; bundling is future packaging work) as a subprocess — the
-    /// roadmap's out-of-process boundary — captures the model JSON from its
-    /// stdout, and feeds it to the same ingest path as [`Session::load`]. No
-    /// persistent cache: every call re-elaborates (caching is #21/#22).
+    /// resulting model (#93). Runs `svxprobe-elaborate` (on `PATH`, or wherever
+    /// [`HARNESS_ENV`] points; bundling is future packaging work) as a
+    /// subprocess — the roadmap's out-of-process boundary — captures the model
+    /// JSON from its stdout via [`elaborate_to_json`], and feeds it to the same
+    /// ingest path as [`Session::load`]. No persistent cache: every call
+    /// re-elaborates (caching is #21/#22).
     pub fn elaborate_and_load(
         filelist: &str,
         top: &str,
@@ -303,72 +454,15 @@ impl Session {
         src_root: impl AsRef<Path>,
         hls_src: &[String],
     ) -> Result<Self> {
-        // Without --top the harness would silently auto-select one; require an
-        // explicit name so the guard below compares against the user's intent.
-        anyhow::ensure!(
-            !top.trim().is_empty(),
-            "a top module name is required to elaborate a designlist"
-        );
-        let mut cmd = std::process::Command::new(HARNESS_BIN);
-        cmd.arg("--top").arg(top).arg("-f").arg(filelist);
-        for dir in incdirs {
-            cmd.arg("-I").arg(dir);
-        }
-        // Always emit the gate-level projection (#157), like the committed golden. It is
-        // additive — process-level rendering ignores the primitives — but the frontend's
-        // gate-level toggle switches the view at scope_graph time without re-elaborating,
-        // so the primitives must already be in the model. Without this, a designlist-
-        // loaded design shows combinational logic as opaque Comb/Assign blocks even with
-        // the toggle on, since there are no gates to dissolve.
-        cmd.arg("--gate-level");
-        // Always emit identifier-occurrence spans (#225), like the committed golden, for
-        // the same reason as --gate-level: the frontend's semantic-name coloring and a
-        // source *usage* click resolving to the signal it names both need `name_refs` in
-        // the model. Without this, a designlist-loaded design renders lexically only and a
-        // click on `clk` inside an always_ff resolves to the enclosing Ff block, not clk.
-        cmd.arg("--name-refs");
-        // Declared C/C++ sources (#222) drive the HLS provenance pass. `--hls-map` is
-        // passed *only* when sources are declared: it regex-scans every line of every
-        // RTL file, which a pure-RTL design gains nothing from, and declaring C sources
-        // is itself the opt-in. (Before #222 the flag was never passed at all, so a
-        // designlist-loaded HLS design produced no source_map and could not cross-probe
-        // to its C sources.)
-        if !hls_src.is_empty() {
-            cmd.arg("--hls-map");
-            for path in hls_src {
-                cmd.arg("--hls-src").arg(path);
-            }
-        }
-        cmd.arg("-o").arg("-"); // model JSON on stdout; progress goes to stderr
-                                // Discriminate "not installed" from every other spawn failure. On the
-                                // isolated target machine (ADR 0009 tier 1) a missing harness is the
-                                // *expected* state, not a fault, and it has a concrete way forward —
-                                // so it gets its own actionable message instead of a bare OS error.
-                                // Windows resolves `.exe` via PATHEXT, so an unactivated venv lands
-                                // here too, which is the common developer case.
-        let out = match cmd.output() {
-            Ok(out) => out,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                anyhow::bail!("{}", harness_missing_message())
-            }
-            Err(e) => return Err(e).context("running svxprobe-elaborate"),
-        };
-        if !out.status.success() {
-            anyhow::bail!(
-                "svxprobe-elaborate failed ({}): {}",
-                out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
-        }
-        let design = svxprobe_ingest::from_slice(&out.stdout)?;
-        // A top that doesn't exist elaborates to an empty design with exit 0;
-        // catch that here instead of loading a blank session, and surface
-        // whatever the harness said on stderr.
+        let (json, log) = elaborate_to_json(filelist, top, incdirs, hls_src)?;
+        let design = svxprobe_ingest::from_slice(&json)?;
+        // The harness itself fails a top that elaborates nothing, so this is
+        // belt-and-braces against a *different* design coming back than the one
+        // asked for; keep it, and surface whatever the harness said on stderr.
         anyhow::ensure!(
             design.doc.design == top,
             "elaboration produced no design for top '{top}' — check the top module name \
-             and the filelist. Harness output: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+             and the filelist. Harness output: {log}"
         );
         // No model file on disk (elaborated in-memory), so no wave_index cache key.
         Self::from_design(design, None, trace, excluded, src_root)
@@ -795,8 +889,73 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::{harness_missing_message, pick_source_path, HARNESS_BIN};
+    use super::{harness_command, harness_missing_message, pick_source_path, HARNESS_BIN};
     use std::path::{Path, PathBuf};
+
+    fn argv(cmd: &std::process::Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    // The one argv builder is what #255 is *for*: the app's designlist load and
+    // the benchmark's `real` basis share it, so --gate-level/--name-refs cannot
+    // drift between them. `tests/session.rs` exercises the same flags but
+    // self-skips when the harness is absent — i.e. on CI — so this pure test is
+    // the only coverage that actually runs there. Assert verbatim.
+    #[test]
+    fn the_harness_argv_always_carries_gate_level_and_name_refs() {
+        let cmd = harness_command("soc.f", "soc_top", &[], &[]).expect("valid");
+        assert_eq!(
+            argv(&cmd),
+            [
+                "--top",
+                "soc_top",
+                "-f",
+                "soc.f",
+                "--gate-level",
+                "--name-refs"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_harness_argv_repeats_include_dirs_and_declared_c_sources() {
+        let cmd = harness_command(
+            "soc.f",
+            "soc_top",
+            &["rtl/inc".into(), "vendor/inc".into()],
+            &["src/foo.cpp".into(), "src/".into()],
+        )
+        .expect("valid");
+        assert_eq!(
+            argv(&cmd),
+            [
+                "--top",
+                "soc_top",
+                "-f",
+                "soc.f",
+                "-I",
+                "rtl/inc",
+                "-I",
+                "vendor/inc",
+                "--gate-level",
+                "--name-refs",
+                // --hls-map only appears once C sources are declared (#222); a
+                // pure-RTL design must not pay for the provenance scan.
+                "--hls-map",
+                "--hls-src",
+                "src/foo.cpp",
+                "--hls-src",
+                "src/",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_top_is_rejected_before_the_harness_is_spawned() {
+        assert!(harness_command("soc.f", "   ", &[], &[]).is_err());
+    }
 
     // The message is the only guidance a user gets on the isolated machine,
     // where the failure is expected rather than exceptional. Assert the facts

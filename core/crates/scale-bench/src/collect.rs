@@ -411,6 +411,12 @@ pub struct EnvFacts {
     pub build: String,
     pub bases: Vec<String>,
     pub model: String,
+    /// Where the `real` basis's model came from, when this run elaborated one
+    /// itself (#255) — `none` when `model` was handed in ready-made.
+    ///
+    /// Its own row rather than folded into `model`: that one is a bare path
+    /// humans diff across runs. Filled by the caller, like `generator`.
+    pub elaborated: String,
 }
 
 /// Probe the machine. Impure by nature — [`render`] takes the result instead of
@@ -434,6 +440,7 @@ pub fn env_facts(bases: &[String], model: Option<&Path>) -> EnvFacts {
         model: model
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "none".into()),
+        elaborated: "none".into(),
     }
 }
 
@@ -664,6 +671,7 @@ pub fn render(env: &EnvFacts, records: &[Record], notes: &Notes) -> String {
     out.push(format!("| build | {} |", env.build));
     out.push(format!("| bases run | {} |", env.bases.join(", ")));
     out.push(format!("| real model | {} |", env.model));
+    out.push(format!("| elaborated from | {} |", env.elaborated));
     out.push(String::new());
 
     out.push(
