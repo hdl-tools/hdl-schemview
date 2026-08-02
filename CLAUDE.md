@@ -80,7 +80,9 @@ has no network, no toolchain and no package manager, so the bundle carries its o
 runtime: `tauri.offline.conf.json` is a one-key **overlay** setting
 `webviewInstallMode: fixedRuntime` for Windows (the payload path stays *out* of the base
 config, which would otherwise break every contributor's `tauri build`), AppImage is the
-supported Linux artifact, and macOS is ad-hoc signed (`signingIdentity: "-"`, which does
+supported **isolated-machine** Linux artifact — the `.deb` and `.rpm` (#260) are the
+separate *"Linux (connected)"* tier, declaring WebKitGTK as a system dependency and
+needing repo access — and macOS is ad-hoc signed (`signingIdentity: "-"`, which does
 **not** clear Gatekeeper quarantine — `xattr -dr` is documented instead) and remains
 **unverified end-to-end**. `src/console.rs` attaches a release build to its parent console
 via hand-declared kernel32 externs (the `mem.rs` precedent, no new dependency): the
@@ -372,8 +374,18 @@ diffs it), Ubuntu, on push/PR. `app.yml` — **three** jobs, when `app/` or `cor
 change: `build` (`npm test` + `npm run build` + `cargo build` on Ubuntu + Windows, the
 fast PR signal) and **`bundle`** (#240 — a real `tauri build` on Ubuntu + Windows +
 **macOS**, uploading each artifact; `cargo build` never exercises the bundler, so
-NSIS/AppImage/`.app` breakage would otherwise surface only at release). `bundle` skips
-pull requests, since macOS bills at 10× minutes on a private repo, and needs the
+NSIS/AppImage/`.app` breakage would otherwise surface only at release). The Linux leg
+builds `appimage,deb,rpm` — **`.rpm` since #260**, which needs no `rpmbuild` (Tauri 2
+writes the archive through the pure-Rust `rpm` crate), and which is smoke-tested by
+installing it in a **clean Fedora container**: the runner itself already has WebKitGTK
+from the build deps, so a local install would pass whatever `bundle.linux.rpm.depends`
+says — and unset, Tauri emits an RPM with *no* dependencies at all, which installs and
+then cannot launch. `bundle` skips pull requests, since macOS bills at 10× minutes on
+a private repo — so a packaging change is proven by dispatching the workflow on its
+branch instead, and `workflow_dispatch`
+takes a **`bundle_os`** input (#260) narrowing the matrix to one OS (~5 billed minutes
+instead of ~49); it applies to dispatch only, so pushes and tags always build all
+three. It needs the
 `WEBVIEW2_CAB_URL` repo variable for the Windows fixed-runtime payload (set
 2026-08-01; since `release` is `needs: [build, bundle]`, an unset variable fails the
 Windows leg and publishes nothing rather than a partial release). Extracting that
@@ -384,8 +396,8 @@ which is what broke every Windows bundle up to 2026-08-01. The third,
 `branches: [main]`, which the `paths:` filter does not suppress because GitHub does not
 evaluate path filters for tag pushes. It `needs: [build, bundle]` (so a red test suite
 or one failed OS leg blocks it — no partial releases), downloads every bundle artifact,
-stages just the installers flat (`.exe`/`.AppImage`/`.deb`/`.dmg` — the macOS `.app` is
-a directory of thousands of files), writes `SHA256SUMS`, and creates a **draft** release
+stages just the installers flat (`.exe`/`.AppImage`/`.deb`/`.rpm`/`.dmg` — the macOS
+`.app` is a directory of thousands of files), writes `SHA256SUMS`, and creates a **draft** release
 for a human to check and publish (macOS stays unverified end-to-end, ADR 0009). Its
 `contents: write` is **job-level**, so the PR-running jobs keep the workflow's default
 read token; `bundle`'s first step on a tag asserts the tag and all three manifests

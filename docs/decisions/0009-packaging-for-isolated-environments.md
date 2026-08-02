@@ -30,7 +30,7 @@ What the target machine actually needs today:
 | OS | Webview runtime | Situation |
 | --- | --- | --- |
 | Windows | WebView2 | `tauri.conf.json` sets no `webviewInstallMode`, so Tauri defaults to `downloadBootstrapper` — **network required at install time**. |
-| Linux | WebKitGTK 4.1 | `.deb`/`.rpm` declare it as a system dependency (package manager + repo access). AppImage bundles it. |
+| Linux | WebKitGTK 4.1 | `.deb`/`.rpm` declare it as a system dependency (package manager + repo access) — see the amendment below. AppImage bundles it. |
 | macOS | WKWebView | Part of the OS; unsigned apps are blocked by Gatekeeper. |
 
 `bundle.targets` is already `"all"`, so the bundler side is configuration rather than new
@@ -111,6 +111,32 @@ into Rust.** Criterion stays dev-only.
   criterion rather than shipping a second dialect of the golden format.
 - This ADR concerns **distribution only**. It does not revisit the FSDB/plugin boundary
   (ADR 0002) or the storage backend (ADR 0003).
+
+## Amendment — 2026-08-02: `.rpm` joins the connected tier (#260)
+
+When this ADR was written the table above named `.deb`/`.rpm` together, but CI built
+only the `.deb`: `app.yml` excluded `.rpm` on the theory that bundling it on Ubuntu
+"can fail and take the job down". That premise did not hold. Tauri 2 writes the RPM
+itself through the pure-Rust `rpm` crate — the pinned `@tauri-apps/cli` 2.11.3 carries
+a full `RpmConfig` and its native binary contains no `rpmbuild` string — so
+`ubuntu-latest` needs no extra toolchain. The Linux leg now builds `appimage,deb,rpm`.
+
+What this amendment does **not** change: **AppImage remains the supported
+isolated-machine artifact.** `.deb` and `.rpm` are one tier — *"Linux (connected)"* —
+both declaring WebKitGTK as a system dependency and both requiring a package manager
+with repo access. Neither is a candidate for the no-network target this ADR exists for.
+
+Two consequences worth recording:
+
+- **An RPM with no `depends` is the failure mode to fear.** Unlike the `.deb`, Tauri
+  emits no dependencies at all unless `bundle.linux.rpm.depends` is set — a package
+  that installs cleanly and then cannot launch. The names differ from Debian's
+  (`webkit2gtk4.1`/`gtk3` vs `libwebkit2gtk-4.1-0`/`libgtk-3-0`), so this cannot be
+  copied across. CI asserts the declaration is present *and* installs the package in
+  a clean Fedora container, because the build runner has WebKitGTK already and would
+  pass regardless.
+- **The `.deb` still has no such coverage** and has never been installed by CI or by
+  the runbook (#261). It ships on the strength of its config alone.
 
 ## Loop-back
 
