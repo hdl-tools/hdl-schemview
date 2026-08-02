@@ -173,10 +173,10 @@ does not by itself solve last-mile delivery. Making that work is a separate,
 undecided question: a public releases repo, an internal mirror, or accepting
 hand-carry.
 
-Elaboration is likewise **not** in the bundle (tier 2 of #240, gated on a PyInstaller
-spike). Getting a design onto the isolated machine still means elaborating a
-`hierarchy.json` on a connected box and copying it across — see `app/README.md`
-§*Getting a design in*.
+Elaboration is likewise **not** in the bundle (#277, tier 2 of #240, gated on a
+PyInstaller spike). Getting a design onto the isolated machine still means
+elaborating a `hierarchy.json` on a connected box and copying it across — see
+`app/README.md` §*Getting a design in*.
 
 ## Cost note
 

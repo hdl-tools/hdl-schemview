@@ -239,9 +239,9 @@ xattr -dr com.apple.quarantine /Applications/hdl-schemview.app
 ### Getting a design in
 
 Elaboration needs Python + pyslang (`svxprobe-elaborate` on PATH) and is **not
-bundled** — freezing it into a sidecar is tier 2 of #240, gated on a PyInstaller
-spike. On a machine without it, the designlist (`.f`) flow reports so explicitly
-and points here. The supported workflow is:
+bundled** — freezing it into a sidecar is #277 (tier 2 of #240), gated on a
+PyInstaller spike. On a machine without it, the designlist (`.f`) flow reports
+so explicitly and points here. The supported workflow is:
 
 1. Elaborate on a connected machine: `svxprobe-elaborate --top <top> -f <list.f>
    --gate-level --name-refs -o hierarchy.json`
