@@ -163,6 +163,41 @@ xattr -dr com.apple.quarantine /Applications/hdl-schemview.app
 > ⚠️ macOS remains **unverified end-to-end** (ADR 0009): CI proves it builds and
 > bundles, but no maintainer has a macOS machine.
 
+## The Nix channel — a tag is already the release
+
+Nix is a **second channel with a different audience** (#243, and explicitly not a
+second attempt at ADR 0009: a machine that cannot install libraries cannot install
+Nix either). It needs no step in this runbook, because the flake outputs are
+addressable at any tag the moment it is pushed:
+
+```bash
+nix run   github:chuanseng-ng/hdl-schemview/v0.2.0#svxprobe -- --help
+nix build github:chuanseng-ng/hdl-schemview/v0.2.0#svxprobe
+```
+
+Downstream flakes consume the package through `overlays.default`.
+
+**Nothing Nix-built is attached to the GitHub release, on purpose.** A Nix store
+path is not a usable asset without `nix copy` and a binary cache, and a tarball of
+one is worse than the tag it came from — the tag is content-addressed, the tarball
+is not. What the flake covers is `packages.svxprobe` only; the desktop app is a
+non-goal there (it already ships as the AppImage/`.deb`/`.rpm` above) and the
+elaboration harness is blocked on `pyslang` building offline under Nix.
+
+Two consequences worth knowing before cutting a tag:
+
+- **The bundle version guard does not cover the flake.** `core/`'s crates are all
+  `0.0.0` (`[workspace.package]`), so `nix build …#svxprobe` reports `0.0.0`
+  regardless of the tag. The tag is the identifier; the package version is not.
+- **Consumers rebuild from source.** There is no binary cache, so a first
+  `nix run` compiles the whole Rust dependency tree. Adding one (e.g. Cachix) is
+  a recurring-cost decision tracked on #243, not part of cutting a release.
+
+`.github/workflows/nix.yml` keeps the outputs from rotting: it runs
+`nix flake check` (which mirrors `ci.yml`'s Rust gate through the flake), builds
+and runs the binary, and asserts both that the dev shell's rustc matches
+`core/rust-toolchain.toml` and that `flake.lock` is committed and current.
+
 ## Caveat — this is a staging point, not a distribution channel
 
 The repository is **private**, so release assets are visible only to collaborators.

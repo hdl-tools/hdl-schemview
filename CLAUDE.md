@@ -37,6 +37,9 @@ docs/        ROADMAP, fixtures policy, benchmarking runbook, release runbook,
              0004 internal-logic granularity · 0005 gate-level projection ·
              0006 HLS C↔RTL tracing · 0007 semantic name coloring ·
              0008 lexical source highlighting · 0009 packaging for isolation
+flake.nix    Nix flake (#243): packages/apps.svxprobe, checks.{fmt,clippy,test},
+             overlays.default, dev shells. Locked by flake.lock; the Rust version
+             is read from core/rust-toolchain.toml so the two cannot drift.
 ```
 
 Data flow (end to end):
@@ -290,6 +293,19 @@ cargo fmt --all --check                             # PR gate
 cargo clippy --all-targets -- -D warnings           # PR gate
 cargo run --bin svxprobe -- match <model> <trace>   # Phase-1 cross-probe gate (≥95% hit-rate)
 
+# Nix (from repo root, #243) — the flake now has packages, not just dev shells.
+# The toolchain version is read out of core/rust-toolchain.toml at eval time, so
+# `nix develop`'s rustc cannot drift from the rustup pin. nixpkgs is pinned by a
+# committed flake.lock — without it the "pinned Verilator" claim was false.
+nix build .#svxprobe   # the CLI; core/crates/cli only, no scale-bench, no fixtures
+nix run   .#svxprobe -- --help
+nix flake check        # builds packages.* + checks.{fmt,clippy,test} (mirrors the Rust gate)
+nix develop            # verilator + the pinned rust + python311 + uv + jq
+# The Python harness is NOT packaged: `uv sync` fetches pyslang from PyPI, which
+# is deliberately impure. pyslang is absent from nixpkgs (the `slang` there is
+# jedsoft's S-Lang, unrelated) and builds its vendored slang through CMake
+# FetchContent, which the Nix sandbox forbids — tier B of #243.
+
 # Frontend (from app/)
 npm install
 npm run dev          # Vite dev server (http://localhost:5173)
@@ -415,6 +431,17 @@ in one run and both fail. Runbook: `docs/releasing.md`.
 `nightly.yml` — **three** jobs: `repro-tier1` (Verilator trace regeneration),
 `stress-tier2` (Ibex, `continue-on-error`), and `scale-bench` (the scalability
 collector, `continue-on-error`, uploads a `scale-bench-metrics` artifact).
+`nix.yml` (#243) — one Ubuntu job on `flake.*`/`core/**` changes: `nix flake check`
+(builds `packages.*` and runs `checks.{fmt,clippy,test}`, deliberately re-running
+`ci.yml`'s Rust gate *through the flake* — that is the thing which rots), then
+`nix build`+`--help` so the binary is proven to run and not merely to link. It
+also asserts the two invariants the flake exists for: `nix develop`'s rustc
+matches `core/rust-toolchain.toml`, and `flake.lock` is committed and current
+(`git ls-files --error-unmatch` **and** `git diff --exit-code` — an *untracked*
+lock never shows in a diff, so the tracked test is the one that catches "no lock
+at all"). The job uploads `flake.lock` on `always()` so a contributor with no local
+Nix can still relock an input — `always()` because the step that most often needs
+that artifact is the one that just failed.
 
 ## Workflow gates
 

@@ -1,0 +1,93 @@
+name: Nix
+
+# Proves the flake outputs still build and still run the PR gate. `ci.yml` is the
+# fast signal; this one exists because flake outputs rot silently — nothing else
+# in the repo evaluates them.
+#
+# It also uploads `flake.lock`, so a contributor with no local Nix can still
+# relock an input (#243).
+on:
+  push:
+    branches: [main]
+    paths:
+      - flake.nix
+      - flake.lock
+      - "core/**"
+      - .github/workflows/nix.yml
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - "core/**"
+      - .github/workflows/nix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flake:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Builds every `packages.*` output and runs checks.{fmt,clippy,test},
+      # which mirror ci.yml's Rust gate.
+      - name: nix flake check
+        run: nix flake check -L
+
+      # The specific bug #243 fixes: nixpkgs 25.05 ships rustc 1.86 while
+      # core/rust-toolchain.toml pins 1.94, and with no rustup in the shell the
+      # pin was silently ignored. The flake now reads the channel out of that
+      # file, so the two cannot disagree — assert it rather than trust it.
+      - name: Dev shell matches rust-toolchain.toml
+        run: |
+          set -euo pipefail
+          pinned=$(grep -oP 'channel\s*=\s*"\K[^"]+' core/rust-toolchain.toml)
+          actual=$(nix develop --command rustc --version | cut -d' ' -f2)
+          echo "pinned=[$pinned] actual=[$actual]"
+          # Without these two guards the comparison passes vacuously: if both
+          # extractions fail, "" matches "" and the step reports success while
+          # having checked nothing. Caught by running this logic by hand.
+          [ -n "$pinned" ] || { echo "::error::could not read the pin from core/rust-toolchain.toml"; exit 1; }
+          [ -n "$actual" ] || { echo "::error::could not read rustc from the dev shell"; exit 1; }
+          # The pin is a rustup channel ("1.94" = newest 1.94.x), so an exact
+          # match and a patch-level match are both correct.
+          case "$actual" in
+            "$pinned" | "$pinned".*) ;;
+            *) echo "::error::dev shell rustc $actual does not match the $pinned pin"; exit 1 ;;
+          esac
+
+      # Proves the binary runs, not merely that it links.
+      - name: nix build + run
+        run: |
+          nix build .#svxprobe -L
+          ./result/bin/svxprobe --help
+
+      # Uploaded unconditionally so a relock never needs a local Nix: whoever
+      # changes an input can take the lock this run produced. Kept `always()`
+      # because the step that most often needs it is the one below, which fails.
+      - name: Upload flake.lock
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-lock
+          path: flake.lock
+          if-no-files-found: warn
+
+      # Fails when flake.nix's inputs changed without a relock, or when the lock
+      # is missing entirely. Last, so the artifact above is still uploaded.
+      #
+      # `git diff` alone is not enough: an untracked flake.lock does not appear
+      # in a diff, so a repo with no committed lock would pass silently — which
+      # is exactly the state #243 exists to end.
+      - name: flake.lock is committed and current
+        run: |
+          git ls-files --error-unmatch flake.lock > /dev/null \
+            || { echo "::error::flake.lock is not committed — download the flake-lock artifact from this run and commit it"; exit 1; }
+          git diff --exit-code -- flake.lock

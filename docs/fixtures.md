@@ -141,8 +141,18 @@ vendored; experimental until hardened.
 | Rust deps | `Cargo.lock` | `core/Cargo.lock` |
 | pyslang | `==11.0.0` | `elaborate/pyproject.toml` + `uv.lock` |
 | Python | `>=3.11` | `elaborate/pyproject.toml` |
-| Verilator | 5.x (apt `5.020` verified; nixpkgs-pinned via `flake.nix`) | nightly / local |
+| Verilator | 5.x (apt `5.020` verified; `flake.lock` pins **`5.034`**) | nightly / local |
+| nixpkgs | `flake.lock` | repo root |
 
 Byte-for-byte trace reproducibility requires a pinned Verilator — use
 `nix develop .#verilator`. The apt package is the verified fallback and is
 checked structurally (scope/var counts), not byte-for-byte.
+
+That pin only holds because **`flake.lock` is committed** (#243). Before it,
+`nixpkgs` floated to whatever `nixos-25.05` currently pointed at, so two machines
+could resolve two different Verilator builds — the exact failure this table exists
+to prevent. Naming `5.034` in the table above is only possible *because* of the
+lock: without one the question "which Verilator does `nix develop` give me?" had no
+answer. Relocking (`nix flake update`) is therefore a deliberate act that can
+change a pinned tool version; re-verify the tier-1 traces after one, and update
+this row.
