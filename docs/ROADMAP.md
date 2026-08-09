@@ -72,12 +72,10 @@ agent trying to build something already solved. When in doubt, **adopt**.
 Both forks are **re-examined** as Architecture Decision Records and **locked to
 their defaults** for v1. Read the ADRs before deviating.
 
-> **All ADRs** live in [`decisions/`](decisions). 0001/0002 are the two forks below;
-> the rest record decisions made during the build: 0003 storage backend for parse
-> scalability, 0004 internal-logic granularity, 0005 optional gate-level projection,
-> 0006 HLS C↔RTL source tracing, 0007 model-driven semantic name coloring, 0008
-> lexical source highlighting. The §8 stack sub-decisions (elkjs, custom waveform
-> canvas) are closed inline there rather than as separate ADRs.
+> **All ADRs** live in [`decisions/`](decisions/README.md), which indexes every record
+> with a one-line summary. 0001/0002 are the two forks below; the rest were decided
+> during the build. The §8 stack sub-decisions (elkjs, custom waveform canvas) are
+> closed inline there rather than as separate ADRs.
 
 ### 4.1 Scope: RTL-level vs. netlist-level → **RTL-level (locked)**
 Source = the hierarchy, so cross-probe is direct and a weekend-feasible spike on

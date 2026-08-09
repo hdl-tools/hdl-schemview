@@ -50,6 +50,11 @@ so a popped-out waveform window can load and query its own trace of the same des
 The pure modules above are DOM-free on purpose, which is why most of the frontend is
 unit-testable without a browser environment.
 
+For the internals behind this map — the selection bus and pane-ownership rules, detached
+windows, ELK layout, trace mode, waveform lane groups and the source tokenizing layers —
+see **[`../docs/frontend.md`](../docs/frontend.md)**. The Tauri command table and the
+crates behind it are in [`../docs/architecture.md`](../docs/architecture.md).
+
 ## Interacting
 
 | Action | Where |
