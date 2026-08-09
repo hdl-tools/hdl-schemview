@@ -311,6 +311,12 @@ pub struct TraceStepReq {
     pub dir: Dir,
     #[serde(default)]
     pub depth: Option<usize>,
+    /// Per-step fan-out override (#244 PR4) — what the "N more…" affordance sends
+    /// so expanding one capped signal does not un-cap the whole trace. Unlike
+    /// `depth` this is **not** clamped to the shared budget: exceeding it is the
+    /// entire point, and `ConeLimits::boxes` still bounds the result.
+    #[serde(default)]
+    pub fanout: Option<usize>,
 }
 
 /// One signal declared directly inside a scope (#171) — a row of a waveform pane's
@@ -729,6 +735,7 @@ impl Session {
                     dir: s.dir,
                     // One click is one hop; a step may not outrun the global cap.
                     depth: s.depth.unwrap_or(1).min(limits.depth),
+                    fanout: s.fanout,
                 })
             })
             .collect();

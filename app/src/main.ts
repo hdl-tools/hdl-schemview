@@ -1022,6 +1022,15 @@ let traceSteps: TraceStep[] = [];
 // newer one, the same guard `loadPaletteSignals` uses for rapid drilling.
 let traceGen = 0;
 
+// The pane's fan-out budget, sent explicitly on every trace call.
+//
+// Explicit rather than inherited so the "+N more" badge can compute what to ask
+// for: the cap kept `TRACE_FANOUT` connections and reported the rest as `more`, so
+// revealing them means asking for `TRACE_FANOUT + more` on that step alone. Mirrors
+// `ConeLimits::default().fanout`; `depth` and `boxes` are deliberately left to
+// inherit, which is what PR2's per-field `ConeLimits` defaults exist for.
+const TRACE_FANOUT = 32;
+
 function applyModeButtons() {
   const on = (id: string, active: boolean) => {
     const b = document.getElementById(id);
@@ -1063,7 +1072,9 @@ async function renderTrace() {
   }
   let graph: SchematicGraph;
   try {
-    graph = await api.traceGraph(traceSteps, sid, currentProjection());
+    graph = await api.traceGraph(traceSteps, sid, currentProjection(), {
+      fanout: TRACE_FANOUT,
+    });
   } catch (e) {
     log("error", `trace failed: ${e}`);
     return;
@@ -1108,8 +1119,8 @@ async function enterHierarchy() {
 // Replacing rather than extending on a fresh seed is deliberate: "Trace from here"
 // in hierarchy mode means *this signal*, and inheriting an unrelated earlier walk
 // would silently draw someone else's question.
-async function startTrace(path: string, dir: Dir) {
-  const step: TraceStep = { path, dir };
+async function startTrace(path: string, dir: Dir, fanout?: number) {
+  const step: TraceStep = { path, dir, ...(fanout === undefined ? {} : { fanout }) };
   traceSteps = schemMode === "trace" ? pushTraceStep(traceSteps, step) : [step];
   await enterTrace();
 }
@@ -1153,6 +1164,76 @@ function storedTraceSteps(label: string): TraceStep[] {
   }
 }
 
+// Draw a pin's trace controls (#244 PR4), in the outboard band `AFFORD_GUTTER`
+// reserved for them: a ◀/▶ button that expands this signal one hop, and — when the
+// fan-out cap dropped connections here — a "+N" badge that reveals *this* signal's
+// remainder.
+//
+// One helper for every box shape rather than a copy per pin loop: the box kinds
+// draw quite different glyphs but the control is the same control, and the pin
+// loops have already drifted (an FF labels its dangling Q *inside* the box because
+// its east gutter is not reserved).
+//
+// Placement is offset vertically off the pin's centre line, because a wire arrives
+// horizontally at exactly that point — a control sitting on `py` would be drawn on
+// top of the wire it is about to expand.
+//
+// `sideOverride` is for glyphs whose pin side is not read off `SchPort.side` (a
+// gate's operands are positional).
+function drawPinAffordances(
+  g: SVGElement,
+  sp: SchPort | undefined,
+  edgeX: number,
+  py: number,
+  west: boolean,
+) {
+  if (schemMode !== "trace" || !sp?.path) return;
+  const path = sp.path;
+  const out = edgeX + (west ? -1 : 1) * 4;
+  const anchor = west ? "end" : "start";
+
+  // The expand control. West is fan-in (what drives this), east fan-out (what
+  // reads it) — the same sense the right-click submenu uses.
+  const dir: Dir = west ? "in" : "out";
+  const btn = document.createElementNS(SVGNS, "text");
+  btn.setAttribute("class", "pin-afford");
+  btn.setAttribute("x", String(out));
+  btn.setAttribute("y", String(py - 5));
+  btn.setAttribute("text-anchor", anchor);
+  btn.textContent = west ? "◀" : "▶";
+  btn.append(
+    Object.assign(document.createElementNS(SVGNS, "title"), {
+      textContent: `Expand ${west ? "fan-in" : "fan-out"} of ${path}`,
+    }),
+  );
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    void startTrace(path, dir);
+  };
+  g.appendChild(btn);
+
+  if (!sp.more) return;
+  // The remainder the cap dropped. Clicking lifts the cap for *this* step only —
+  // raising the shared budget would un-cap every other signal in the trace and
+  // drag a global clock's whole fan-out onto a canvas nobody asked for.
+  const badge = document.createElementNS(SVGNS, "text");
+  badge.setAttribute("class", "more-badge");
+  badge.setAttribute("x", String(out));
+  badge.setAttribute("y", String(py + 9));
+  badge.setAttribute("text-anchor", anchor);
+  badge.textContent = `+${sp.more}`;
+  badge.append(
+    Object.assign(document.createElementNS(SVGNS, "title"), {
+      textContent: `${sp.more} more connection(s) not drawn — click to expand this signal past the fan-out cap`,
+    }),
+  );
+  badge.onclick = (e) => {
+    e.stopPropagation();
+    void startTrace(path, dir, TRACE_FANOUT + (sp.more ?? 0));
+  };
+  g.appendChild(badge);
+}
+
 function setupModeToggle() {
   document.getElementById("mode-hier")?.addEventListener("click", () => {
     if (schemMode !== "hierarchy") void enterHierarchy();
@@ -1170,7 +1251,9 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     host.textContent = "(empty scope)";
     return;
   }
-  const laid: any = await layout(graph);
+  // Reserve the outboard gutter only where the controls are actually drawn, so the
+  // hierarchy view's spacing is untouched (#244 PR4).
+  const laid: any = await layout(graph, { affordances: schemMode === "trace" });
   const baseW = Math.max(laid.width ?? 400, 200);
   const baseH = Math.max(laid.height ?? 300, 150);
   const svg = document.createElementNS(SVGNS, "svg");
@@ -1450,6 +1533,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       arrow.onclick = () => selectNode(pid);
       arrow.oncontextmenu = probePin;
       g.appendChild(arrow);
+      drawPinAffordances(g, sp, edgeX, py, west);
 
       // A logic node (comb/latch/assign) is a process, not a module: its pins are
       // bare wire stubs, so skip the per-pin signal-name labels (the wire already
@@ -1581,6 +1665,9 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
     arrow.oncontextmenu = probePin;
   }
   g.appendChild(arrow);
+  // A boundary pin is where a trace leaves the drawn scope, so it is the most
+  // likely thing to want expanded. A constant tie-off is inert and gets none.
+  if (!isConst) drawPinAffordances(g, sp, px, py, input);
 
   const t = document.createElementNS(SVGNS, "text");
   t.setAttribute("class", isConst ? "const-label" : "pin-label");
@@ -2172,6 +2259,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
     arrow.onclick = () => selectNode(pid);
     arrow.oncontextmenu = probePin;
     g.appendChild(arrow);
+    drawPinAffordances(g, sp, edgeX, py, west);
     if (sp) {
       const t = document.createElementNS(SVGNS, "text");
       t.setAttribute("class", "pin-label");

@@ -433,7 +433,54 @@ function memoryChild(n: SchNode): ElkChild {
 /// vertical centre, which left wires floating ~8px off the pins. A zero-size port
 /// makes ELK route the edge to exactly the `(x, y)` we set — the box wall, where
 /// the renderer draws the pin — so wires meet their pins.
-export function toElk(graph: SchematicGraph): ElkGraph {
+/// Layout knobs that are a property of the *view*, not of the graph (#244 PR4).
+export interface LayoutOpts {
+  /// Reserve an outboard gutter on each wall for trace mode's ◀/▶ expand controls
+  /// and its "+N more" badge. Off for the hierarchy view, which draws neither.
+  affordances?: boolean;
+}
+
+/// Width of the outboard band a trace affordance occupies, per wall.
+///
+/// Reserved as a whole-node `elk.margins` — the #199 const-label precedent — so
+/// ELK keeps the neighbouring layer clear instead of letting a control land on a
+/// box next door. Outboard rather than inboard because the inward band is already
+/// spoken for by the pin triangle and its signal-name label.
+export const AFFORD_GUTTER = 16;
+
+/// Extra room for the widest "+N" badge on one wall, on top of the gutter. Sized
+/// like the const-label (5.6 px/char at 9 px), since it is the same kind of small
+/// outboard text.
+function badgeWidth(ports: SchPort[]): number {
+  const widest = ports.reduce((m, p) => Math.max(m, p.more ? `+${p.more}`.length : 0), 0);
+  return widest ? widest * 5.6 + 4 : 0;
+}
+
+/// Merge a trace affordance gutter into a child's `elk.margins`.
+///
+/// Applied once, here, rather than threaded through all six per-kind sizers: it is
+/// the same reservation for every box shape, and the sizers already disagree about
+/// whether they emit margins at all (only gate/mux do, for #199). Parses any left
+/// margin they set so the two reservations add instead of clobbering each other.
+function withAffordanceMargins(child: ElkChild, n: SchNode, on: boolean): ElkChild {
+  if (!on) return child;
+  const west = n.ports.filter((p) => p.side !== "east");
+  const east = n.ports.filter((p) => p.side === "east");
+  if (!west.length && !east.length) return child;
+  const prev = child.layoutOptions["elk.margins"];
+  const prevLeft = prev ? Number(/left=([\d.]+)/.exec(prev)?.[1] ?? 0) : 0;
+  const left = (west.length ? AFFORD_GUTTER : 0) + badgeWidth(west) + prevLeft;
+  const right = (east.length ? AFFORD_GUTTER : 0) + badgeWidth(east);
+  return {
+    ...child,
+    layoutOptions: {
+      ...child.layoutOptions,
+      "elk.margins": `[left=${left.toFixed(1)},top=0.0,right=${right.toFixed(1)},bottom=0.0]`,
+    },
+  };
+}
+
+export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
   const portOwner = new Set<number>();
   for (const n of graph.nodes) for (const p of n.ports) portOwner.add(p.id);
   // Edge-connected port/node ids — a modport bundle pin only fans out its
@@ -445,7 +492,11 @@ export function toElk(graph: SchematicGraph): ElkGraph {
     wired.add(e.target);
   }
 
-  const children: ElkChild[] = graph.nodes.map((n): ElkChild => {
+  const children: ElkChild[] = graph.nodes.map((n): ElkChild =>
+    withAffordanceMargins(sizeChild(n), n, opts.affordances === true),
+  );
+
+  function sizeChild(n: SchNode): ElkChild {
     // Inferred storage (register / level latch): an FF-style symbol with
     // labelled west input rows, clock wedge, south reset bubble, east Qs.
     if (n.kind === "FF" || n.kind === "Latch") return storageChild(n);
@@ -567,7 +618,7 @@ export function toElk(graph: SchematicGraph): ElkGraph {
         ...east.map((p, i) => sidePort(p, i, w)),
       ],
     };
-  });
+  }
 
   // An edge endpoint is a port if some box exposes it, else the box itself.
   const endpoint = (id: number) => (portOwner.has(id) ? portId(id) : nodeId(id));
@@ -709,8 +760,8 @@ export function gatherBar(pins: Pt[], dir: 1 | -1): { bar: [Pt, Pt]; stubs: [Pt,
 const elk = new ELK();
 
 /// Lay out a SchematicGraph; returns the ELK graph with x/y/edge sections.
-export async function layout(graph: SchematicGraph): Promise<any> {
-  return elk.layout(toElk(graph) as any);
+export async function layout(graph: SchematicGraph, opts: LayoutOpts = {}): Promise<any> {
+  return elk.layout(toElk(graph, opts) as any);
 }
 
 /// Zoom factor that fits a laid-out graph (`baseW`x`baseH`) inside a pane
