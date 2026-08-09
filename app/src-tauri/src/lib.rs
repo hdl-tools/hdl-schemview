@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use svxprobe_gui::{
-    NameRefDto, ProbeResponse, Projection, Session, SignalEntry, SourceFile, StartupArgs,
-    StartupError, TreeNode,
+    ConeLimits, NameRefDto, ProbeResponse, Projection, Session, SignalEntry, SourceFile,
+    StartupArgs, StartupError, TraceStepReq, TreeNode,
 };
 
 mod bench;
@@ -217,6 +217,32 @@ fn cone(
     with_session(&state, session_id, |s| Ok(s.cone(net, &dir, depth)))
 }
 
+/// The schematic trace mode's graph (#244 PR2): the accumulated fan-in/out of an
+/// ordered list of expansion steps.
+///
+/// The pane sends its whole step list on every expansion and gets a whole graph
+/// back, rather than posting its current graph to be merged into. Pin ids come
+/// from a per-call allocator, so ids from two calls are not comparable — one call
+/// per render is what keeps the graph internally consistent, and it also means the
+/// backend holds no per-pane trace state (a detached pane restores its trace from
+/// its own snapshot).
+///
+/// `limits` is partial-friendly: `{"fanout": 8}` inherits the other two defaults.
+#[tauri::command]
+fn trace_graph(
+    state: State<AppState>,
+    session_id: Option<String>,
+    steps: Vec<TraceStepReq>,
+    limits: Option<ConeLimits>,
+    projection: Option<Projection>,
+) -> CmdResult<SchematicGraph> {
+    let limits = limits.unwrap_or_default();
+    let projection = projection.unwrap_or_default();
+    with_session(&state, session_id, |s| {
+        s.trace_graph(&steps, limits, projection).map_err(fmt_err)
+    })
+}
+
 #[tauri::command]
 fn probe_signal(
     state: State<AppState>,
@@ -379,6 +405,7 @@ pub fn run() {
             hierarchy_tree,
             scope_signals,
             cone,
+            trace_graph,
             probe_signal,
             probe_node,
             probe_source,

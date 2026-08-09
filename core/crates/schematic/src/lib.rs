@@ -1985,18 +1985,38 @@ fn join_signal(
 /// [`SchPort::more`] and [`SchematicGraph::truncated`], never silently
 /// discarded. Defaults come from the `nav` benchmark rather than from feel —
 /// see each field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Deserialized field-by-field (#244 PR2) so the `trace_graph` command can take
+/// a partial `{"fanout": 8}` and inherit the rest — a caller that names one cap
+/// should not have to restate the two it does not care about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConeLimits {
     /// Maximum hops from the seed. One hop is signal → box → that box's other
     /// signals.
+    #[serde(default = "default_depth")]
     pub depth: usize,
     /// Maximum boxes reached through any one signal, per hop. This is the cap
     /// that tames a global clock/reset: fan-out, not node count, is what makes
     /// a cone expensive (ADR 0003).
+    #[serde(default = "default_fanout")]
     pub fanout: usize,
     /// Maximum boxes in the whole returned graph — the only cap that bounds
     /// `fanout^depth`.
+    #[serde(default = "default_boxes")]
     pub boxes: usize,
+}
+
+// Serde needs a fn per field; each defers to `Default` so there is exactly one
+// place the numbers (and the reasoning below) live.
+fn default_depth() -> usize {
+    ConeLimits::default().depth
+}
+fn default_fanout() -> usize {
+    ConeLimits::default().fanout
+}
+fn default_boxes() -> usize {
+    ConeLimits::default().boxes
 }
 
 impl Default for ConeLimits {
@@ -2033,6 +2053,27 @@ impl ConeLimits {
             ..Self::default()
         }
     }
+}
+
+/// One expansion request in a trace (#244 PR2): walk `depth` hops out of `seed`
+/// in `dir`.
+///
+/// A trace is an *ordered list* of these, and [`trace_graph`] re-walks the whole
+/// list on every expansion rather than merging a new hop into an existing graph.
+/// That is not a convenience: [`PinAlloc`] hands out pin ids from a per-call
+/// counter, so the same `(box, signal)` gets a different id in a second call and
+/// the two graphs' pins collide misaligned with meaning — see [`cone_with`]'s
+/// note. Re-deriving keeps every id inside one call, which is the only place
+/// they are comparable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceStep {
+    /// A net, port, or logic/instance node to expand from.
+    pub seed: NodeId,
+    /// Which way to follow connectivity: fan-in, fan-out, or both.
+    pub dir: Dir,
+    /// Hops for this step alone. One click is normally one hop; the caller is
+    /// expected to clamp this to [`ConeLimits::depth`].
+    pub depth: usize,
 }
 
 /// Whether `e` leaves `sig` in the requested direction.
@@ -2360,8 +2401,8 @@ fn cone_root(design: &Design, seed: NodeId) -> String {
 /// `scale-bench` fan-out baseline.
 ///
 /// Pin ids are stable within one call, in allocation order — they are *not*
-/// comparable across calls, so a future incremental merge must re-key rather
-/// than assume.
+/// comparable across calls, so an incremental merge must re-key rather than
+/// assume. [`trace_graph`] sidesteps that by re-deriving instead of merging.
 pub fn cone_with(
     design: &Design,
     seed: NodeId,
@@ -2369,7 +2410,54 @@ pub fn cone_with(
     limits: ConeLimits,
     projection: Projection,
 ) -> SchematicGraph {
-    let root = cone_root(design, seed);
+    trace_graph(
+        design,
+        &[TraceStep {
+            seed,
+            dir,
+            depth: limits.depth,
+        }],
+        limits,
+        projection,
+    )
+}
+
+/// The accumulated fan-in/out of an ordered list of [`TraceStep`]s — the trace
+/// mode's extractor (#244 PR2), and the generalization [`cone_with`] delegates to.
+///
+/// Every step walks the same machinery a single-seed cone does; what makes them
+/// *one* graph rather than several is that they share the walk's state. Nothing
+/// merges anything:
+///
+/// * `emitted` / `emitted_pins` already dedupe boxes, and [`PinAlloc`] memoizes
+///   on `(box, signal)`, so a box two steps both reach is emitted once with the
+///   same pins.
+/// * `seen_pairs` already dedupes wires on the `(min, max)` pin pair, and
+///   `next_edge` keeps counting, so edge ids stay unique across steps.
+/// * `visited` only gates what is pushed onto the *next* hop — a step's own
+///   frontier is always walked, so re-seeding on a signal an earlier step
+///   reached still expands it.
+/// * `stubs` is the load-bearing one. [`follows`] filters to one direction, so a
+///   directional walk is one-sided by construction and always synthesizes a
+///   signal stub. Expanding fan-in of a net and then its fan-out therefore
+///   re-uses that one stub — step 1 hangs it as a load, step 2 finds it already
+///   there and hangs it as a driver — so the net converges on a single junction
+///   node with its drivers on one side and its loads on the other, instead of
+///   being drawn twice.
+///
+/// `limits.boxes` is the budget for the *whole* graph, so an accumulating trace
+/// stays bounded no matter how many steps the user adds. `root` binds to the
+/// first step's seed; an empty `steps` yields an empty graph.
+pub fn trace_graph(
+    design: &Design,
+    steps: &[TraceStep],
+    limits: ConeLimits,
+    projection: Projection,
+) -> SchematicGraph {
+    let root = steps
+        .first()
+        .map(|s| cone_root(design, s.seed))
+        .unwrap_or_default();
     let mut pins = PinAlloc::new();
     let mut nodes: Vec<SchNode> = Vec::new();
     let mut emitted: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
@@ -2385,207 +2473,223 @@ pub fn cone_with(
     let mut scopes = ScopeCache::default();
     let mut more_on: std::collections::HashMap<NodeId, u32> = std::collections::HashMap::new();
 
-    let mut frontier = seed_signals(design, seed);
-    let mut visited: std::collections::HashSet<NodeId> = frontier.iter().copied().collect();
+    let mut visited: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
 
-    for _hop in 0..limits.depth.max(1) {
-        let mut next: Vec<NodeId> = Vec::new();
-        for &sig in &frontier {
-            let mut drivers: Vec<(NodeId, Option<String>)> = Vec::new();
-            let mut loads: Vec<(NodeId, Option<String>)> = Vec::new();
-            let mut sig_pins: Vec<NodeId> = Vec::new();
+    for step in steps {
+        // Per step, not per call: a later step re-seeds a fresh frontier, and
+        // `visited` carries over so the walk does not re-expand ground an
+        // earlier step already covered. A seed that is itself already visited
+        // is still walked — `visited` gates only what the *next* hop picks up.
+        let mut frontier = seed_signals(design, step.seed);
+        visited.extend(frontier.iter().copied());
 
-            // Ascending model-edge order, so the kept set — and therefore pin
-            // allocation and the wire sequence — is byte-stable across runs.
-            let cands: Vec<&Edge> = design
-                .edge_indices_of(sig)
-                .iter()
-                .map(|&i| &design.edges()[i as usize])
-                .filter(|e| follows(e, sig, dir))
-                .collect();
-            let total = cands.len();
-            let mut kept = 0usize;
-            let mut dropped = 0u32;
+        for _hop in 0..step.depth.max(1) {
+            let mut next: Vec<NodeId> = Vec::new();
+            for &sig in &frontier {
+                let mut drivers: Vec<(NodeId, Option<String>)> = Vec::new();
+                let mut loads: Vec<(NodeId, Option<String>)> = Vec::new();
+                let mut sig_pins: Vec<NodeId> = Vec::new();
 
-            // `.max(1)` for the same reason as `depth` above: a zero budget would
-            // drop every candidate on every signal, and the graph would come back
-            // empty with `truncated` set but no pin anywhere to hang a `more`
-            // count on — indistinguishable from "nothing found" in the UI, which
-            // is precisely the silent discard this cap exists to prevent.
-            for e in cands {
-                if kept >= limits.fanout.max(1) {
-                    dropped += 1;
-                    continue;
-                }
-                let other = if e.port == sig { e.endpoint } else { e.port };
-                let Some((bx, scope)) = cone_box_of(design, other, projection, &mut scopes) else {
-                    // No enclosing box: a module port or free net. Emit it as a
-                    // stub so the wire has a real endpoint, and keep walking —
-                    // this is how the trace crosses a hierarchy wall.
-                    if other != sig && visited.insert(other) {
-                        next.push(other);
-                    }
-                    continue;
-                };
-                // The box built for this hop, not yet committed to `nodes`.
-                let mut fresh: Option<SchNode> = None;
-                // `stubs` as well as `emitted`: a `SchNode.id` is a model id, and a
-                // node the walk already stood up as a one-sided signal stub would
-                // otherwise be pushed a second time as a box, putting one id on two
-                // nodes — which no layout engine can resolve. The stub's own pin *is*
-                // that model id, so a connection resolving there still anchors; one
-                // resolving to a pin only the box form has (a bundle's raw access
-                // port) is dropped by the `anchored` test below, the same way any
-                // unexposed pin already is.
-                if !emitted.contains(&bx) && !stubs.contains(&bx) {
-                    if nodes.len() >= limits.boxes {
-                        truncated = true;
+                // Ascending model-edge order, so the kept set — and therefore pin
+                // allocation and the wire sequence — is byte-stable across runs.
+                let cands: Vec<&Edge> = design
+                    .edge_indices_of(sig)
+                    .iter()
+                    .map(|&i| &design.edges()[i as usize])
+                    .filter(|e| follows(e, sig, step.dir))
+                    .collect();
+                let total = cands.len();
+                let mut kept = 0usize;
+                let mut dropped = 0u32;
+
+                // `.max(1)` for the same reason as `depth` above: a zero budget would
+                // drop every candidate on every signal, and the graph would come back
+                // empty with `truncated` set but no pin anywhere to hang a `more`
+                // count on — indistinguishable from "nothing found" in the UI, which
+                // is precisely the silent discard this cap exists to prevent.
+                for e in cands {
+                    if kept >= limits.fanout.max(1) {
                         dropped += 1;
                         continue;
                     }
-                    let scope_path = design
-                        .node(scope)
-                        .map(|n| n.path.clone())
-                        .unwrap_or_else(|| root.clone());
-                    let Some(node) = cone_box_node(design, bx, &scope_path, &mut pins) else {
+                    let other = if e.port == sig { e.endpoint } else { e.port };
+                    let Some((bx, scope)) = cone_box_of(design, other, projection, &mut scopes)
+                    else {
+                        // No enclosing box: a module port or free net. Emit it as a
+                        // stub so the wire has a real endpoint, and keep walking —
+                        // this is how the trace crosses a hierarchy wall.
+                        if other != sig && visited.insert(other) {
+                            next.push(other);
+                        }
                         continue;
                     };
-                    // Held back, not committed: the connection that reached this
-                    // box may still fail to resolve to one of its pins, and a box
-                    // pushed before that is known becomes an edge-less orphan on
-                    // canvas (#269). `PinAlloc` memoizes per `(box, signal)`, so
-                    // rebuilding the node on a later hop hands out the same ids —
-                    // discarding one here costs nothing and shifts nothing.
-                    fresh = Some(node);
-                }
-                let pin = cone_pin_for(
-                    design,
-                    &mut scopes,
-                    scope,
-                    projection,
-                    bx,
-                    other,
-                    e,
-                    &mut pins,
-                );
-                // A pin the box did not actually emit cannot anchor a wire (an
-                // instance edge that resolves to no port child, say). Drop the
-                // connection rather than emit an edge pointing at nothing.
-                //
-                // This is a real, load-bearing case, not a should-never-happen
-                // backstop: a cone routinely reaches a signal *inside* an
-                // instance that the instance does not expose as a port, and a
-                // logic box's builder emits pins only for the signals it wires.
-                // Neither has a pin, and neither is a truncation — so this drop
-                // deliberately feeds neither `truncated` nor the `more` counts,
-                // which would misreport it as the fan-out cap engaging.
-                let anchored = emitted_pins.contains(&pin)
-                    || fresh
-                        .as_ref()
-                        .is_some_and(|n| n.ports.iter().any(|p| p.id == pin));
-                if !anchored {
-                    continue;
-                }
-                if let Some(node) = fresh {
-                    emitted_pins.extend(node.ports.iter().map(|p| p.id));
-                    nodes.push(node);
-                    emitted.insert(bx);
-                }
-                kept += 1;
-                sig_pins.push(pin);
-                if edge_drives(e, sig) {
-                    drivers.push((pin, e.select.clone()));
-                } else {
-                    loads.push((pin, e.select.clone()));
-                }
-                // Next hop: this box's other signals — but never one the scope
-                // graph draws inline. `child_boxes` makes no box for those, so
-                // the next hop finds nothing on the far side and the one-sided
-                // stub heuristic below re-materializes them as phantom one-pin
-                // boxes duplicating the decoration already drawn (#268). A
-                // parameter tie is inline the same way, but only on a gate's own
-                // operand edge — elsewhere a `Param` is an ordinary signal.
-                for be in design.edges_of(bx) {
-                    let bsig = if be.port == bx { be.endpoint } else { be.port };
-                    let inline = is_drawn_inline(design, bsig, projection)
-                        || (projection == Projection::GateLevel
-                            && is_gate(design, be.port)
-                            && is_kind(design, bsig, NodeKind::Param));
-                    if bsig != sig && !inline && visited.insert(bsig) {
-                        next.push(bsig);
+                    // The box built for this hop, not yet committed to `nodes`.
+                    let mut fresh: Option<SchNode> = None;
+                    // `stubs` as well as `emitted`: a `SchNode.id` is a model id, and a
+                    // node the walk already stood up as a one-sided signal stub would
+                    // otherwise be pushed a second time as a box, putting one id on two
+                    // nodes — which no layout engine can resolve. The stub's own pin *is*
+                    // that model id, so a connection resolving there still anchors; one
+                    // resolving to a pin only the box form has (a bundle's raw access
+                    // port) is dropped by the `anchored` test below, the same way any
+                    // unexposed pin already is.
+                    if !emitted.contains(&bx) && !stubs.contains(&bx) {
+                        if nodes.len() >= limits.boxes {
+                            truncated = true;
+                            dropped += 1;
+                            continue;
+                        }
+                        let scope_path = design
+                            .node(scope)
+                            .map(|n| n.path.clone())
+                            .unwrap_or_else(|| root.clone());
+                        let Some(node) = cone_box_node(design, bx, &scope_path, &mut pins) else {
+                            continue;
+                        };
+                        // Held back, not committed: the connection that reached this
+                        // box may still fail to resolve to one of its pins, and a box
+                        // pushed before that is known becomes an edge-less orphan on
+                        // canvas (#269). `PinAlloc` memoizes per `(box, signal)`, so
+                        // rebuilding the node on a later hop hands out the same ids —
+                        // discarding one here costs nothing and shifts nothing.
+                        fresh = Some(node);
                     }
-                }
-            }
-
-            // A signal with reached boxes on only one side needs an anchor for
-            // its wires — the seed net itself, most often. Added only when the
-            // complementary side is empty, so it never duplicates a real
-            // box-to-box wire.
-            let mut stub_pin = None;
-            // A signal that is itself a box (a `Memory` array is both) already
-            // has real pins from its own builder; synthesizing a stub pin keyed
-            // on its model id would name a pin that box never emitted. A node
-            // the scope graph draws inline gets no stub either — the frontier
-            // filter above keeps those out, and this covers a seed that is one.
-            // Nor does a gate primitive: a stub stands in for a *signal* the
-            // trace reaches, and at ProcessLevel a gate is interior to its block
-            // — stubbing it drew a `Mux` the scope graph never shows (#268).
-            if (drivers.is_empty() != loads.is_empty())
-                && !emitted.contains(&sig)
-                && !is_drawn_inline(design, sig, projection)
-                && !is_gate(design, sig)
-            {
-                let stub_side = if drivers.is_empty() {
-                    Side::East
-                } else {
-                    Side::West
-                };
-                if !stubs.contains(&sig) {
-                    if let Some(node) = make_signal_stub(design, sig, stub_side) {
+                    let pin = cone_pin_for(
+                        design,
+                        &mut scopes,
+                        scope,
+                        projection,
+                        bx,
+                        other,
+                        e,
+                        &mut pins,
+                    );
+                    // A pin the box did not actually emit cannot anchor a wire (an
+                    // instance edge that resolves to no port child, say). Drop the
+                    // connection rather than emit an edge pointing at nothing.
+                    //
+                    // This is a real, load-bearing case, not a should-never-happen
+                    // backstop: a cone routinely reaches a signal *inside* an
+                    // instance that the instance does not expose as a port, and a
+                    // logic box's builder emits pins only for the signals it wires.
+                    // Neither has a pin, and neither is a truncation — so this drop
+                    // deliberately feeds neither `truncated` nor the `more` counts,
+                    // which would misreport it as the fan-out cap engaging.
+                    let anchored = emitted_pins.contains(&pin)
+                        || fresh
+                            .as_ref()
+                            .is_some_and(|n| n.ports.iter().any(|p| p.id == pin));
+                    if !anchored {
+                        continue;
+                    }
+                    if let Some(node) = fresh {
                         emitted_pins.extend(node.ports.iter().map(|p| p.id));
                         nodes.push(node);
-                        stubs.insert(sig);
+                        emitted.insert(bx);
                     }
-                }
-                if stubs.contains(&sig) {
-                    stub_pin = Some(sig);
-                    if drivers.is_empty() {
-                        drivers.push((sig, None));
+                    kept += 1;
+                    sig_pins.push(pin);
+                    if edge_drives(e, sig) {
+                        drivers.push((pin, e.select.clone()));
                     } else {
-                        loads.push((sig, None));
+                        loads.push((pin, e.select.clone()));
                     }
-                }
-            }
-
-            if dropped > 0 {
-                truncated = true;
-                // Report the remainder where the user can see it: on the
-                // signal's own anchor when it has one, else on every pin the
-                // hop did emit for it.
-                match stub_pin {
-                    Some(p) => *more_on.entry(p).or_default() += dropped,
-                    None => {
-                        for p in &sig_pins {
-                            *more_on.entry(*p).or_default() += dropped;
+                    // Next hop: this box's other signals — but never one the scope
+                    // graph draws inline. `child_boxes` makes no box for those, so
+                    // the next hop finds nothing on the far side and the one-sided
+                    // stub heuristic below re-materializes them as phantom one-pin
+                    // boxes duplicating the decoration already drawn (#268). A
+                    // parameter tie is inline the same way, but only on a gate's own
+                    // operand edge — elsewhere a `Param` is an ordinary signal.
+                    for be in design.edges_of(bx) {
+                        let bsig = if be.port == bx { be.endpoint } else { be.port };
+                        let inline = is_drawn_inline(design, bsig, projection)
+                            || (projection == Projection::GateLevel
+                                && is_gate(design, be.port)
+                                && is_kind(design, bsig, NodeKind::Param));
+                        if bsig != sig && !inline && visited.insert(bsig) {
+                            next.push(bsig);
                         }
                     }
                 }
-            }
-            debug_assert!(kept + dropped as usize <= total);
 
-            join_signal(
-                design.node(sig),
-                &root,
-                &drivers,
-                &loads,
-                &mut seen_pairs,
-                &mut next_edge,
-                &mut edges,
-            );
-        }
-        frontier = next;
-        if frontier.is_empty() {
-            break;
+                // A signal with reached boxes on only one side needs an anchor for
+                // its wires — the seed net itself, most often. Added only when the
+                // complementary side is empty, so it never duplicates a real
+                // box-to-box wire.
+                let mut stub_pin = None;
+                // A signal that is itself a box (a `Memory` array is both) already
+                // has real pins from its own builder; synthesizing a stub pin keyed
+                // on its model id would name a pin that box never emitted. A node
+                // the scope graph draws inline gets no stub either — the frontier
+                // filter above keeps those out, and this covers a seed that is one.
+                // Nor does a gate primitive: a stub stands in for a *signal* the
+                // trace reaches, and at ProcessLevel a gate is interior to its block
+                // — stubbing it drew a `Mux` the scope graph never shows (#268).
+                if (drivers.is_empty() != loads.is_empty())
+                    && !emitted.contains(&sig)
+                    && !is_drawn_inline(design, sig, projection)
+                    && !is_gate(design, sig)
+                {
+                    let stub_side = if drivers.is_empty() {
+                        Side::East
+                    } else {
+                        Side::West
+                    };
+                    // Deliberately *not* charged against `limits.boxes`: a stub is a
+                    // wire anchor, not a box, and starving it is what the `.max(1)`
+                    // clamps above exist to prevent — with no anchor the one-sided
+                    // join draws nothing, so a tight budget would return an empty
+                    // graph instead of a small one. Stubs stay bounded anyway, since
+                    // the signals reaching this point come from boxes the budget
+                    // already capped.
+                    if !stubs.contains(&sig) {
+                        if let Some(node) = make_signal_stub(design, sig, stub_side) {
+                            emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                            nodes.push(node);
+                            stubs.insert(sig);
+                        }
+                    }
+                    if stubs.contains(&sig) {
+                        stub_pin = Some(sig);
+                        if drivers.is_empty() {
+                            drivers.push((sig, None));
+                        } else {
+                            loads.push((sig, None));
+                        }
+                    }
+                }
+
+                if dropped > 0 {
+                    truncated = true;
+                    // Report the remainder where the user can see it: on the
+                    // signal's own anchor when it has one, else on every pin the
+                    // hop did emit for it.
+                    match stub_pin {
+                        Some(p) => *more_on.entry(p).or_default() += dropped,
+                        None => {
+                            for p in &sig_pins {
+                                *more_on.entry(*p).or_default() += dropped;
+                            }
+                        }
+                    }
+                }
+                debug_assert!(kept + dropped as usize <= total);
+
+                join_signal(
+                    design.node(sig),
+                    &root,
+                    &drivers,
+                    &loads,
+                    &mut seen_pairs,
+                    &mut next_edge,
+                    &mut edges,
+                );
+            }
+            frontier = next;
+            if frontier.is_empty() {
+                break;
+            }
         }
     }
 

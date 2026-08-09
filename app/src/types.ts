@@ -9,6 +9,40 @@ export type Side = "west" | "east";
  */
 export type Projection = "process-level" | "gate-level";
 
+/**
+ * Which way to follow connectivity, mirroring the Rust `Dir` enum (lowercase
+ * serde). Note `Edge.dir` in the model is relative to the edge's port end; on the
+ * trace API this is the user-facing sense — `"in"` is fan-in (what drives this),
+ * `"out"` is fan-out (what this reaches).
+ */
+export type Dir = "in" | "out" | "inout";
+
+/**
+ * One expansion step of a schematic trace (#244 PR2).
+ *
+ * The seed is a canonical model **path** — what a pin, a wire and a box already
+ * carry — rather than a node id, so a step survives in a detached pane's
+ * localStorage snapshot across a reload. `depth` defaults to one hop, because the
+ * affordance behind it is a single click on a fan-in/fan-out control.
+ */
+export interface TraceStep {
+  path: string;
+  dir: Dir;
+  depth?: number;
+}
+
+/**
+ * The trace traversal budget (#244), mirroring the Rust `ConeLimits`. Every field
+ * is optional and inherits its default independently, so a caller that cares only
+ * about fan-out passes `{ fanout: 8 }`. What a cap drops is always reported —
+ * `SchPort.more` and `SchematicGraph.truncated` — never silently discarded.
+ */
+export interface ConeLimits {
+  depth?: number;
+  fanout?: number;
+  boxes?: number;
+}
+
 export interface SchPort {
   id: number;
   name: string;

@@ -12,17 +12,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 pub mod startup;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 pub use startup::{StartupArgs, StartupError};
 use svxprobe_matcher::MatchOptions;
-use svxprobe_model::{Design, EnumMember, NodeId, NodeKind};
+use svxprobe_model::{Design, Dir, EnumMember, NodeId, NodeKind};
 use svxprobe_schematic::{
     cone, expand, expand_with, is_navigable_scope, module_of, pin_width, scope_graph,
-    scope_graph_with,
+    scope_graph_with, trace_graph, TraceStep,
 };
 // Re-exported so the shell and tests name the projection + graph DTOs through the
 // session crate (the Tauri layer's single import surface), not the schematic crate.
-pub use svxprobe_schematic::{Projection, SchematicGraph};
+pub use svxprobe_schematic::{ConeLimits, Projection, SchematicGraph};
 use svxprobe_wave::{LoadedWave, TraceTimescale, ValueChange};
 use svxprobe_xprobe::{CrossProbe, Resolution, Selection, WaveTarget};
 
@@ -293,6 +293,24 @@ pub struct TreeNode {
     pub module: Option<String>,
     pub expandable: bool,
     pub children: Vec<TreeNode>,
+}
+
+/// One expansion step of a schematic trace, as the frontend names it (#244 PR2).
+///
+/// The seed is a canonical model **path**, not a `NodeId`: that is what a pin, a
+/// wire and a box already carry (`SchPort.path`, `SchEdge.net_path`,
+/// `SchNode.path`), and it is what survives in a detached pane's `localStorage`
+/// snapshot across a reload — a node id would not.
+///
+/// `depth` is optional and defaults to one hop, because the affordance it backs is
+/// a single click on a fan-in/fan-out control.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceStepReq {
+    pub path: String,
+    pub dir: Dir,
+    #[serde(default)]
+    pub depth: Option<usize>,
 }
 
 /// One signal declared directly inside a scope (#171) — a row of a waveform pane's
@@ -675,6 +693,46 @@ impl Session {
             _ => Dir::Inout,
         };
         cone(self.cross.design(), net, d, depth)
+    }
+
+    /// The schematic trace mode's graph (#244 PR2): the accumulated fan-in/out of
+    /// an ordered list of expansion steps, each naming its seed by canonical path.
+    ///
+    /// The whole list is re-walked per call rather than merged into the caller's
+    /// existing graph, because `PinAlloc` hands out pin ids from a per-call
+    /// counter — two calls' ids are not comparable, so re-deriving is what keeps
+    /// them consistent. The frontend therefore holds a list of steps, not a graph.
+    ///
+    /// Errors on a path that names no node, rather than quietly returning a
+    /// smaller graph: a step the user asked for and did not get is a bug report,
+    /// not a rendering decision.
+    pub fn trace_graph(
+        &self,
+        steps: &[TraceStepReq],
+        limits: ConeLimits,
+        projection: Projection,
+    ) -> Result<SchematicGraph> {
+        let design = self.cross.design();
+        let resolved: Result<Vec<TraceStep>> = steps
+            .iter()
+            .map(|s| {
+                // Any node at the path will do: `seed_signals` re-expands a signal
+                // seed over `nodes_at_path` itself, so the port/backing-net dual
+                // node folds back in whichever one is picked, and a box path names
+                // exactly one node anyway.
+                let seed = *design
+                    .nodes_at_path(&s.path)
+                    .first()
+                    .with_context(|| format!("trace seed not found: {}", s.path))?;
+                Ok(TraceStep {
+                    seed,
+                    dir: s.dir,
+                    // One click is one hop; a step may not outrun the global cap.
+                    depth: s.depth.unwrap_or(1).min(limits.depth),
+                })
+            })
+            .collect();
+        Ok(trace_graph(design, &resolved?, limits, projection))
     }
 
     pub fn source_text(&self, file: u32) -> Result<String> {

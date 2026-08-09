@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use svxprobe_model::{Design, Dir, NodeId, NodeKind};
 use svxprobe_schematic::{
-    cone, cone_with, scope_graph, scope_graph_with, ConeLimits, PinRole, Projection,
-    SchematicGraph, Side,
+    cone, cone_with, scope_graph, scope_graph_with, trace_graph, ConeLimits, PinRole, Projection,
+    SchematicGraph, Side, TraceStep,
 };
 
 fn design() -> Design {
@@ -2239,7 +2239,8 @@ fn cone_with_never_repeats_a_node_or_pin_id() {
     // is unlayoutable. This held by luck rather than by construction: a signal
     // some box already exposed as a pin could still be stood up as its own
     // one-sided stub, whose pin id *is* that model id. It bit six of the golden
-    // cones (`bus.valid` inout, both projections, every depth).
+    // cones (`bus.valid` inout, both projections, every depth), and an
+    // accumulating `trace_graph` re-rolls that luck on every step.
     every_cone(|g, seed, proj, depth| {
         let mut ids = std::collections::HashSet::new();
         for n in &g.nodes {
@@ -2279,5 +2280,255 @@ fn cone_is_unchanged() {
     assert!(
         !g.edges.is_empty(),
         "legacy cone still finds the connections"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// trace_graph (#244 PR2) — the accumulating extractor cone_with delegates to.
+// Same discipline as the cone_with block: seeds resolve by path, assertions are
+// on set relations, never on ids.
+// ---------------------------------------------------------------------------
+
+fn step(d: &Design, path: &str, dir: Dir, depth: usize) -> TraceStep {
+    TraceStep {
+        seed: id(d, path),
+        dir,
+        depth,
+    }
+}
+
+fn box_paths(g: &SchematicGraph) -> std::collections::HashSet<&str> {
+    g.nodes.iter().map(|n| n.path.as_str()).collect()
+}
+
+#[test]
+fn trace_graph_with_one_step_matches_cone_with() {
+    // The delegation contract. cone_with is `svxprobe graph --cone --fanout`'s
+    // output and a scale-bench measurement, so a one-step trace must reproduce
+    // it exactly — not merely "structurally", or the refactor has moved a
+    // baseline nothing else would catch.
+    let d = design();
+    for seed in [RESETN, VALID, MEM_VALID] {
+        for proj in [Projection::ProcessLevel, Projection::GateLevel] {
+            for dir in [Dir::In, Dir::Out, Dir::Inout] {
+                for depth in [1, 2, 3] {
+                    let limits = ConeLimits::depth(depth);
+                    let want = cone_with(&d, id(&d, seed), dir, limits, proj);
+                    let got = trace_graph(&d, &[step(&d, seed, dir, depth)], limits, proj);
+                    assert_eq!(want, got, "{seed} {dir:?} {proj:?} depth {depth}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn trace_graph_is_deterministic() {
+    // The frontend re-derives the whole trace on every expansion instead of
+    // merging (pin ids are call-local), so identical steps must give an
+    // identical graph or the canvas would churn for no reason.
+    let d = design();
+    let steps = [
+        step(&d, RESETN, Dir::In, 1),
+        step(&d, MEM_VALID, Dir::Out, 2),
+    ];
+    let a = trace_graph(&d, &steps, ConeLimits::default(), Projection::ProcessLevel);
+    let b = trace_graph(&d, &steps, ConeLimits::default(), Projection::ProcessLevel);
+    assert_eq!(a, b);
+}
+
+#[test]
+fn trace_graph_accumulates_every_step() {
+    // The point of the mode: a second expansion adds to the canvas rather than
+    // replacing it.
+    let d = design();
+    let limits = ConeLimits::depth(1);
+    let proj = Projection::ProcessLevel;
+    let s1 = step(&d, RESETN, Dir::Inout, 1);
+    let s2 = step(&d, MEM_VALID, Dir::Inout, 1);
+
+    let one = trace_graph(&d, &[s1], limits, proj);
+    let two = trace_graph(&d, &[s2], limits, proj);
+    let both = trace_graph(&d, &[s1, s2], limits, proj);
+
+    // A box the combined walk drops would have to have lost its last wire, and
+    // both seeds keep theirs — so this is a plain superset check.
+    for g in [&one, &two] {
+        for p in box_paths(g) {
+            assert!(
+                box_paths(&both).contains(p),
+                "combined trace lost {p}; has {:?}",
+                box_paths(&both)
+            );
+        }
+    }
+    assert!(
+        both.nodes.len() > one.nodes.len(),
+        "the second step must add something: {} vs {}",
+        both.nodes.len(),
+        one.nodes.len()
+    );
+}
+
+#[test]
+fn trace_graph_emits_each_box_once() {
+    // Two steps that overlap must share the box, not draw it twice — the
+    // property that makes re-derivation a merge.
+    let d = design();
+    let g = trace_graph(
+        &d,
+        &[
+            step(&d, RESETN, Dir::Inout, 2),
+            step(&d, MEM_VALID, Dir::Inout, 2),
+            step(&d, VALID, Dir::Inout, 2),
+        ],
+        ConeLimits::default(),
+        Projection::ProcessLevel,
+    );
+    let mut seen = std::collections::HashSet::new();
+    for n in &g.nodes {
+        assert!(seen.insert(n.id), "duplicate box {} ({})", n.id, n.path);
+    }
+    let mut pins = std::collections::HashSet::new();
+    for p in g.nodes.iter().flat_map(|n| &n.ports) {
+        assert!(pins.insert(p.id), "duplicate pin id {} ({})", p.id, p.name);
+    }
+}
+
+#[test]
+fn trace_graph_joins_both_directions_of_one_net_at_a_single_node() {
+    // `follows` filters to one direction, so a directional walk is one-sided by
+    // construction and always synthesizes a signal stub. Expanding fan-in then
+    // fan-out of the *same* net must re-use that stub — otherwise the net is
+    // drawn twice and the two halves of its connectivity never meet.
+    let d = design();
+    let limits = ConeLimits::depth(1);
+    let proj = Projection::ProcessLevel;
+    let g = trace_graph(
+        &d,
+        &[
+            step(&d, MEM_VALID, Dir::In, 1),
+            step(&d, MEM_VALID, Dir::Out, 1),
+        ],
+        limits,
+        proj,
+    );
+    let only_in = trace_graph(&d, &[step(&d, MEM_VALID, Dir::In, 1)], limits, proj);
+    let junction = |g: &SchematicGraph| -> Vec<NodeId> {
+        let mut v: Vec<NodeId> = g
+            .nodes
+            .iter()
+            .filter(|n| n.path == MEM_VALID)
+            .map(|n| n.id)
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    // Not "exactly one node": a port and its backing net are two model nodes for
+    // one wire, `seed_signals` folds both into the frontier on purpose, and the
+    // two directions do not reach the same one. The property that matters is
+    // that the fan-out step *re-uses* the anchor the fan-in step stood up rather
+    // than standing up a rival for the same signal — which is what sharing
+    // `stubs` across steps buys, and what `trace_graph_emits_each_box_once`
+    // would catch as a duplicate id if it were lost.
+    assert!(
+        !junction(&only_in).is_empty(),
+        "vacuous: the seed net was never drawn"
+    );
+    for anchor in junction(&only_in) {
+        assert!(
+            junction(&g).contains(&anchor),
+            "the fan-out step replaced the fan-in anchor {anchor} instead of \
+             re-using it: {:?} -> {:?}",
+            junction(&only_in),
+            junction(&g)
+        );
+    }
+    // And it must carry both halves: the fan-in walk alone leaves it with wires
+    // on one side only.
+    assert!(
+        g.edges.len() > only_in.edges.len(),
+        "the fan-out step must add wires to the junction: {} vs {}",
+        g.edges.len(),
+        only_in.edges.len()
+    );
+}
+
+#[test]
+fn trace_graph_endpoints_resolve_to_emitted_pins() {
+    // ELK cannot anchor an edge whose endpoint is not a pin of an emitted node.
+    // cone_with asserts this for one seed; accumulation is the case most likely
+    // to break it, since a box can now be reached by a step that did not emit it.
+    let d = design();
+    for proj in [Projection::ProcessLevel, Projection::GateLevel] {
+        let g = trace_graph(
+            &d,
+            &[
+                step(&d, RESETN, Dir::In, 2),
+                step(&d, MEM_VALID, Dir::Out, 2),
+                step(&d, VALID, Dir::Inout, 1),
+            ],
+            ConeLimits::default(),
+            proj,
+        );
+        let pins = pin_ids(&g);
+        for e in &g.edges {
+            assert!(pins.contains(&e.source), "{proj:?}: dangling source {e:?}");
+            assert!(pins.contains(&e.target), "{proj:?}: dangling target {e:?}");
+        }
+    }
+}
+
+#[test]
+fn trace_graph_box_budget_is_global_across_steps() {
+    // An accumulating trace has no natural bound, so the budget has to cover the
+    // whole graph rather than each step. Anti-vacuous: the same steps uncapped
+    // must exceed the cap, or this would pass on an empty walk.
+    let d = design();
+    let steps = [
+        step(&d, RESETN, Dir::Inout, 3),
+        step(&d, MEM_VALID, Dir::Inout, 3),
+    ];
+    let proj = Projection::ProcessLevel;
+    // `boxes` bounds boxes, not nodes: a one-sided signal's stub is a wire
+    // anchor, and starving it would return an empty graph rather than a small
+    // one (the same reasoning as the `.max(1)` fan-out clamp).
+    let boxes = |g: &SchematicGraph| {
+        g.nodes
+            .iter()
+            .filter(|n| n.kind != NodeKind::Net && n.kind != NodeKind::Var)
+            .count()
+    };
+    let uncapped = trace_graph(&d, &steps, ConeLimits::default(), proj);
+    assert!(
+        boxes(&uncapped) > 4,
+        "fixture too small to test the budget: {} boxes",
+        boxes(&uncapped)
+    );
+    let capped = trace_graph(
+        &d,
+        &steps,
+        ConeLimits {
+            boxes: 4,
+            ..ConeLimits::default()
+        },
+        proj,
+    );
+    assert!(
+        boxes(&capped) <= 4,
+        "budget ignored: {} boxes",
+        boxes(&capped)
+    );
+    assert!(capped.truncated, "a budget that engaged must say so");
+}
+
+#[test]
+fn trace_graph_with_no_steps_is_empty() {
+    let d = design();
+    let g = trace_graph(&d, &[], ConeLimits::default(), Projection::ProcessLevel);
+    assert!(g.nodes.is_empty() && g.edges.is_empty() && !g.truncated);
+    assert!(
+        g.root.is_empty(),
+        "no seed, no scope to bind a breadcrumb to"
     );
 }

@@ -7,6 +7,7 @@
 // payload, so the Rust `Option<String>` resolves to the default.
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ConeLimits,
   NameRefDto,
   ProbeResponse,
   Projection,
@@ -14,6 +15,7 @@ import type {
   SignalEntry,
   SourceFile,
   StartupArgs,
+  TraceStep,
   TraceTimescale,
   TreeNode,
   ValueChange,
@@ -70,6 +72,24 @@ export const api = {
     invoke<SignalEntry[]>("scope_signals", { sessionId, scope }),
   cone: (net: number, dir: string, depth: number, sessionId?: string) =>
     invoke<SchematicGraph>("cone", { sessionId, net, dir, depth }),
+  // The schematic trace mode's graph (#244 PR2). The pane owns the step list and
+  // sends all of it every time, getting a whole graph back: pin ids are minted per
+  // call, so ids from two calls cannot be merged — re-deriving is what keeps one
+  // graph self-consistent, and it leaves no trace state on the backend. `limits`
+  // is partial-friendly ({ fanout: 8 } inherits the rest); both it and
+  // `projection` drop out of the payload when undefined, so Rust sees `None`.
+  traceGraph: (
+    steps: TraceStep[],
+    sessionId?: string,
+    projection?: Projection,
+    limits?: ConeLimits,
+  ) =>
+    invoke<SchematicGraph>("trace_graph", {
+      sessionId,
+      steps,
+      projection,
+      limits,
+    }),
 
   probeNode: (path: string, context: string | null, sessionId?: string) =>
     invoke<ProbeResponse | null>("probe_node", { sessionId, path, context }),
