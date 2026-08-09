@@ -2234,6 +2234,38 @@ fn cone_with_anchors_a_bare_interface_on_its_raw_access_port() {
 }
 
 #[test]
+fn cone_with_never_repeats_a_node_or_pin_id() {
+    // ELK ids are global to the graph, so one id on two nodes — or on two pins —
+    // is unlayoutable. This held by luck rather than by construction: a signal
+    // some box already exposed as a pin could still be stood up as its own
+    // one-sided stub, whose pin id *is* that model id. It bit six of the golden
+    // cones (`bus.valid` inout, both projections, every depth).
+    every_cone(|g, seed, proj, depth| {
+        let mut ids = std::collections::HashSet::new();
+        for n in &g.nodes {
+            assert!(
+                ids.insert(n.id),
+                "{seed} {proj:?} depth {depth}: node id {} twice ({})",
+                n.id,
+                n.path
+            );
+        }
+        let mut pins = std::collections::HashSet::new();
+        for n in &g.nodes {
+            for p in &n.ports {
+                assert!(
+                    pins.insert(p.id),
+                    "{seed} {proj:?} depth {depth}: pin id {} twice ({} on {})",
+                    p.id,
+                    p.name,
+                    n.path
+                );
+            }
+        }
+    });
+}
+
+#[test]
 fn cone_is_unchanged() {
     // The legacy extractor is the `svxprobe graph --cone` output contract and
     // the scale-bench fan-out baseline; cone_with must not have perturbed it.

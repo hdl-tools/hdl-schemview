@@ -2429,7 +2429,15 @@ pub fn cone_with(
                 };
                 // The box built for this hop, not yet committed to `nodes`.
                 let mut fresh: Option<SchNode> = None;
-                if !emitted.contains(&bx) {
+                // `stubs` as well as `emitted`: a `SchNode.id` is a model id, and a
+                // node the walk already stood up as a one-sided signal stub would
+                // otherwise be pushed a second time as a box, putting one id on two
+                // nodes — which no layout engine can resolve. The stub's own pin *is*
+                // that model id, so a connection resolving there still anchors; one
+                // resolving to a pin only the box form has (a bundle's raw access
+                // port) is dropped by the `anchored` test below, the same way any
+                // unexposed pin already is.
+                if !emitted.contains(&bx) && !stubs.contains(&bx) {
                     if nodes.len() >= limits.boxes {
                         truncated = true;
                         dropped += 1;
@@ -2579,6 +2587,31 @@ pub fn cone_with(
         if frontier.is_empty() {
             break;
         }
+    }
+
+    // A stub's pin id *is* its model id, so a signal some box also exposes as a
+    // pin — an instance's own `Port` child, most often — ends up with that one id
+    // on two nodes, which no layout engine can anchor. Reconciled here rather
+    // than at stub time because neither order is knowable during the walk: the
+    // box may be emitted before or after the stub, and refusing the stub up
+    // front (on `emitted_pins`) also suppresses the bare-interface bundle anchor
+    // #269 exists to keep.
+    //
+    // The box wins — it is the real design object, and every wire anchored on
+    // that id stays valid precisely because it *is* the box's pin id, the same
+    // number. Dropping the stub therefore loses no connectivity, only the
+    // redundant second node claiming the same pin. On the committed golden this
+    // is not hypothetical: six cone dumps carried the collision, and each loses
+    // exactly one node here with its edge count unchanged.
+    if !stubs.is_empty() {
+        let box_pins: std::collections::HashSet<NodeId> = nodes
+            .iter()
+            .filter(|n| !stubs.contains(&n.id))
+            .flat_map(|n| n.ports.iter().map(|p| p.id))
+            .collect();
+        nodes.retain(|n| {
+            !stubs.contains(&n.id) || !n.ports.iter().any(|p| box_pins.contains(&p.id))
+        });
     }
 
     if !more_on.is_empty() {
