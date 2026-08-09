@@ -843,3 +843,96 @@ export function clampSegmentToRect(a: Pt, b: Pt, r: VRect): [Pt, Pt] | null {
     { x: a.x + t1 * dx, y: a.y + t1 * dy },
   ];
 }
+
+/// Manhattan length of a segment. The metric `placeWireLabels` has always used
+/// to pick "longest"; kept in one place so the live pick and the precomputed
+/// off-screen fallback cannot disagree about which segment wins (#263).
+function manhattan(a: Pt, b: Pt): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+/// Bounding box of every segment of a net; `null` for an empty set.
+export function segmentsAabb(segs: [Pt, Pt][]): VRect | null {
+  if (!segs.length) return null;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [a, b] of segs) {
+    x0 = Math.min(x0, a.x, b.x);
+    y0 = Math.min(y0, a.y, b.y);
+    x1 = Math.max(x1, a.x, b.x);
+    y1 = Math.max(y1, a.y, b.y);
+  }
+  return { x0, y0, x1, y1 };
+}
+
+/// The longest segment overall by Manhattan length — where a label parks when
+/// its whole net is off-screen. Ties keep the first, matching the original loop.
+export function longestSegment(segs: [Pt, Pt][]): [Pt, Pt] | null {
+  let best: [Pt, Pt] | null = null;
+  let bestLen = -1;
+  for (const seg of segs) {
+    const len = manhattan(seg[0], seg[1]);
+    if (len > bestLen) [bestLen, best] = [len, seg];
+  }
+  return best;
+}
+
+/// Do two rectangles overlap? **Inclusive** on the boundary, because
+/// `clampSegmentToRect` keeps a segment lying exactly on the viewport edge —
+/// an exclusive test here would reject a label the full clip would have placed.
+export function rectsIntersect(a: VRect, b: VRect): boolean {
+  return a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1;
+}
+
+/// A label's pan-invariant geometry, computed once per render (#263). Both
+/// fields depend only on the laid-out wire, so recomputing them per scroll
+/// event — as `placeWireLabels` used to — is pure waste.
+export interface LabelGeom {
+  /// Bounding box of every segment, for the cheap off-screen reject.
+  aabb: VRect | null;
+  /// The segment an off-screen label parks on.
+  fallback: [Pt, Pt] | null;
+}
+
+export function labelGeometry(segs: [Pt, Pt][]): LabelGeom {
+  return { aabb: segmentsAabb(segs), fallback: longestSegment(segs) };
+}
+
+/// Where a net's label belongs for the current viewport: centred on the longest
+/// *visible* part of the wire, or parked on `geom.fallback` when the net is
+/// wholly off-screen. Equivalent to the two-pass loop this replaced (#263) —
+/// the AABB test only skips a per-segment clip that could not have matched.
+export function chooseLabelSegment(
+  segs: [Pt, Pt][],
+  view: VRect,
+  geom: LabelGeom,
+): LabelPlacement | null {
+  let best: [Pt, Pt] | null = null;
+  if (geom.aabb && rectsIntersect(geom.aabb, view)) {
+    let bestLen = -1;
+    for (const [a, b] of segs) {
+      const vis = clampSegmentToRect(a, b, view);
+      if (!vis) continue;
+      const len = manhattan(vis[0], vis[1]);
+      if (len > bestLen) [bestLen, best] = [len, vis];
+    }
+  }
+  best ??= geom.fallback;
+  return best ? wireLabelPlacement(best[0], best[1]) : null;
+}
+
+/// Has a label's placement actually moved? Guards the 4–6 `setAttribute` calls
+/// per label: writing an unchanged value still dirties layout, which is what
+/// made the next pan's viewport read force a re-layout (#263).
+export function placementsEqual(a: LabelPlacement | null, b: LabelPlacement): boolean {
+  return (
+    a !== null &&
+    a.x === b.x &&
+    a.y === b.y &&
+    a.rotate === b.rotate &&
+    a.anchor === b.anchor &&
+    a.baseline === b.baseline
+  );
+}

@@ -21,7 +21,14 @@ import {
   gatherBar,
   wireLabelPlacement,
   clampSegmentToRect,
+  segmentsAabb,
+  longestSegment,
+  rectsIntersect,
+  labelGeometry,
+  chooseLabelSegment,
+  placementsEqual,
 } from "./elk";
+import type { LabelPlacement, Pt, VRect } from "./elk";
 import type { SchematicGraph, SchPort } from "./types";
 
 // Build an FF child from a bare port list (FF dispatches to ffChild in toElk).
@@ -795,6 +802,199 @@ describe("clampSegmentToRect", () => {
 
   it("returns null for a segment wholly outside the rect", () => {
     expect(clampSegmentToRect({ x: 200, y: 200 }, { x: 300, y: 250 }, r)).toBeNull();
+  });
+});
+
+// #263: the per-pan label placement is precomputed where it can be. These are the
+// pure halves of that; `main.ts` holds the DOM and the rAF batching.
+describe("segmentsAabb", () => {
+  it("bounds every segment of a net", () => {
+    expect(
+      segmentsAabb([
+        [
+          { x: 10, y: 40 },
+          { x: 50, y: 40 },
+        ],
+        [
+          { x: 30, y: 5 },
+          { x: 30, y: 90 },
+        ],
+      ]),
+    ).toEqual({ x0: 10, y0: 5, x1: 50, y1: 90 });
+  });
+
+  it("bounds a single segment regardless of endpoint order", () => {
+    expect(
+      segmentsAabb([
+        [
+          { x: 90, y: 70 },
+          { x: 20, y: 10 },
+        ],
+      ]),
+    ).toEqual({ x0: 20, y0: 10, x1: 90, y1: 70 });
+  });
+
+  it("collapses a degenerate point segment to a zero-area box", () => {
+    expect(
+      segmentsAabb([
+        [
+          { x: 7, y: 7 },
+          { x: 7, y: 7 },
+        ],
+      ]),
+    ).toEqual({ x0: 7, y0: 7, x1: 7, y1: 7 });
+  });
+
+  it("returns null when there are no segments", () => {
+    expect(segmentsAabb([])).toBeNull();
+  });
+});
+
+describe("longestSegment", () => {
+  it("measures by Manhattan length, not Euclidean", () => {
+    // (0,0)-(10,0) is longer Euclidean (10 vs 8.49) but shorter Manhattan
+    // (10 vs 12). `placeWireLabels` has always used Manhattan; picking the
+    // Euclidean winner here would silently move every off-screen label.
+    const diagonal: [Pt, Pt] = [
+      { x: 0, y: 0 },
+      { x: 6, y: 6 },
+    ];
+    expect(
+      longestSegment([
+        [
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+        ],
+        diagonal,
+      ]),
+    ).toEqual(diagonal);
+  });
+
+  it("keeps the first of two equally long segments", () => {
+    // Ties resolve first-wins (`>`, not `>=`), matching the original loop.
+    const first: [Pt, Pt] = [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+    ];
+    expect(
+      longestSegment([
+        first,
+        [
+          { x: 0, y: 50 },
+          { x: 20, y: 50 },
+        ],
+      ]),
+    ).toEqual(first);
+  });
+
+  it("returns null when there are no segments", () => {
+    expect(longestSegment([])).toBeNull();
+  });
+});
+
+describe("rectsIntersect", () => {
+  const view = { x0: 0, y0: 0, x1: 100, y1: 100 };
+
+  it("reports an overlapping box", () => {
+    expect(rectsIntersect(view, { x0: 80, y0: 80, x1: 200, y1: 200 })).toBe(true);
+  });
+
+  it("reports a fully contained box", () => {
+    expect(rectsIntersect(view, { x0: 20, y0: 20, x1: 30, y1: 30 })).toBe(true);
+  });
+
+  it("counts a box touching the edge as intersecting", () => {
+    // clampSegmentToRect keeps a segment lying exactly on the boundary, so the
+    // cheap reject in front of it must not discard one.
+    expect(rectsIntersect(view, { x0: 100, y0: 20, x1: 150, y1: 30 })).toBe(true);
+  });
+
+  it("rejects a disjoint box", () => {
+    expect(rectsIntersect(view, { x0: 101, y0: 0, x1: 200, y1: 100 })).toBe(false);
+  });
+});
+
+describe("placementsEqual", () => {
+  const p: LabelPlacement = { x: 10, y: 20, rotate: 0, anchor: "middle", baseline: "auto" };
+
+  it("treats an identical placement as unchanged", () => {
+    expect(placementsEqual({ ...p }, { ...p })).toBe(true);
+  });
+
+  it("reports a moved label as changed", () => {
+    expect(placementsEqual(p, { ...p, x: 11 })).toBe(false);
+  });
+
+  it("reports a rotated label as changed", () => {
+    expect(placementsEqual(p, { ...p, rotate: 90 })).toBe(false);
+  });
+
+  it("treats a never-placed label as changed", () => {
+    expect(placementsEqual(null, p)).toBe(false);
+  });
+});
+
+describe("chooseLabelSegment", () => {
+  // The two-pass loop `placeWireLabels` ran before #263, kept verbatim as the
+  // oracle: the precomputed path must agree with it exactly, not merely closely.
+  const reference = (segs: [Pt, Pt][], view: VRect): LabelPlacement | null => {
+    const manhattan = (a: Pt, b: Pt) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    let best: [Pt, Pt] | null = null;
+    let bestLen = -1;
+    for (const [a, b] of segs) {
+      const vis = clampSegmentToRect(a, b, view);
+      if (!vis) continue;
+      const len = manhattan(vis[0], vis[1]);
+      if (len > bestLen) [bestLen, best] = [len, vis];
+    }
+    if (!best) {
+      for (const [a, b] of segs) {
+        const len = manhattan(a, b);
+        if (len > bestLen) [bestLen, best] = [len, [a, b]];
+      }
+    }
+    return best ? wireLabelPlacement(best[0], best[1]) : null;
+  };
+
+  const net: [Pt, Pt][] = [
+    [
+      { x: 0, y: 10 },
+      { x: 120, y: 10 },
+    ],
+    [
+      { x: 120, y: 10 },
+      { x: 120, y: 240 },
+    ],
+    [
+      { x: 120, y: 240 },
+      { x: 300, y: 240 },
+    ],
+  ];
+
+  const views: [string, VRect][] = [
+    ["the whole net visible", { x0: -10, y0: -10, x1: 400, y1: 400 }],
+    ["one segment partly visible", { x0: 50, y0: 0, x1: 200, y1: 100 }],
+    ["a corner clipping two segments", { x0: 100, y0: 200, x1: 400, y1: 300 }],
+    ["the net entirely off-screen", { x0: 500, y0: 500, x1: 900, y1: 900 }],
+  ];
+
+  for (const [name, view] of views) {
+    it(`matches the original loop with ${name}`, () => {
+      expect(chooseLabelSegment(net, view, labelGeometry(net))).toEqual(reference(net, view));
+    });
+  }
+
+  it("parks an off-screen net on its longest segment", () => {
+    // The explicit statement of the fallback, so the oracle above cannot drift
+    // in step with a bug: the longest run is the 230-unit vertical one.
+    const view = { x0: 500, y0: 500, x1: 900, y1: 900 };
+    expect(chooseLabelSegment(net, view, labelGeometry(net))).toEqual(
+      wireLabelPlacement({ x: 120, y: 10 }, { x: 120, y: 240 }),
+    );
+  });
+
+  it("returns null for a label with no segments", () => {
+    expect(chooseLabelSegment([], { x0: 0, y0: 0, x1: 10, y1: 10 }, labelGeometry([]))).toBeNull();
   });
 });
 

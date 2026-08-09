@@ -2,7 +2,7 @@
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
 import {
-  clampSegmentToRect,
+  chooseLabelSegment,
   FF_LABEL_PAD,
   ffRole,
   fitZoom,
@@ -10,14 +10,15 @@ import {
   IFACE_CAP,
   isGateKind,
   isLogicKind,
+  labelGeometry,
   layout,
   MEM_LABEL_PAD,
   nodeId,
+  placementsEqual,
   portId,
   trunkGroups,
-  wireLabelPlacement,
 } from "./elk";
-import type { Pt, TrunkGroup } from "./elk";
+import type { LabelGeom, LabelPlacement, Pt, TrunkGroup } from "./elk";
 import type {
   Dir,
   NameRefDto,
@@ -178,7 +179,18 @@ const viewCache = new Map<string, ViewState>();
 // position/rotation is (re)computed by `placeWireLabels` so a label rotates to
 // follow a vertical wire (#27) and stays on the visible portion of its wire as
 // the view pans/zooms (#28).
-let labelItems: { el: SVGTextElement; segs: [Pt, Pt][] }[] = [];
+//
+// `geom` is the pan-invariant part of that placement, computed once per render
+// (#263); `last` is the placement currently written to the DOM, so an unchanged
+// one can skip its attribute writes. Both are filled in after the edge loop —
+// segments accumulate across a net's whole fan-out before the geometry is final.
+interface LabelItem {
+  el: SVGTextElement;
+  segs: [Pt, Pt][];
+  geom: LabelGeom;
+  last: LabelPlacement | null;
+}
+let labelItems: LabelItem[] = [];
 
 // The source pane's current file + per-line byte offsets (LF-based, matching the
 // model's source ranges), so a right-click resolves to a file byte offset for
@@ -1268,7 +1280,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   //    the one label so `placeWireLabels` can ride whichever part of the net is on
   //    screen (orientation + keep-in-view), not just the first wire we saw.
   labelItems = [];
-  const labelByText = new Map<string, { el: SVGTextElement; segs: [Pt, Pt][] }>();
+  const labelByText = new Map<string, LabelItem>();
   // The laid-out ELK edges keep their `e<schId>` ids, so map back to the model
   // edge for the net's canonical path (clicking a wire cross-probes that net).
   const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
@@ -1342,7 +1354,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
           t.onclick = wireLeft;
           t.oncontextmenu = wireMenu;
         }
-        item = { el: t, segs: [] };
+        item = { el: t, segs: [], geom: { aabb: null, fallback: null }, last: null };
         labelByText.set(text, item);
         labelItems.push(item); // position + rotation set by placeWireLabels
       }
@@ -1570,8 +1582,13 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     root.appendChild(g);
   }
 
-  // 3. Net labels last, so they stay legible over wires and box edges.
-  for (const it of labelItems) root.appendChild(it.el);
+  // 3. Net labels last, so they stay legible over wires and box edges. Their
+  // segments are complete by now, so freeze the pan-invariant geometry here
+  // rather than re-deriving it on every scroll event (#263).
+  for (const it of labelItems) {
+    it.geom = labelGeometry(it.segs);
+    root.appendChild(it.el);
+  }
 
   // A view change (drill-in / breadcrumb-jump): zoom-to-fit so the whole scope
   // is visible, scrolled top-left — unless we're navigating back, in which case
@@ -1591,8 +1608,13 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
 // Position each net label on the currently-visible portion of its wire, rotated
 // to run along a vertical segment. Picks the longest segment in view (so the
 // label rides the on-screen part of the wire — #28); falls back to the longest
-// segment overall when the wire is fully off-screen. Cheap; safe to call on every
-// pan/zoom.
+// segment overall when the wire is fully off-screen (`chooseLabelSegment`).
+//
+// Not cheap at gate-level scale, despite what the comment here used to claim —
+// it is O(labels x segments) and it writes to the DOM. Drive it through
+// `scheduleWireLabels` from any input path so it runs once per frame (#263);
+// call it directly only when a stale frame would be visible, i.e. right after a
+// render or when a hidden pane is revealed.
 function placeWireLabels() {
   if (!labelItems.length) return;
   const host = $("schematic");
@@ -1604,25 +1626,14 @@ function placeWireLabels() {
     x1: (host.scrollLeft + host.clientWidth) / k,
     y1: (host.scrollTop + host.clientHeight) / k,
   };
-  const manhattan = (a: Pt, b: Pt) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-  for (const { el, segs } of labelItems) {
-    let best: [Pt, Pt] | null = null;
-    let bestLen = -1;
-    for (const [a, b] of segs) {
-      const vis = clampSegmentToRect(a, b, view);
-      if (!vis) continue;
-      const len = manhattan(vis[0], vis[1]);
-      if (len > bestLen) [bestLen, best] = [len, vis];
-    }
-    // Fully off-screen: keep a stable home on the longest segment overall.
-    if (!best) {
-      for (const [a, b] of segs) {
-        const len = manhattan(a, b);
-        if (len > bestLen) [bestLen, best] = [len, [a, b]];
-      }
-    }
-    if (!best) continue;
-    const p = wireLabelPlacement(best[0], best[1]);
+  for (const it of labelItems) {
+    const p = chooseLabelSegment(it.segs, view, it.geom);
+    // Unchanged placements are skipped: an attribute write dirties layout even
+    // when the value is identical, forcing the next pan's viewport read to
+    // re-layout. Panning a few pixels moves very few labels.
+    if (!p || placementsEqual(it.last, p)) continue;
+    it.last = p;
+    const { el } = it;
     el.setAttribute("x", String(p.x));
     el.setAttribute("y", String(p.y));
     el.setAttribute("text-anchor", p.anchor);
@@ -1630,6 +1641,21 @@ function placeWireLabels() {
     if (p.rotate) el.setAttribute("transform", `rotate(${p.rotate} ${p.x} ${p.y})`);
     else el.removeAttribute("transform");
   }
+}
+
+// Coalesce pan/zoom label work into one pass per animation frame (#263). Scroll
+// events fire faster than `placeWireLabels` completes on a dense scope, and
+// `setZoom` re-enters this path ~3x per wheel tick (its own call, plus the
+// scrollLeft and scrollTop writes). Same pending-flag + rAF shape the waveform
+// pane uses for resize redraws.
+let wireLabelFrame = false;
+function scheduleWireLabels() {
+  if (wireLabelFrame) return;
+  wireLabelFrame = true;
+  requestAnimationFrame(() => {
+    wireLabelFrame = false;
+    placeWireLabels();
+  });
 }
 
 // A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
@@ -2475,7 +2501,8 @@ function setZoom(k: number, focus?: { x: number; y: number }) {
   const ratio = zoom.k / prev;
   host.scrollLeft = ox * ratio - fx;
   host.scrollTop = oy * ratio - fy;
-  placeWireLabels();
+  // Batched: this call and the two scroll writes above all land in one pass.
+  scheduleWireLabels();
 }
 
 // Fit the whole current scope into the pane (zoom-to-fit, scrolled to origin) —
@@ -2490,6 +2517,11 @@ function fitView() {
   applyZoom(svg);
   host.scrollLeft = 0;
   host.scrollTop = 0;
+  // Direct, not batched: fit is a discrete action, and it is the reveal path for
+  // a schematic drawn while hidden (#99) — that draw placed every label on its
+  // off-screen fallback against a 0-width viewport, so deferring a frame here
+  // would show them jumping into place. Setting scroll to 0 fires no scroll
+  // event when it is already 0, so there is no scheduled pass to rely on either.
   placeWireLabels();
 }
 
@@ -2544,6 +2576,12 @@ function refreshSchematic() {
 // and Ctrl/⌘ + (+/-/0) are intercepted at the document (capture, non-passive) so
 // the browser/webview can't page-zoom the whole window; the gesture is routed to
 // our SVG zoom (toward the cursor for the wheel). Plain wheel still scrolls.
+
+// Wheel ticks accumulated within one frame (#263): the product of their scale
+// factors, applied at the most recent cursor position.
+let pendingZoom: { scale: number; focus: { x: number; y: number } } | null = null;
+let zoomFrame = false;
+
 function setupZoom() {
   const host = $("schematic");
   document.addEventListener(
@@ -2552,7 +2590,22 @@ function setupZoom() {
       if (!ev.ctrlKey && !ev.metaKey) return;
       ev.preventDefault(); // stop page/webview zoom everywhere
       if (host.contains(ev.target as Node)) {
-        setZoom(zoom.k * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), { x: ev.clientX, y: ev.clientY });
+        // Accumulate the tick's scale and keep the latest focal point, applying
+        // one setZoom per frame (#263) — a trackpad pinch delivers wheel events
+        // far faster than a re-layout of a dense scope completes.
+        pendingZoom = {
+          scale: (pendingZoom?.scale ?? 1) * (ev.deltaY < 0 ? 1.15 : 1 / 1.15),
+          focus: { x: ev.clientX, y: ev.clientY },
+        };
+        if (!zoomFrame) {
+          zoomFrame = true;
+          requestAnimationFrame(() => {
+            zoomFrame = false;
+            const p = pendingZoom;
+            pendingZoom = null;
+            if (p) setZoom(zoom.k * p.scale, p.focus);
+          });
+        }
       }
     },
     { passive: false, capture: true },
@@ -2568,14 +2621,9 @@ function setupZoom() {
   $("zoom-in").addEventListener("click", () => setZoom(zoom.k * 1.25));
   $("zoom-out").addEventListener("click", () => setZoom(zoom.k / 1.25));
   $("zoom-reset").addEventListener("click", fitView); // fit, not actual-size 100%
-  // Panning (native scroll) re-places net labels onto the visible wire portion.
-  host.addEventListener(
-    "scroll",
-    () => {
-      placeWireLabels();
-    },
-    { passive: true },
-  );
+  // Panning (native scroll) re-places net labels onto the visible wire portion,
+  // batched to one pass per frame (#263).
+  host.addEventListener("scroll", scheduleWireLabels, { passive: true });
 }
 
 // `node.path` isn't in the layout; look it up from the graph by id.
