@@ -36,7 +36,8 @@ docs/        ROADMAP, fixtures policy, benchmarking runbook, release runbook,
              ADRs: 0001 RTL-vs-netlist · 0002 open-vs-FSDB · 0003 storage backend ·
              0004 internal-logic granularity · 0005 gate-level projection ·
              0006 HLS C↔RTL tracing · 0007 semantic name coloring ·
-             0008 lexical source highlighting · 0009 packaging for isolation
+             0008 lexical source highlighting · 0009 packaging for isolation ·
+             0010 schematic trace mode
 flake.nix    Nix flake (#243): packages/apps.svxprobe, checks.{fmt,clippy,test},
              overlays.default, dev shells. Locked by flake.lock; the Rust version
              is read from core/rust-toolchain.toml so the two cannot drift.
