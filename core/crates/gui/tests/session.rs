@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use svxprobe_gui::{Projection, SchematicGraph, Session, SignalEntry};
-use svxprobe_model::NodeKind;
+use svxprobe_gui::{ConeLimits, Projection, SchematicGraph, Session, SignalEntry, TraceStepReq};
+use svxprobe_model::{Dir, NodeKind};
 
 fn names(sigs: &[SignalEntry]) -> Vec<&str> {
     sigs.iter().map(|e| e.name.as_str()).collect()
@@ -95,6 +95,143 @@ fn expand_projection_threads_through() {
         .expand_with(inst.id, Projection::GateLevel)
         .expect("gate-level expand");
     assert_eq!(shape(&base), shape(&gate), "no gate prims ⇒ identical");
+}
+
+const TRACE_NET: &str = "picorv32_soc.g_lane[0].core.mem_valid";
+
+fn req(path: &str, dir: Dir, depth: Option<usize>) -> TraceStepReq {
+    TraceStepReq {
+        path: path.to_string(),
+        dir,
+        depth,
+    }
+}
+
+#[test]
+fn trace_graph_resolves_seeds_by_path() {
+    // The session layer's whole job here: the frontend holds paths (that is what
+    // a pin, a wire and a pop-out's localStorage snapshot carry), never NodeIds.
+    let s = session();
+    let g = s
+        .trace_graph(
+            &[req(TRACE_NET, Dir::Inout, None)],
+            ConeLimits::default(),
+            Projection::ProcessLevel,
+        )
+        .expect("a real net resolves");
+    assert!(!g.nodes.is_empty(), "the seed net reaches something");
+    assert!(!g.root.is_empty(), "a trace binds a breadcrumb scope");
+}
+
+#[test]
+fn trace_graph_rejects_an_unknown_seed() {
+    // Loudly, not by quietly returning a smaller graph: a step the user asked for
+    // and did not get is a bug report, not a rendering decision.
+    let s = session();
+    let err = s
+        .trace_graph(
+            &[req("picorv32_soc.no_such_net", Dir::Inout, None)],
+            ConeLimits::default(),
+            Projection::ProcessLevel,
+        )
+        .expect_err("an unknown path must fail");
+    assert!(
+        err.to_string().contains("picorv32_soc.no_such_net"),
+        "the message must name the path: {err}"
+    );
+}
+
+#[test]
+fn trace_graph_defaults_to_one_hop_and_clamps_to_the_budget() {
+    let s = session();
+    let limits = ConeLimits::default();
+    let one = s
+        .trace_graph(
+            &[req(TRACE_NET, Dir::Inout, None)],
+            limits,
+            Projection::ProcessLevel,
+        )
+        .unwrap();
+    let explicit = s
+        .trace_graph(
+            &[req(TRACE_NET, Dir::Inout, Some(1))],
+            limits,
+            Projection::ProcessLevel,
+        )
+        .unwrap();
+    assert_eq!(shape(&one), shape(&explicit), "omitted depth means one hop");
+
+    // A step may not outrun the global cap, so asking for far more than
+    // `limits.depth` gives the same graph as asking for exactly it.
+    let capped = ConeLimits {
+        depth: 2,
+        ..ConeLimits::default()
+    };
+    let huge = s
+        .trace_graph(
+            &[req(TRACE_NET, Dir::Inout, Some(99))],
+            capped,
+            Projection::ProcessLevel,
+        )
+        .unwrap();
+    let exact = s
+        .trace_graph(
+            &[req(TRACE_NET, Dir::Inout, Some(2))],
+            capped,
+            Projection::ProcessLevel,
+        )
+        .unwrap();
+    assert_eq!(shape(&huge), shape(&exact), "depth clamps to limits.depth");
+}
+
+#[test]
+fn trace_graph_projection_threads_through() {
+    // Unlike the two tests above, this one asserts the projections *differ*. Those
+    // walk `g_lane[0]`, whose own children are instances; a trace crosses into
+    // `core`, where the committed golden really does carry gate primitives (it is
+    // elaborated with `--gate-level` since #199). So "identical either way" would
+    // pass here only if the parameter never reached the extractor.
+    let s = session();
+    let steps = [req(TRACE_NET, Dir::Inout, Some(2))];
+    let limits = ConeLimits::default();
+    let process = s
+        .trace_graph(&steps, limits, Projection::ProcessLevel)
+        .unwrap();
+    let gate = s
+        .trace_graph(&steps, limits, Projection::GateLevel)
+        .unwrap();
+    assert!(!process.nodes.is_empty(), "vacuous otherwise");
+    assert_ne!(
+        shape(&process),
+        shape(&gate),
+        "gate level must dissolve the combinational blocks a trace reaches"
+    );
+}
+
+#[test]
+fn trace_graph_accumulates_across_steps() {
+    let s = session();
+    let limits = ConeLimits::default();
+    let proj = Projection::ProcessLevel;
+    let one = s
+        .trace_graph(&[req(TRACE_NET, Dir::In, Some(1))], limits, proj)
+        .unwrap();
+    let two = s
+        .trace_graph(
+            &[
+                req(TRACE_NET, Dir::In, Some(1)),
+                req(TRACE_NET, Dir::Out, Some(1)),
+            ],
+            limits,
+            proj,
+        )
+        .unwrap();
+    assert!(
+        two.edges.len() > one.edges.len(),
+        "the second step must add connectivity: {} vs {}",
+        two.edges.len(),
+        one.edges.len()
+    );
 }
 
 #[test]
