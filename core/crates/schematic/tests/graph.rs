@@ -2065,11 +2065,189 @@ fn cone_with_crosses_hierarchy() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// #285 — a module port is a crossing point, not a wall.
+//
+// A port is *two* model nodes at one canonical path with **no edge between
+// them**: the `Port` carries only the external connection (to the parent net or
+// enclosing interface), and the backing `Var`/`Net` carries every internal one.
+// Walking them as two independent signals gave each its own `join_signal` and
+// its own stub, so the two halves landed on canvas as two identically labelled
+// junctions in two disconnected components — which is what made a trace look
+// like it stopped at the boundary.
+// ---------------------------------------------------------------------------
+
+const CORE_CLK: &str = "picorv32_soc.g_lane[0].core.clk";
+const TOP_CLK: &str = "picorv32_soc.clk";
+
+/// How many connected components the graph's wires leave behind, counting only
+/// nodes that are wired at all. Union-find over pin ids, because a wire names
+/// pins and a pin belongs to exactly one node.
+fn components(g: &SchematicGraph) -> usize {
+    let mut owner: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+    for (i, n) in g.nodes.iter().enumerate() {
+        for p in &n.ports {
+            owner.insert(p.id, i);
+        }
+    }
+    let mut parent: Vec<usize> = (0..g.nodes.len()).collect();
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    let mut wired: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for e in &g.edges {
+        let (Some(&a), Some(&b)) = (owner.get(&e.source), owner.get(&e.target)) else {
+            continue;
+        };
+        wired.insert(a);
+        wired.insert(b);
+        let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+        if ra != rb {
+            parent[ra] = rb;
+        }
+    }
+    let roots: std::collections::HashSet<usize> =
+        wired.iter().map(|&i| find(&mut parent, i)).collect();
+    roots.len()
+}
+
+#[test]
+fn cone_with_on_a_module_port_shows_both_sides() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, MEM_VALID),
+        Dir::Inout,
+        ConeLimits::depth(1),
+        Projection::ProcessLevel,
+    );
+    let inside = "picorv32_soc.g_lane[0].core.";
+    let internal: Vec<&str> = g
+        .nodes
+        .iter()
+        .filter(|n| n.path.starts_with(inside) && n.path != MEM_VALID)
+        .map(|n| n.path.as_str())
+        .collect();
+    let external: Vec<&str> = g
+        .nodes
+        .iter()
+        .filter(|n| !n.path.is_empty() && !n.path.starts_with(inside))
+        .map(|n| n.path.as_str())
+        .collect();
+    // Anti-vacuity: "one component" is trivially true of a graph with one side.
+    assert!(
+        !internal.is_empty(),
+        "no logic behind the port: {:?}",
+        g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+    assert!(
+        !external.is_empty(),
+        "nothing outside the port: {:?}",
+        g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+    // The point of the issue: one graph, not two islands that happen to share a
+    // label. Before #285 this was 2 — the `Port` half wired only to the parent's
+    // interface, the `Var` half only to the module's own logic.
+    assert_eq!(
+        components(&g),
+        1,
+        "a port's two sides must meet at one crossing point: {:?}",
+        g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn cone_with_draws_a_port_once() {
+    let d = design();
+    for seed in [MEM_VALID, VALID, CORE_CLK] {
+        for dir in [Dir::In, Dir::Out, Dir::Inout] {
+            for proj in [Projection::ProcessLevel, Projection::GateLevel] {
+                let g = cone_with(&d, id(&d, seed), dir, ConeLimits::depth(2), proj);
+                // Stronger than the id-uniqueness invariant, which passes happily
+                // on two distinct model ids drawn for the same signal.
+                let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                for n in &g.nodes {
+                    if n.path.is_empty() {
+                        continue;
+                    }
+                    assert!(
+                        seen.insert(n.path.as_str()),
+                        "{seed} {dir:?} {proj:?}: {} drawn twice",
+                        n.path
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cone_with_on_an_undriven_input_still_draws_the_seed() {
+    let d = design();
+    // `core.clk` is driven from the design's own top-level input, which nothing
+    // drives in turn. The honest answer is "here is the signal, nothing feeds
+    // it" — an empty graph says "nothing found" and is indistinguishable from a
+    // failed lookup, which is exactly the silent drop ADR 0003 forbids.
+    for seed in [CORE_CLK, "picorv32_soc.g_lane[0].core.resetn"] {
+        let g = cone_with(
+            &d,
+            id(&d, seed),
+            Dir::In,
+            ConeLimits::depth(1),
+            Projection::ProcessLevel,
+        );
+        assert!(
+            g.nodes.iter().any(|n| n.path == seed),
+            "{seed}: fan-in must still draw the seed, got {:?}",
+            g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn cone_with_descends_through_an_instance() {
+    let d = design();
+    let inner = |g: &SchematicGraph| {
+        g.nodes
+            .iter()
+            .any(|n| n.path.starts_with("picorv32_soc.g_lane[0].core.$"))
+    };
+    let at = |depth: usize| {
+        cone_with(
+            &d,
+            id(&d, TOP_CLK),
+            Dir::Out,
+            ConeLimits::depth(depth),
+            Projection::ProcessLevel,
+        )
+    };
+    // Anti-vacuity: the assertion below only means something if the extra hop is
+    // what crossed the wall. At depth 1 the walk has only reached the instance.
+    assert!(
+        !inner(&at(1)),
+        "depth 1 should stop at the instance boundary"
+    );
+    assert!(
+        inner(&at(2)),
+        "depth 2 must enter the module: {:?}",
+        at(2).nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+}
+
 /// Every seed x projection x depth a cone invariant is checked against — one
 /// place to widen the sweep, since the assertions below are all "for every cone".
 fn every_cone(mut f: impl FnMut(&SchematicGraph, &str, Projection, usize)) {
     let d = design();
-    for seed in [RESETN, VALID, MEM_VALID] {
+    // `CORE_CLK` is here for #285: an input port whose fan-in leaves the module
+    // entirely. Widening this sweep is what makes every invariant below — no
+    // repeated id, no orphan box, agreement with `child_boxes`, no inline
+    // operand drawn as a box — cover the wall-crossing path too. That sweep is
+    // how #268 and #269 were found; the hand-written repro tests missed both.
+    for seed in [RESETN, VALID, MEM_VALID, CORE_CLK] {
         for proj in [Projection::ProcessLevel, Projection::GateLevel] {
             for depth in [1, 2, 3] {
                 let g = cone_with(&d, id(&d, seed), Dir::Inout, ConeLimits::depth(depth), proj);
@@ -2425,16 +2603,22 @@ fn trace_graph_joins_both_directions_of_one_net_at_a_single_node() {
         v.sort_unstable();
         v
     };
-    // Not "exactly one node": a port and its backing net are two model nodes for
-    // one wire, `seed_signals` folds both into the frontier on purpose, and the
-    // two directions do not reach the same one. The property that matters is
-    // that the fan-out step *re-uses* the anchor the fan-in step stood up rather
-    // than standing up a rival for the same signal — which is what sharing
-    // `stubs` across steps buys, and what `trace_graph_emits_each_box_once`
-    // would catch as a duplicate id if it were lost.
+    // Exactly one node, since #285: a port and its backing net are two model
+    // nodes for one wire, and the walk now folds them into one signal with one
+    // anchor keyed on the group's representative. It used to be two — the two
+    // directions reached different halves — and that is precisely what drew a
+    // traced port twice. The property on top of that is that the fan-out step
+    // *re-uses* the anchor the fan-in step stood up rather than standing up a
+    // rival, which is what sharing `stubs` across steps buys.
     assert!(
         !junction(&only_in).is_empty(),
         "vacuous: the seed net was never drawn"
+    );
+    assert_eq!(
+        junction(&g).len(),
+        1,
+        "one signal, one junction: {:?}",
+        junction(&g)
     );
     for anchor in junction(&only_in) {
         assert!(
@@ -2491,13 +2675,16 @@ fn trace_graph_box_budget_is_global_across_steps() {
         step(&d, MEM_VALID, Dir::Inout, 3),
     ];
     let proj = Projection::ProcessLevel;
-    // `boxes` bounds boxes, not nodes: a one-sided signal's stub is a wire
-    // anchor, and starving it would return an empty graph rather than a small
-    // one (the same reasoning as the `.max(1)` fan-out clamp).
+    // `boxes` bounds boxes, not nodes: a signal's anchor is a wire anchor, and
+    // starving it would return an empty graph rather than a small one (the same
+    // reasoning as the `.max(1)` fan-out clamp). `Port` joins `Net`/`Var` here
+    // because a boundary crossing's anchor is keyed on its group representative,
+    // which is whichever of the two same-path nodes has the lower model id (#285)
+    // — the anchor is the same wire anchor either way.
     let boxes = |g: &SchematicGraph| {
         g.nodes
             .iter()
-            .filter(|n| n.kind != NodeKind::Net && n.kind != NodeKind::Var)
+            .filter(|n| !matches!(n.kind, NodeKind::Net | NodeKind::Var | NodeKind::Port))
             .count()
     };
     let uncapped = trace_graph(&d, &steps, ConeLimits::default(), proj);
