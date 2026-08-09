@@ -370,6 +370,9 @@ level-of-detail work, and it is exactly ADR 0003's "third outcome".
 
 ### The level-of-detail answer to that cliff (#244)
 
+Recorded as [ADR 0010](decisions/0010-schematic-trace-mode.md) — trace mode is the
+consumer that turned ADR 0003's third outcome into shipped behaviour.
+
 `cone_with` is the capped rebuild. `nav` now walks **both** on the same seed, so the two are
 directly comparable within a run. Measured 2026-08-01 on a slower machine than the table above
 — compare rows *within* this table, never against the 2026-07-26 absolutes:

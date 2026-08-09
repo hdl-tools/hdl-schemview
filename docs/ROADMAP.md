@@ -228,7 +228,13 @@ return to the indicated loop-back point rather than proceeding.
 > `expand`, fan-in/out `cone`; `svxprobe graph` CLI) ✅. 3c — the **Tauri desktop
 > app** (`app/`): three linked panes (schematic via elkjs, source, waveform
 > canvas) over `svxprobe-gui`; click a box → source + waveform follow; expand;
-> picker; cone ✅. Standalone (native webview; no Chromium/Playwright at runtime).
+> picker ✅. Standalone (native webview; no Chromium/Playwright at runtime).
+> **Correction (#244):** "cone ✅" was overstated for the app and is withdrawn. The
+> `cone` API wrapper existed, but **nothing in `app/src` ever called it** — the only
+> live consumer was `svxprobe graph --cone`. A cone became reachable from the UI in
+> Phase 3d via **trace mode** (#244, [ADR 0010](decisions/0010-schematic-trace-mode.md)),
+> which rebuilt the extractor rather than wiring the old one: `cone` matched
+> `Instance` only and returned raw model ids no layout engine could anchor.
 
 - **Goal:** Generate a navigable schematic from the elaborated model and link it
   into the bus.
@@ -259,6 +265,12 @@ return to the indicated loop-back point rather than proceeding.
 > `always_comb` / continuous `assign` is **one** logic box (`Ff`/`Comb`), wired
 > to the signals it reads and writes. Granularity is fixed by **ADR 0004**
 > (process-level, *not* gate/operator-level).
+>
+> Two further *projections over the same spine* have since landed on this
+> foundation, both opt-in and both leaving the default view byte-identical:
+> **gate level** (#157, [ADR 0005](decisions/0005-optional-gate-level-projection.md))
+> and **trace mode** (#244, [ADR 0010](decisions/0010-schematic-trace-mode.md)) —
+> seed a signal, expand its fan-in/fan-out a hop at a time, across hierarchy walls.
 
 - **Part-issues:** #30 quick nav fix (leaf instances drillable) ✅ · #31 harness
   emits process-level logic nodes (`Comb` + broaden `FF`) + golden + `NodeKind::Comb` ✅ ·
@@ -352,6 +364,11 @@ return to the indicated loop-back point rather than proceeding.
 > - *Sub-second signal query* — the one interactive miss is **`cone()` under fan-out**:
 >   190.8 ms at a 59K-load clock. That is the concrete target for the level-of-detail
 >   work, and per ADR 0003 it is an algorithmic fix, not a storage one.
+>   **Answered (#244, [ADR 0010](decisions/0010-schematic-trace-mode.md)):** the capped
+>   rebuild takes the same 1M seed from **522.6 ms → 3.12 ms**, inside a 16 ms frame,
+>   with what the caps drop reported (`SchPort.more` / `SchematicGraph.truncated`)
+>   rather than hidden. The legacy `cone` is kept uncapped and unchanged, because it is
+>   the baseline that measurement is against.
 >
 > **Open and gated on this data:** **#22** (Phase B — redb/SQLite demand-loading) and
 > **#155** (true zero-copy rkyv read-back). For #155 the split is already measured:
@@ -362,8 +379,9 @@ return to the indicated loop-back point rather than proceeding.
 
 - **Goal:** Survive a real SoC, not just a core.
 - **Tasks:** lazy everywhere (hierarchy, connectivity, signal data via wellen's
-  per-signal loading); level-of-detail in the schematic; bounded-memory trace
-  handling. Audit every "load all" path.
+  per-signal loading); ~~level-of-detail in the schematic~~ **✅ #244** (the capped
+  trace extractor — the one measured interactive miss, now 522.6 ms → 3.12 ms at 1M);
+  bounded-memory trace handling. Audit every "load all" path.
 - **Exit gate:** open a multi-million-net design + large trace with bounded memory
   and interactive (sub-second) scope expansion and signal query.
 - **Depends on:** Phase 3.
@@ -424,6 +442,9 @@ Two **separate** surfaces — do not conflate them (§6, ADR 0002).
 - **Do not** target Verdi/Indago feature parity, multi-vendor simulator
   robustness, or post-synthesis optimization tracing in v1.
 - **Do not** render flat schematics of whole designs. Hierarchical, on-demand only.
+  *Trace mode (#244) does not amend this:* its graph ignores scope walls while
+  following one signal's connectivity, but it is always **seeded** and always
+  **incremental** — there is no "flatten everything" action, and every walk is capped.
 - **Do not** ship any Synopsys/FSDB binaries or headers. The user supplies their
   own.
 - **Do not** support the full SV class/UVM/constraint machinery for visualization
@@ -460,7 +481,9 @@ Two **separate** surfaces — do not conflate them (§6, ADR 0002).
   JS-boundary crossing to pay for: the graph is already in the frontend when it is
   laid out. `elk-rs` would have moved layout into the Rust shell only to serialize the
   result straight back out. Revisit only if layout becomes the interactive bottleneck
-  — at present `cone()` extraction, not layout, is the measured cliff (Phase 4).
+  — at present `cone()` extraction, not layout, is the measured cliff (Phase 4). Trace
+  mode's capped extractor (#244) has since taken that cliff off the table; layout has
+  not become the bottleneck in its place.
 - **Rendering/control:** **custom canvas, decided in Phase 3c.** Surfer is embedded via
   `<iframe>` + WCP or not at all, and an embedded pane cannot participate in the
   cross-probe as a *projection of our model* — WCP would have made it a second
