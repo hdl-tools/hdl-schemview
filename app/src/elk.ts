@@ -1,6 +1,6 @@
 // Adapter from our SchematicGraph to an ELK graph, plus a layout helper.
-// `toElk` is pure (unit-tested); `layout` runs elkjs.
-import ELK from "elkjs/lib/elk.bundled.js";
+// `toElk` is pure (unit-tested); `layout` runs elkjs — in a worker (#264), so
+// the window keeps painting during a scope change.
 import type { SchEdge, SchematicGraph, SchNode, SchPort } from "./types";
 
 export interface ElkLabel {
@@ -757,10 +757,43 @@ export function gatherBar(pins: Pt[], dir: 1 | -1): { bar: [Pt, Pt]; stubs: [Pt,
   };
 }
 
-const elk = new ELK();
+/// The elkjs instance, built on first use and reused after (#264).
+///
+/// Everything here is imported *lazily* and for a reason: Vite's `?worker`
+/// module is a `class extends Worker`, which needs `Worker` to exist when the
+/// class is defined, and elk-api spawns its worker inside the constructor. A
+/// static import of either therefore throws at module load anywhere without
+/// `Worker` — which took out all of `elk.test.ts` at collection time, not just
+/// the one test that lays a graph out.
+let elkInstance: Promise<{ layout(g: unknown): Promise<unknown> }> | null = null;
+
+async function getElk() {
+  if (elkInstance) return elkInstance;
+  elkInstance = (async () => {
+    // Vitest's `node` environment has no `Worker`, so fall back to the
+    // self-contained build, which runs the same GWT-compiled algorithm inline.
+    // Gated on `!PROD` as well so Rollup drops this branch — and the 1.4 MB
+    // bundled chunk with it — from the app build, where `Worker` always exists.
+    if (!import.meta.env.PROD && typeof Worker === "undefined") {
+      const { default: BundledELK } = await import("elkjs/lib/elk.bundled.js");
+      return new BundledELK();
+    }
+    const [{ default: ELK }, { default: ElkWorker }] = await Promise.all([
+      import("elkjs/lib/elk-api.js"),
+      import("elkjs/lib/elk-worker.min.js?worker"),
+    ]);
+    return new ELK({ workerFactory: () => new ElkWorker() });
+  })();
+  return elkInstance;
+}
 
 /// Lay out a SchematicGraph; returns the ELK graph with x/y/edge sections.
+///
+/// The work happens off the UI thread, so callers must expect a real await here
+/// — a scope changed mid-layout needs a generation token to discard the stale
+/// result, the way `renderTrace`/`refreshSchemPalette` already guard themselves.
 export async function layout(graph: SchematicGraph, opts: LayoutOpts = {}): Promise<any> {
+  const elk = await getElk();
   return elk.layout(toElk(graph, opts) as any);
 }
 

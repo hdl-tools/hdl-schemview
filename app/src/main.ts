@@ -1256,7 +1256,14 @@ function setupModeToggle() {
   applyModeButtons();
 }
 
+// Guarded by schemGen so a scope superseded mid-layout can't draw over a newer
+// one (#264). Layout was always awaited, but it used to run synchronously inside
+// that promise; in a worker it is genuinely concurrent, so two quick scope
+// changes can finish out of order. Same token pattern as paletteGen/traceGen.
+let schemGen = 0;
+
 async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
+  const gen = ++schemGen;
   const host = $("schematic");
   host.innerHTML = "";
   if (!graph.nodes.length) {
@@ -1266,6 +1273,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // Reserve the outboard gutter only where the controls are actually drawn, so the
   // hierarchy view's spacing is untouched (#244 PR4).
   const laid: any = await layout(graph, { affordances: schemMode === "trace" });
+  if (gen !== schemGen) return; // superseded by a newer scope
   const baseW = Math.max(laid.width ?? 400, 200);
   const baseH = Math.max(laid.height ?? 300, 150);
   const svg = document.createElementNS(SVGNS, "svg");
