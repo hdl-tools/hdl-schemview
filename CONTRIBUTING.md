@@ -30,8 +30,9 @@ A polyglot monorepo with three trees:
 **The governing principle:** the elaborated hierarchy is the single source of
 truth, and source / schematic / waveform are three *projections* of it.
 Cross-probing is lookups, not heuristics — please don't reintroduce
-string-matching where a model lookup exists. See [`CLAUDE.md`](CLAUDE.md) and
-[`docs/decisions/`](docs/decisions) for the full architecture.
+string-matching where a model lookup exists. See
+[`docs/architecture.md`](docs/architecture.md) for how the trees fit together and
+[`docs/decisions/`](docs/decisions/README.md) for why.
 
 ## Dev setup
 
@@ -99,19 +100,21 @@ diff <(jq -S . fixtures/picorv32_soc/golden/hierarchy.json) \
 wire format for the frontend. If you change any of them, mirror the change in
 [`app/src/types.ts`](app/src/types.ts) or the TS layer silently desyncs. A model-level
 change usually needs a third edit, in
-[`elaborate/schema/model.schema.json`](elaborate/schema/model.schema.json).
+[`elaborate/schema/model.schema.json`](elaborate/schema/model.schema.json). The shapes and
+the full sync rule are in [`docs/data-model.md`](docs/data-model.md).
 
 **What runs where:** `ci.yml` (every push/PR) covers the Rust gates, the matcher on both
 trace formats, the Python lint/test/schema gates, the RTL `always_ff` lint, and golden
-reproducibility. `app.yml` builds the Tauri app on Ubuntu + Windows and runs `npm test` +
-`npm run build` when `app/` or `core/crates/` change. `nightly.yml` has three jobs —
-`repro-tier1` (regenerate traces with Verilator), `stress-tier2` (Ibex, `continue-on-error`),
-and `scale-bench` (the scalability benchmark, `continue-on-error`, uploads a metrics
-artifact). None of the nightly jobs gate a PR.
+reproducibility. `app.yml` builds and bundles the Tauri app when `app/` or `core/crates/`
+change. `nightly.yml` and `nix.yml` do not gate a PR. The full account of all four
+workflows — including the packaging traps they encode — is in
+[`docs/development.md`](docs/development.md).
 
 **Docs are part of the change, not a follow-up.** If your PR alters architecture, commands,
-DTOs, gates, or workflow, update `CLAUDE.md` and the relevant `docs/*` in the same PR. A
-decision with lasting consequences gets an ADR in [`docs/decisions/`](docs/decisions).
+DTOs, gates, or workflow, update the relevant `docs/*` (and `CLAUDE.md` if the routing
+changes) in the same PR. A decision with lasting consequences gets an ADR in
+[`docs/decisions/`](docs/decisions) — add its row to the
+[index](docs/decisions/README.md).
 
 ## Commit messages
 
