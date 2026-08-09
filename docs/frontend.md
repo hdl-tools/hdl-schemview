@@ -102,6 +102,27 @@ re-fanning the members via a gather bar just off the wall. Stubs cross-probe per
 the trunk and bar cross-probe the bundle, and selection links both ways: a bundle lights
 its stubs, a stub lights itself and the trunk, never its siblings.
 
+### Pan & zoom
+
+`setupZoom` owns the pane's view input and runs once per window, from both `init` and the
+`initDetached("schematic")` branch — so anything hung off it reaches a schematic pop-out
+with no extra wiring. That is why `setupPan` (#265) is called from its body rather than
+added as a third call site.
+
+Zoom is an SVG transform; **panning is native scroll**. Drag-to-pan — middle-drag, or
+Space + left-drag — writes `host.scrollLeft`/`scrollTop`, the same properties the wheel,
+`setZoom` and `captureView` already use, so the existing `scroll` listener re-places wire
+labels through `scheduleWireLabels` (one `placeWireLabels` per frame, #263) and the drag
+needs no rAF of its own. Panning by transform instead would bypass `placeWireLabels`,
+which reads the scroll offsets directly, and desync the persisted `ViewState`.
+
+Two consequences worth knowing before touching it: the gesture's scroll range is captured
+at `mousedown` (reading `scrollWidth` per move would flush layout every frame), and a
+left-drag swallows its trailing `click` **and `dblclick`** via a capture-phase listener on
+the host — the only central interception point while the pane's handlers are still
+per-element `on*` properties, and one that survives their delegation (#267) unchanged.
+Pure parts (`shouldStartPan`, `panTarget`, `blocksSpaceHotkey`) live in `pan.ts`.
+
 ### Trace mode
 
 A `Hierarchy | Trace` segmented control in the schematic `.tab-aux`, wired from both
