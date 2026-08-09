@@ -19,6 +19,7 @@ import {
 } from "./elk";
 import type { Pt, TrunkGroup } from "./elk";
 import type {
+  Dir,
   NameRefDto,
   NodeRef,
   ProbeResponse,
@@ -29,6 +30,7 @@ import type {
   SourceFile,
   SourceLoc,
   StartupArgs,
+  TraceStep,
   TraceTimescale,
   WaveLink,
 } from "./types";
@@ -47,7 +49,14 @@ import {
   type Selection,
 } from "./bus";
 import { formatLogEntry, type LogLevel } from "./log";
-import { filterSignals, isTextEntryTag, moveIndex } from "./schempick";
+import {
+  filterSignals,
+  isTextEntryTag,
+  moveIndex,
+  pushTraceStep,
+  stepLabel,
+  truncateTrace,
+} from "./schempick";
 import { highlightLineRange } from "./source";
 import { tokenizeLines } from "./syntax";
 import { applyNameRefs } from "./names";
@@ -233,6 +242,11 @@ type LoadSpec =
 // (#170).
 const detachScopeKey = (label: string) => `detach:${label}:scope`;
 const detachWaveKey = (label: string) => `detach:${label}:wave`;
+// A schematic pop-out detached while tracing (#244 PR3). A sibling key rather than
+// a change to `:scope`, whose value is a bare path string that an older window may
+// still be holding — and because a pane carries *both*: the trace it is showing and
+// the scope its Hierarchy button falls back to.
+const detachTraceKey = (label: string) => `detach:${label}:trace`;
 
 // One seeded waveform pop-out: the design to (re)load under its own session, plus the
 // lanes/view/markers main was showing at pop-out time.
@@ -330,6 +344,15 @@ async function popOut(pane: DetachablePane) {
     pane === "schematic" ? `schematic-${++schematicPops}` : `waveform-${++wavePops}`;
   if (pane === "schematic") {
     localStorage.setItem(detachScopeKey(label), context() ?? "");
+    // The trace is a list of steps, which is exactly what the backend re-derives
+    // from — so a pop-out restores the same walk with no server-side state to hand
+    // over. Written only while tracing, and cleared otherwise so a recycled label
+    // can't resurrect an earlier window's trace.
+    if (schemMode === "trace" && traceSteps.length) {
+      localStorage.setItem(detachTraceKey(label), JSON.stringify({ steps: traceSteps }));
+    } else {
+      localStorage.removeItem(detachTraceKey(label));
+    }
   } else {
     const snap: WaveSnapshot = {
       load: state.loaded ?? undefined,
@@ -472,6 +495,15 @@ function currentProjection(): "process-level" | "gate-level" {
 // A scope with a cached viewport is restored to it; a first-time scope is
 // zoom-to-fit and scrolled top-left (see renderSchematic).
 async function setScope(path: string, label: string, push = true) {
+  // Showing a scope is a hierarchy action by definition, so this is where trace
+  // mode ends — one choke point covering the tree jump, a breadcrumb click and a
+  // box drill alike, rather than the same guard repeated at each. The step list
+  // survives, so the Trace button restores the walk rather than starting over.
+  if (schemMode === "trace") {
+    schemMode = "hierarchy";
+    applyModeButtons();
+    showTruncation(false);
+  }
   const graph = await api.scopeGraph(path, undefined, currentProjection());
   state.graph = graph;
   if (push) state.stack.push({ path, label });
@@ -497,6 +529,33 @@ function rememberCurrentView() {
 function renderBreadcrumb() {
   const bc = $("breadcrumb");
   bc.innerHTML = "";
+  // Trace mode reuses this bar for its step list (#244). The scope stack is
+  // meaningless once the walk crosses hierarchy walls, but "where am I, and how do
+  // I get back" is the same question — so it gets the same bar and the same
+  // click-to-rewind, with a lead-in so the two are never confusable.
+  if (schemMode === "trace") {
+    const lead = document.createElement("span");
+    lead.className = "crumb-lead";
+    lead.textContent = "Trace:";
+    bc.appendChild(lead);
+    if (!traceSteps.length) {
+      const hint = document.createElement("span");
+      hint.className = "crumb-hint";
+      hint.textContent = " (no seed yet)";
+      bc.appendChild(hint);
+      return;
+    }
+    traceSteps.forEach((s, i) => {
+      bc.appendChild(document.createTextNode(" "));
+      const el = document.createElement("span");
+      el.textContent = stepLabel(s);
+      el.title = `${s.path} — click to rewind the trace to here`;
+      el.onclick = () => void rewindTrace(i);
+      bc.appendChild(el);
+      if (i < traceSteps.length - 1) bc.appendChild(document.createTextNode(" ·"));
+    });
+    return;
+  }
   state.stack.forEach((f, i) => {
     const s = document.createElement("span");
     s.textContent = f.label;
@@ -754,11 +813,17 @@ function onPaletteNav(e: KeyboardEvent) {
 }
 
 async function openSchemPalette() {
-  const scope = schematicScope();
-  if (!scope) return; // nothing loaded yet
+  const scope = paletteScope();
+  if (!scope) return; // nothing loaded yet (or trace mode with no seed)
   $("schem-palette").hidden = false;
   const input = $("schem-palette-input") as HTMLInputElement;
   input.value = "";
+  // The verb differs by mode, so say which one is live rather than leave the user
+  // to discover that Enter did something else than last time.
+  input.placeholder =
+    schemMode === "trace"
+      ? "Expand a signal's fan-in / fan-out…  (Esc to close)"
+      : "Trace a signal in this scope…  (Esc to close)";
   paletteActive = 0;
   await loadPaletteSignals(scope);
   input.focus();
@@ -786,9 +851,20 @@ async function loadPaletteSignals(scope: string) {
 
 // Live update (#219): when the schematic scope changes while the palette is open,
 // refetch its signals so the list matches the newly rendered scope in place.
+// The scope whose signals the palette lists. In trace mode the nav stack is not
+// what is on canvas, so it uses the graph's own `root` — the nearest navigable
+// scope the backend bound the trace to — rather than a stale hierarchy position.
+function paletteScope(): string | null {
+  // Falls back to the hierarchy scope when a trace has no seed yet — otherwise the
+  // palette, which is one of the two ways to *start* a trace, would be unopenable
+  // in exactly the state you need it.
+  if (schemMode === "trace") return state.graph?.root || schematicScope();
+  return schematicScope();
+}
+
 function refreshSchemPalette() {
   if ($("schem-palette").hidden) return;
-  const scope = schematicScope();
+  const scope = paletteScope();
   if (scope) void loadPaletteSignals(scope);
 }
 
@@ -814,7 +890,11 @@ function renderPaletteList() {
     row.className = "snode";
     row.id = `schem-opt-${i}`;
     row.setAttribute("role", "option");
-    if (!s.in_trace) row.classList.add("dim");
+    // In trace mode the action is "expand this signal", which the waveform trace
+    // has no bearing on — so every row is live, and dimming (the #171 "inert"
+    // convention) would misreport a usable row as unusable.
+    const usable = schemMode === "trace" || s.in_trace;
+    if (!usable) row.classList.add("dim");
     if (added.has(s.path)) row.classList.add("added");
     if (i === paletteActive) {
       row.classList.add("active");
@@ -831,8 +911,13 @@ function renderPaletteList() {
       w.textContent = s.width;
       row.appendChild(w);
     }
-    row.title = s.in_trace ? s.path : `${s.path} — not in this trace`;
-    if (s.in_trace) row.onclick = () => void pickPaletteSignal(s.path);
+    row.title =
+      schemMode === "trace"
+        ? `${s.path} — expand this signal's fan-in and fan-out`
+        : s.in_trace
+          ? s.path
+          : `${s.path} — not in this trace`;
+    if (usable) row.onclick = () => void pickPaletteSignal(s.path);
     host.appendChild(row);
   });
   // Keep the keyboard-highlighted row visible as the user arrows through a long list.
@@ -843,6 +928,15 @@ function renderPaletteList() {
 // main window's waveform — the same bus path as the right-click menu (appendWaveItem),
 // so it works from a detached schematic window too. Then close the palette.
 async function pickPaletteSignal(path: string) {
+  // In trace mode the palette is the keyboard route to the same expansion the
+  // right-click menu offers (#244 PR3), so it seeds the walk instead of appending a
+  // waveform lane. `inout` because a search-and-pick carries no direction — the
+  // user asked about the signal, not about one side of it.
+  if (schemMode === "trace") {
+    closeSchemPalette();
+    await startTrace(path, "inout");
+    return;
+  }
   let resp: ProbeResponse | null;
   try {
     resp = await api.probeNode(path, null, sid);
@@ -901,6 +995,173 @@ const zoom = { k: 1 };
 // 0 → a degenerate fit). renderSchematic sets this when it draws while hidden; the
 // next schematic-tab activation re-fits against the now-visible pane (#99).
 let schematicDirty = false;
+
+// ---------------------------------------------------------------------------
+// Schematic view mode (#244 PR3)
+// ---------------------------------------------------------------------------
+//
+// Hierarchy is the default and is untouched: one scope at a time, driven by the
+// nav stack. Trace is seeded on a signal and grown by explicit fan-in/fan-out
+// steps that cross hierarchy walls.
+//
+// Module-level, which *is* per-pane: a detached pop-out is its own webview and so
+// its own JS context (#169). Nothing here is shared with another window, and
+// nothing is persisted globally — a mode with no steps would restore as an empty
+// canvas. The one place it outlives the window is the pop-out snapshot, which
+// carries the steps with it.
+type SchemMode = "hierarchy" | "trace";
+let schemMode: SchemMode = "hierarchy";
+
+// The trace as the backend wants it: an ordered list of expansion steps, re-sent
+// whole on every change. Deliberately not a graph — pin ids are minted per call,
+// so two graphs cannot be merged; re-deriving is what keeps one self-consistent
+// (#244 PR2).
+let traceSteps: TraceStep[] = [];
+
+// Monotonic token so a slow trace fetch for an older step list can't overwrite a
+// newer one, the same guard `loadPaletteSignals` uses for rapid drilling.
+let traceGen = 0;
+
+function applyModeButtons() {
+  const on = (id: string, active: boolean) => {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", String(active));
+  };
+  on("mode-hier", schemMode === "hierarchy");
+  on("mode-trace", schemMode === "trace");
+}
+
+// A cap engaged, so the graph is missing connections the model has. Truncation is
+// an allowed *rendering* policy; truncation the user cannot see is not (ADR 0003).
+// The per-pin "N more" affordance is PR4 — this is the pane-level banner, which
+// still shows when the truncated pin is scrolled off canvas.
+function showTruncation(truncated: boolean) {
+  const el = document.getElementById("trace-banner");
+  if (!el) return;
+  el.hidden = !truncated;
+  if (truncated) {
+    el.textContent =
+      "Trace capped — some connections are not drawn. Narrow the trace, or expand a specific signal.";
+  }
+}
+
+// Fetch and draw the current step list. Keeps the zoom level rather than
+// zoom-to-fit, because a trace grows in place: refitting on every expansion would
+// yank the canvas out from under the user.
+async function renderTrace() {
+  const gen = ++traceGen;
+  if (!traceSteps.length) {
+    state.graph = null;
+    state.selected = null;
+    renderBreadcrumb();
+    showTruncation(false);
+    $("schematic").textContent =
+      "Trace mode — right-click a signal, box or wire and pick “Trace from here”, or press `a` to search this scope.";
+    return;
+  }
+  let graph: SchematicGraph;
+  try {
+    graph = await api.traceGraph(traceSteps, sid, currentProjection());
+  } catch (e) {
+    log("error", `trace failed: ${e}`);
+    return;
+  }
+  if (gen !== traceGen) return; // superseded by a newer expansion
+  state.graph = graph;
+  state.selected = null;
+  renderBreadcrumb();
+  await renderSchematic(graph, { k: zoom.k, scrollLeft: 0, scrollTop: 0 });
+  showTruncation(graph.truncated === true);
+  refreshSchemPalette();
+}
+
+// Switch to trace mode and draw. Separate from `startTrace` so an already-tracing
+// pane re-renders instead of no-opping on "the mode is already trace".
+async function enterTrace() {
+  schemMode = "trace";
+  applyModeButtons();
+  activateTab("schematic-pane");
+  await renderTrace();
+}
+
+// Back to the hierarchy view, on whatever scope the nav stack last held (or the
+// design top for a pane that booted straight into a trace). The step list is kept,
+// so flipping back to Trace restores the same walk rather than starting over.
+async function enterHierarchy() {
+  schemMode = "hierarchy";
+  applyModeButtons();
+  showTruncation(false);
+  const cur = state.stack[state.stack.length - 1];
+  if (cur) {
+    await setScope(cur.path, cur.label, false);
+  } else if (state.top) {
+    await setScope(state.top, state.top);
+  } else {
+    renderBreadcrumb();
+  }
+}
+
+// Seed a trace on `path`, or extend the current one when already tracing.
+//
+// Replacing rather than extending on a fresh seed is deliberate: "Trace from here"
+// in hierarchy mode means *this signal*, and inheriting an unrelated earlier walk
+// would silently draw someone else's question.
+async function startTrace(path: string, dir: Dir) {
+  const step: TraceStep = { path, dir };
+  traceSteps = schemMode === "trace" ? pushTraceStep(traceSteps, step) : [step];
+  await enterTrace();
+}
+
+// Rewind to a step in the trace bar, mirroring how a breadcrumb frame truncates
+// the scope stack.
+async function rewindTrace(i: number) {
+  const next = truncateTrace(traceSteps, i);
+  if (next === traceSteps) return;
+  traceSteps = next;
+  await renderTrace();
+}
+
+// Read a pop-out's seeded trace (#244 PR3). Defensive because localStorage is
+// user-visible and survives a version change: anything that is not a list of
+// well-formed steps yields none, so the pane boots into hierarchy rather than
+// throwing during init or sending garbage to the backend.
+function storedTraceSteps(label: string): TraceStep[] {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(detachTraceKey(label));
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const steps = (parsed as { steps?: unknown })?.steps;
+    if (!Array.isArray(steps)) return [];
+    return steps.filter(
+      (s): s is TraceStep =>
+        !!s &&
+        typeof (s as TraceStep).path === "string" &&
+        ((s as TraceStep).dir === "in" ||
+          (s as TraceStep).dir === "out" ||
+          (s as TraceStep).dir === "inout"),
+    );
+  } catch {
+    log("warn", `ignoring an unreadable trace snapshot for ${label}`);
+    return [];
+  }
+}
+
+function setupModeToggle() {
+  document.getElementById("mode-hier")?.addEventListener("click", () => {
+    if (schemMode !== "hierarchy") void enterHierarchy();
+  });
+  document.getElementById("mode-trace")?.addEventListener("click", () => {
+    if (schemMode !== "trace") void enterTrace();
+  });
+  applyModeButtons();
+}
 
 async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const host = $("schematic");
@@ -2301,6 +2562,28 @@ async function waveformDestinations(): Promise<string[]> {
 // pop-outs it appends to main's own waveform; with live panes it becomes a flyout,
 // one entry per window, each addressing that window by label. Disabled when the
 // origin has no trace signal (the destination re-resolves by model path on append).
+// "Trace from here ▸ fan-in | fan-out | both" (#244 PR3) — the main seeding route.
+// Every schematic object a right-click can reach (box, pin, wire) already carries a
+// canonical model path, which is exactly what a `TraceStep` names, so this needs no
+// new resolution path.
+//
+// The verb changes with the mode because the effect does: in hierarchy mode it
+// *starts* a trace on this signal; in trace mode it *adds* a step to the walk
+// already on canvas.
+function traceFromHereItem(path: string): MenuItem {
+  const extend = schemMode === "trace";
+  const go = (dir: Dir) => void startTrace(path, dir);
+  return {
+    label: extend ? "Add to trace" : "Trace from here",
+    enabled: true,
+    submenu: [
+      { label: "fan-in ◀ (what drives this)", enabled: true, onClick: () => go("in") },
+      { label: "fan-out ▶ (what reads this)", enabled: true, onClick: () => go("out") },
+      { label: "both ◀▶", enabled: true, onClick: () => go("inout") },
+    ],
+  };
+}
+
 async function appendWaveItem(resp: ProbeResponse): Promise<MenuItem> {
   const enabled = resp.wave.in_trace;
   const suffix = enabled ? "" : " (not in trace)";
@@ -2322,6 +2605,10 @@ async function appendWaveItem(resp: ProbeResponse): Promise<MenuItem> {
 // "Append to waveform" (when the object has a trace signal) and "Show in source"
 // (when it has a source location). Disabled items annotate why.
 async function schematicMenu(ev: MouseEvent, path: string) {
+  // Built before the probe, and offered even when the probe finds nothing: the
+  // path came off an object the schematic just drew, so it is by definition in the
+  // model, and tracing it needs no waveform link or source location.
+  const traceItem = traceFromHereItem(path);
   let resp: ProbeResponse | null;
   try {
     resp = await api.probeNode(path, context());
@@ -2329,8 +2616,12 @@ async function schematicMenu(ev: MouseEvent, path: string) {
     log("error", `probe failed: ${e}`);
     return;
   }
-  if (!resp) return;
+  if (!resp) {
+    openContextMenu(ev.clientX, ev.clientY, [traceItem]);
+    return;
+  }
   openContextMenu(ev.clientX, ev.clientY, [
+    traceItem,
     await appendWaveItem(resp),
     {
       label: resp.source ? "Show in source" : "Show in source (no location)",
@@ -2379,7 +2670,14 @@ async function handleSelection(sel: Selection) {
   if (sel.scope !== null && owns("schematic")) navToScope(sel.scope);
   if (sel.resp) {
     if (owns("source")) await showInSource(sel.resp);
-    if (owns("schematic")) await showInSchematic(sel.resp.anchor);
+    if (owns("schematic")) {
+      // A pane already in trace mode answers a cross-probe by expanding the
+      // arrived-at signal into its walk (#244), rather than abandoning the trace to
+      // drill a scope. `inout` for the same reason the palette uses it: the sender
+      // named a signal, not a direction.
+      if (schemMode === "trace") await startTrace(sel.resp.anchor.path, "inout");
+      else await showInSchematic(sel.resp.anchor);
+    }
     if (owns("waveform")) await appendResolved(sel.resp);
   }
 }
@@ -3828,11 +4126,20 @@ async function initDetached(pane: DetachablePane) {
   if (pane === "schematic") {
     setupZoom();
     setupSchemPalette(); // #219 — the `a`-key signal palette, per-window
+    setupModeToggle(); // #244 — Hierarchy | Trace, per-window
     activateTab("schematic-pane");
     // Seed this independent pane on the scope main was viewing when it popped out
     // (#169); thereafter it navigates only via its own local drill.
     const scope = localStorage.getItem(detachScopeKey(selfLabel));
     if (scope) navToScope(scope);
+    // …and on the trace, if main was tracing (#244). After the scope seed, so the
+    // Hierarchy button has somewhere to fall back to — `navToScope` leaves the nav
+    // stack populated even though the trace is what gets drawn.
+    const steps = storedTraceSteps(selfLabel);
+    if (steps.length) {
+      traceSteps = steps;
+      void enterTrace();
+    }
     return;
   }
   setupWaveInteraction();
@@ -4029,6 +4336,7 @@ async function init() {
   setupColSplitter(); // #139
   setupPicker(); // #171 — main's waveform pane gets a signal picker like every pop-out
   setupSchemPalette(); // #219 — main's schematic pane gets the `a`-key signal palette
+  setupModeToggle(); // #244 — Hierarchy | Trace, defaulting to Hierarchy
   // Tab groups (#99): a tab click activates its panel; the toolbar buttons reveal +
   // focus the on-demand schematic / waveform views.
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) =>

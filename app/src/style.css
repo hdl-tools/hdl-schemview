@@ -3,6 +3,7 @@
   /* UI chrome */
   --chrome:#111; --panel:#252525; --field:#222; --border:#333;
   --crumb:#181818; --crumb-fg:#9cf; --muted:#666; --hl:#3a3000; --wavebg:#151515;
+  --trunc-bg:#4a3a00; --trunc-fg:#ffe08a;
   --warn:#e0a83a; --error:#ff6b6b;
   /* schematic */
   --canvas:#1e1e1e;
@@ -30,6 +31,7 @@
   --bg:#f4f5f7; --fg:#1c2330; --accent:#2563eb; --sel:#c87f00;
   --chrome:#e3e6ec; --panel:#e9ecf2; --field:#ffffff; --border:#c7ccd6;
   --crumb:#eceef3; --crumb-fg:#1d4ed8; --muted:#8893a6; --hl:#fff3c4; --wavebg:#fbfbfd;
+  --trunc-bg:#fff3c4; --trunc-fg:#6b4e00;
   --warn:#b26a00; --error:#c0392b;
   --canvas:#ffffff;
   --box:#eef2fb; --box-stroke:#5b6b8c;
@@ -86,9 +88,32 @@ body { margin:0; font:13px/1.4 system-ui, sans-serif; background:var(--bg); colo
 #zoombar { display:flex; gap:2px; }
 #zoombar button { background:transparent; color:var(--fg); border:1px solid var(--border); padding:1px 6px; cursor:pointer; min-width:26px; font-size:12px; line-height:1.4; }
 #zoombar #zoom-reset { min-width:46px; font-variant-numeric:tabular-nums; }
+/* Schematic view mode (#244): a segmented Hierarchy | Trace control, sharing
+   #zoombar's flat outlined-button look so the .tab-aux reads as one strip. The
+   pressed segment is filled rather than merely outlined, since which mode is live
+   changes what every click in the pane means. */
+#schem-mode { display:flex; gap:0; margin-right:8px; }
+#schem-mode .mode-btn {
+  background:transparent; color:var(--fg); border:1px solid var(--border);
+  padding:1px 8px; cursor:pointer; font-size:12px; line-height:1.4;
+}
+#schem-mode .mode-btn + .mode-btn { border-left:none; }
+#schem-mode .mode-btn.active { background:var(--accent); color:var(--bg); border-color:var(--accent); }
 #breadcrumb { padding:2px 8px; background:var(--crumb); font-size:12px; color:var(--crumb-fg); }
 #breadcrumb span { cursor:pointer; }
 #breadcrumb span:hover { text-decoration:underline; }
+/* Trace mode reuses #breadcrumb for its step list (#244): the scope stack is
+   meaningless once the walk crosses hierarchy walls, but "where am I and how do I
+   get back" is the same question, so it gets the same bar and the same
+   click-to-rewind. The lead-in labels it so the two are not confusable. */
+#breadcrumb .crumb-lead,
+#breadcrumb .crumb-hint { cursor:default; opacity:.75; }
+#breadcrumb .crumb-hint { font-style:italic; }
+#breadcrumb .crumb-lead:hover,
+#breadcrumb .crumb-hint:hover { text-decoration:none; }
+/* A cap engaged and connections were dropped — never silent (ADR 0003). */
+#trace-banner { padding:3px 8px; font-size:12px; background:var(--trunc-bg); color:var(--trunc-fg); }
+#trace-banner[hidden] { display:none; }
 /* Default layout grid (#98, epic #94): top row is tree | content (schematic over
    source); a draggable splitter; then a full-width bottom drawer (waveform). The
    minmax(0,…) tracks let a zoomed SVG / long content scroll inside its pane instead
