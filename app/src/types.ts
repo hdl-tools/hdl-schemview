@@ -29,6 +29,14 @@ export interface TraceStep {
   path: string;
   dir: Dir;
   depth?: number;
+  /**
+   * Overrides the shared `ConeLimits.fanout` for this step only (#244 PR4) — what
+   * the "N more…" badge sends, so expanding one capped signal reveals its
+   * remainder without un-capping every other signal in the trace. Not clamped to
+   * the shared budget (exceeding it is the point); `ConeLimits.boxes` still bounds
+   * the result, so this degrades gracefully rather than blowing up on a hot net.
+   */
+  fanout?: number;
 }
 
 /**

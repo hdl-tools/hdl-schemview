@@ -2294,6 +2294,7 @@ fn step(d: &Design, path: &str, dir: Dir, depth: usize) -> TraceStep {
         seed: id(d, path),
         dir,
         depth,
+        fanout: None,
     }
 }
 
@@ -2520,6 +2521,63 @@ fn trace_graph_box_budget_is_global_across_steps() {
         boxes(&capped)
     );
     assert!(capped.truncated, "a budget that engaged must say so");
+}
+
+#[test]
+fn trace_graph_per_step_fanout_reveals_what_the_shared_cap_dropped() {
+    // Backs the "N more…" affordance (#244 PR4): expanding one capped signal must
+    // reveal *its* remainder without un-capping the rest of the trace, which is
+    // what raising the shared budget would do.
+    let d = design();
+    let proj = Projection::ProcessLevel;
+    let tight = ConeLimits {
+        fanout: 1,
+        ..ConeLimits::depth(1)
+    };
+    let capped = trace_graph(&d, &[step(&d, RESETN, Dir::Inout, 1)], tight, proj);
+    assert!(capped.truncated, "fanout 1 must engage on the fixture");
+    let dropped: u32 = capped
+        .nodes
+        .iter()
+        .flat_map(|n| &n.ports)
+        .filter_map(|p| p.more)
+        .sum();
+    assert!(dropped > 0, "a capped pin must report its remainder");
+
+    // The same step, with only *this* step's fan-out lifted.
+    let opened = trace_graph(
+        &d,
+        &[TraceStep {
+            fanout: Some(usize::MAX),
+            ..step(&d, RESETN, Dir::Inout, 1)
+        }],
+        tight,
+        proj,
+    );
+    assert!(
+        opened.nodes.len() > capped.nodes.len(),
+        "the override must draw what the cap dropped: {} vs {}",
+        opened.nodes.len(),
+        capped.nodes.len()
+    );
+
+    // And it is per step, not global: a second capped step alongside it stays capped.
+    let mixed = trace_graph(
+        &d,
+        &[
+            TraceStep {
+                fanout: Some(usize::MAX),
+                ..step(&d, RESETN, Dir::Inout, 1)
+            },
+            step(&d, MEM_VALID, Dir::Inout, 1),
+        ],
+        tight,
+        proj,
+    );
+    assert!(
+        mixed.truncated,
+        "the un-overridden step must still report its own cap"
+    );
 }
 
 #[test]

@@ -374,6 +374,15 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 .box-label.sel { fill:var(--sel); }
 .box-sublabel.sel { fill:var(--sel); }
 .const-label { fill:var(--sublabel); font-size:9px; font-family:ui-monospace, monospace; cursor:pointer; }
+/* Trace-mode pin controls (#244 PR4), drawn in the outboard gutter elk.ts reserves.
+   Muted until hovered: on a busy trace there is one per pin, and a canvas of live
+   accent-coloured glyphs would compete with the wires that carry the meaning. */
+.pin-afford { fill:var(--muted); font-size:9px; cursor:pointer; }
+.pin-afford:hover { fill:var(--accent); }
+/* The remainder a fan-out cap dropped. Uses the same colour pair as #trace-banner,
+   so "something was truncated" reads the same at pin level and pane level. */
+.more-badge { fill:var(--trunc-fg); font-size:9px; font-weight:600; cursor:pointer; }
+.more-badge:hover { fill:var(--accent); }
 .box.ff { fill:var(--box); stroke:var(--box-stroke); }
 /* Combinational logic: comb is a rectangle, assign a stadium — each its own tint.
    A latch is a storage rectangle (like the FF) with its own tint. */

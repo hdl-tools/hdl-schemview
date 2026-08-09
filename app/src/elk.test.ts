@@ -911,3 +911,88 @@ describe("mux child (#157)", () => {
     expect(east[0].y).toBe(c.height / 2);
   });
 });
+
+// Trace-mode affordance gutter (#244 PR4). The ◀/▶ expand controls and the "+N
+// more" badge are drawn outboard of a box wall, so ELK has to be told to keep the
+// neighbouring layer clear — otherwise a control lands on the box next door.
+describe("affordance margins", () => {
+  const box = (ports: SchPort[]): SchematicGraph => ({
+    root: "s",
+    nodes: [
+      {
+        id: 1,
+        kind: "Instance",
+        label: "u",
+        path: "s.u",
+        expandable: true,
+        ports,
+      },
+    ],
+    edges: [],
+  });
+  const pin = (id: number, side: "west" | "east", more?: number): SchPort => ({
+    id,
+    name: `p${id}`,
+    side,
+    path: `s.u.p${id}`,
+    ...(more === undefined ? {} : { more }),
+  });
+  const margins = (g: SchematicGraph, affordances: boolean) =>
+    toElk(g, { affordances }).children[0].layoutOptions["elk.margins"];
+  // `[0-9.]` rather than `\d`: this pattern is built from a template literal, and
+  // `\d` there is not a regex escape — it collapses to a plain `d`, silently
+  // matching nothing.
+  const side = (m: string | undefined, key: string) =>
+    Number(new RegExp(key + "=([0-9.]+)").exec(m ?? "")?.[1] ?? 0);
+
+  it("reserves nothing when affordances are off", () => {
+    // The hierarchy view draws no controls, so its spacing must be untouched —
+    // this is what keeps PR4 invisible to every existing scope graph.
+    expect(margins(box([pin(2, "west"), pin(3, "east")]), false)).toBeUndefined();
+  });
+
+  it("reserves a gutter on each wall that has pins", () => {
+    const m = margins(box([pin(2, "west"), pin(3, "east")]), true);
+    expect(side(m, "left")).toBeGreaterThan(0);
+    expect(side(m, "right")).toBeGreaterThan(0);
+  });
+
+  it("reserves only the walls that actually have pins", () => {
+    const m = margins(box([pin(2, "west")]), true);
+    expect(side(m, "left")).toBeGreaterThan(0);
+    expect(side(m, "right")).toBe(0);
+  });
+
+  it("widens a wall that carries a `+N` badge", () => {
+    // The badge is text, so it needs more room than the bare control.
+    const plain = margins(box([pin(2, "east")]), true);
+    const badged = margins(box([pin(2, "east", 128)]), true);
+    expect(side(badged, "right")).toBeGreaterThan(side(plain, "right"));
+  });
+
+  it("adds to a const-label margin instead of clobbering it", () => {
+    // A gate reserves its own west margin for inline tie values (#199). Both
+    // reservations are real, so the gutter must stack on top rather than replace
+    // it — which a plain overwrite would do silently.
+    const gate: SchematicGraph = {
+      root: "s",
+      nodes: [
+        {
+          id: 1,
+          kind: "And",
+          label: "&",
+          path: "s.g",
+          expandable: false,
+          ports: [
+            { id: 2, name: "a", side: "west", path: "s.a", constant: "8'hFF" },
+            { id: 3, name: "y", side: "east", path: "s.y" },
+          ],
+        },
+      ],
+      edges: [],
+    };
+    const withConstOnly = side(margins(gate, false), "left");
+    expect(withConstOnly).toBeGreaterThan(0); // the #199 reservation still fires
+    expect(side(margins(gate, true), "left")).toBeGreaterThan(withConstOnly);
+  });
+});

@@ -2074,6 +2074,19 @@ pub struct TraceStep {
     /// Hops for this step alone. One click is normally one hop; the caller is
     /// expected to clamp this to [`ConeLimits::depth`].
     pub depth: usize,
+    /// Overrides [`ConeLimits::fanout`] for this step only (#244 PR4).
+    ///
+    /// Backs the "N more…" affordance: a pin reports its dropped connections on
+    /// [`SchPort::more`], and expanding *that* signal must reveal them without
+    /// un-capping every other signal in the trace — which is what raising the
+    /// shared budget would do, dragging a global clock's whole fan-out onto a
+    /// canvas the user never asked about.
+    ///
+    /// `None` inherits the shared budget. A large value is safe rather than
+    /// unbounded: [`ConeLimits::boxes`] still bounds the graph, so "expand this
+    /// signal fully" degrades to "as far as the box budget allows, and still
+    /// reports the remainder" instead of blowing up on a 59K-load net.
+    pub fanout: Option<usize>,
 }
 
 /// Whether `e` leaves `sig` in the requested direction.
@@ -2416,6 +2429,7 @@ pub fn cone_with(
             seed,
             dir,
             depth: limits.depth,
+            fanout: None,
         }],
         limits,
         projection,
@@ -2508,7 +2522,7 @@ pub fn trace_graph(
                 // count on — indistinguishable from "nothing found" in the UI, which
                 // is precisely the silent discard this cap exists to prevent.
                 for e in cands {
-                    if kept >= limits.fanout.max(1) {
+                    if kept >= step.fanout.unwrap_or(limits.fanout).max(1) {
                         dropped += 1;
                         continue;
                     }

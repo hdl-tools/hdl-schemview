@@ -104,6 +104,7 @@ fn req(path: &str, dir: Dir, depth: Option<usize>) -> TraceStepReq {
         path: path.to_string(),
         dir,
         depth,
+        fanout: None,
     }
 }
 
