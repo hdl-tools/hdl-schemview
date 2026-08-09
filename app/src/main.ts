@@ -58,6 +58,7 @@ import {
   stepLabel,
   truncateTrace,
 } from "./schempick";
+import { blocksSpaceHotkey, panTarget, shouldStartPan } from "./pan";
 import { highlightLineRange } from "./source";
 import { tokenizeLines } from "./syntax";
 import { applyNameRefs } from "./names";
@@ -2626,12 +2627,159 @@ function setupZoom() {
     else return;
     ev.preventDefault(); // stop the webview's own +/-/0 page zoom
   });
-  $("zoom-in").addEventListener("click", () => setZoom(zoom.k * 1.25));
-  $("zoom-out").addEventListener("click", () => setZoom(zoom.k / 1.25));
-  $("zoom-reset").addEventListener("click", fitView); // fit, not actual-size 100%
+  // `blur` after acting (#265): a click leaves the button focused, and a focused
+  // button owns the Space key — Space would re-zoom instead of arming drag-to-pan.
+  const zoomBtn = (id: string, act: () => void) =>
+    $(id).addEventListener("click", (ev) => {
+      act();
+      (ev.currentTarget as HTMLElement).blur();
+    });
+  zoomBtn("zoom-in", () => setZoom(zoom.k * 1.25));
+  zoomBtn("zoom-out", () => setZoom(zoom.k / 1.25));
+  zoomBtn("zoom-reset", fitView); // fit, not actual-size 100%
   // Panning (native scroll) re-places net labels onto the visible wire portion,
-  // batched to one pass per frame (#263).
+  // batched to one pass per frame (#263). Kept here rather than in `setupPan`
+  // because it also fires for wheel scroll and for `setZoom`'s own scroll writes.
   host.addEventListener("scroll", scheduleWireLabels, { passive: true });
+  setupPan(host); // #265 — inside setupZoom so pop-outs inherit it (see below)
+}
+
+// Drag-to-pan (#265): middle-drag, or Space + left-drag. Both write
+// `host.scrollLeft`/`scrollTop`, so a pan reuses the same path as the wheel and as
+// `setZoom`'s own scroll writes — the `scroll` listener above re-places wire labels
+// once per frame (#263) and nothing else has to know a pan happened. That is also
+// why the drag needs no rAF of its own: `mousemove` is already frame-aligned, and
+// the expensive consequence is batched downstream.
+//
+// Called from `setupZoom`, which runs once per window from both `init` and the
+// `initDetached("schematic")` branch — so a detached schematic pop-out (#169) gets
+// this with no extra wiring.
+function setupPan(host: HTMLElement) {
+  let spaceHeld = false;
+  let drag: {
+    x: number;
+    y: number;
+    left: number;
+    top: number;
+    max: { left: number; top: number };
+    buttons: number; // `MouseEvent.buttons` bit of the press that started the pan
+  } | null = null;
+  // Set when a *left* pan ends, so the click the browser synthesises can't also
+  // select or drill whatever ended up under the cursor. Cleared on the next
+  // mousedown rather than on the click itself: a gesture released over another pane
+  // produces no click inside the host at all, and a flag only a click could clear
+  // would leak into an unrelated later one.
+  let swallowClick = false;
+
+  function endPan() {
+    if (!drag) return;
+    // Only a left gesture synthesises a `click`. The middle button emits `auxclick`,
+    // which none of the schematic's `onclick` properties receive.
+    swallowClick = drag.buttons === 1;
+    drag = null;
+    host.classList.remove("panning");
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+  }
+  const onMove = (ev: MouseEvent) => {
+    if (!drag) return;
+    // Released outside the window: no mouseup is delivered there, so the button
+    // state on the next move is the only signal. Without this the pan would silently
+    // resume when the cursor came back.
+    if ((ev.buttons & drag.buttons) === 0) {
+      endPan();
+      return;
+    }
+    const t = panTarget(drag, ev.clientX - drag.x, ev.clientY - drag.y, drag.max);
+    host.scrollLeft = t.left;
+    host.scrollTop = t.top;
+  };
+  const onUp = () => endPan();
+
+  host.addEventListener("mousedown", (ev) => {
+    if (drag) return; // a second button pressed mid-gesture changes nothing
+    swallowClick = false; // a fresh press starts a fresh verdict
+    if (!shouldStartPan(ev.button, spaceHeld)) return;
+    // Middle's default is the webview's autoscroll widget, left's is a native
+    // element drag. Neither may run underneath a pan.
+    ev.preventDefault();
+    drag = {
+      x: ev.clientX,
+      y: ev.clientY,
+      left: host.scrollLeft,
+      top: host.scrollTop,
+      // Read once: scrollWidth/clientWidth flush layout, and the content cannot
+      // resize mid-gesture — reading them per move would reflow every frame, on the
+      // pane whose layout is the expensive one.
+      max: {
+        left: host.scrollWidth - host.clientWidth,
+        top: host.scrollHeight - host.clientHeight,
+      },
+      buttons: ev.button === 1 ? 4 : 1,
+    };
+    host.classList.add("panning");
+    // Dismiss the transient overlays at grab rather than letting the closing click
+    // do it: that click is swallowed below, so it never reaches the document-level
+    // dismissers — and closing now is better anyway than lingering through the drag.
+    closeContextMenu();
+    closeSchemPalette();
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+
+  // Capture on the host, so this beats the per-element `onclick`/`ondblclick` the
+  // renderer assigns (those are bubble-phase, on descendants). `dblclick` is
+  // suppressed too: swallowing a click does not stop the dblclick that follows a
+  // second one, and on a module box that dblclick drills the design. No
+  // preventDefault — a click over SVG glyphs has no default worth cancelling.
+  const swallow = (ev: Event) => {
+    if (swallowClick) ev.stopPropagation();
+  };
+  host.addEventListener("click", swallow, true);
+  host.addEventListener("dblclick", swallow, true);
+  // A right-click mid-drag would otherwise open the cross-probe menu over a moving
+  // canvas.
+  host.addEventListener(
+    "contextmenu",
+    (ev) => {
+      if (drag) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    },
+    true,
+  );
+
+  // Space arms the gesture. `ev.code` (not `ev.key`, as the `a` hotkey uses) so the
+  // physical key works on any keyboard layout.
+  document.addEventListener("keydown", (ev) => {
+    if (ev.code !== "Space") return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey) return;
+    if (!$("schematic-pane").classList.contains("active")) return;
+    // `instanceof` (not a cast): a schematic target is often an SVGElement, which has
+    // no `isContentEditable` — same reasoning as the `a` hotkey's guard.
+    const t = ev.target instanceof HTMLElement ? ev.target : null;
+    if (t && blocksSpaceHotkey(t.tagName, t.isContentEditable)) return;
+    ev.preventDefault(); // every time, incl. auto-repeats, or the webview scrolls
+    if (spaceHeld) return; // auto-repeat: state and class are already set
+    spaceHeld = true;
+    host.classList.add("pan-ready");
+  });
+  // Release is unguarded on purpose: the keydown guards decide whether to *enter*
+  // pan-ready, and repeating them here would strand the state if focus or the active
+  // tab moved while the key was down.
+  const releaseSpace = () => {
+    if (!spaceHeld) return;
+    spaceHeld = false;
+    host.classList.remove("pan-ready");
+  };
+  document.addEventListener("keyup", (ev) => {
+    if (ev.code === "Space") releaseSpace();
+  });
+  window.addEventListener("blur", releaseSpace); // Alt-Tab mid-hold delivers no keyup
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseSpace();
+  });
 }
 
 // `node.path` isn't in the layout; look it up from the graph by id.

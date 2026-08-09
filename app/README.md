@@ -23,7 +23,7 @@ independent: its own scope, its own trace, its own signal picker.
 
 ```
 app/
-  src/                 frontend (TypeScript + Vite) — 15 modules, 12 test files
+  src/                 frontend (TypeScript + Vite) — 16 modules, 13 test files
     main.ts            all panes, app state, and the only DOM outside tree.ts
     api.ts             typed wrappers over the 18 Tauri commands
     types.ts           DTO interfaces mirroring the Rust serde types
@@ -67,6 +67,7 @@ crates behind it are in [`../docs/architecture.md`](../docs/architecture.md).
 | **Search signals in the current scope** | **`a`** over the schematic (`Esc` closes) |
 | **Signal picker for a waveform pane** | **Ctrl/⌘+B**, or ☰ Signals |
 | Zoom the schematic to fit | Ctrl/⌘+0 |
+| Pan the schematic | middle-drag, or **Space** + left-drag |
 | Pop a pane into its own window | `⇱` in the tab's control strip |
 | Swap the trace of one pane | **Load trace…** in that pane's control strip |
 | Regroup / reorder waveform lanes | drag a lane by its name cell, or its name-cell menu |
@@ -152,9 +153,9 @@ npm run tauri dev -- -- -- -f ../fixtures/picorv32_soc/picorv32_soc.f -top picor
 
 ## Tests
 
-- Frontend logic: `npm test` (vitest — 12 suites covering the ELK adapter, the
+- Frontend logic: `npm test` (vitest — 13 suites covering the ELK adapter, the
   selection bus, waveform geometry and grouping, the tokenizer and name overlay, the
-  tree factory, source offsets, prefs, log and palette helpers).
+  tree factory, source offsets, prefs, log, palette and pan helpers).
 - Frontend build: `npm run build` (tsc + vite). TS is strict, with
   `noUnusedLocals`/`noUnusedParameters`; there is no ESLint or Prettier, so match the
   surrounding style by hand.

@@ -348,6 +348,15 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 .wave-group-header.drop-zone { min-height:40px; border:1px dashed var(--border); }
 .wave-group-header.drop-zone.drag-over { border-color:var(--accent); background:var(--hl); }
 
+/* Drag-to-pan (#265): Space arms the gesture, a live drag shows the closed hand.
+   The `*` is deliberate — .box/.pin/.pin-label/.wire.clickable/.wire-hit each set
+   cursor:pointer, so a rule on the host alone would be inherited and then overridden
+   by every glyph. `.panning` must stay *after* `.pan-ready`: a Space + left-drag
+   carries both classes and they tie on specificity, so source order is what makes
+   grabbing win. */
+#schematic.pan-ready, #schematic.pan-ready * { cursor:grab; }
+#schematic.panning, #schematic.panning * { cursor:grabbing; }
+
 /* schematic primitives */
 .box { fill:var(--box); stroke:var(--box-stroke); cursor:pointer; }
 .box-label { fill:var(--label); font-size:12px; font-weight:600; }
