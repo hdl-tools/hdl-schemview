@@ -78,6 +78,24 @@ Node {
 | `members` | `Option<Vec<ModportMember { name, dir }>>` — per-modport membership on `Modport` nodes (descriptive; the modport stays a view). A member's own node resolves via `Design::modport_member_nodes` |
 | `reset` / `enable` | Canonical paths of an inferred FF's async-reset signal and an inferred latch's gating signal. **Structural facts, never name guesses:** the reset is the timing-control edge whose signal the process body *also* reads (and `type_` then names the true clock); the enable is the sole signal read by the body's top-level conditional. Ambiguity ⇒ absent, so a sync reset stays untagged |
 
+### A module port is two nodes
+
+A module port is **two `Node`s sharing one canonical `path`, with no edge between them**, and
+connectivity splits cleanly across the pair:
+
+- the **`Port`** carries only the *external* connection — to the parent scope's net, or to the
+  enclosing interface;
+- the backing **`Net`/`Var`** carries every *internal* one, to the logic inside the module.
+
+`Design::nodes_at_path` is the sanctioned recovery (`path_index` is one-to-many precisely for
+this). Any consumer that asks "what is connected to this signal" **must fold over that lookup**,
+or it sees one side of the wall and not the other: walking the two halves as separate signals is
+what drew a traced port twice, once on each side, with nothing joining them (#285, ADR 0010 §5).
+
+A modport-specialized port is the same shape one level out — it shares its path with the member
+it views — but there the two *are* wired, and that edge is how a bare interface bundle is
+reached (#269). So a group must not assume its members are unconnected.
+
 ### `Design` and `Document`
 
 `Design { doc, path_index, src_index, conn_index, wave_index, gen_map_index,

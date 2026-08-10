@@ -2160,6 +2160,66 @@ fn seed_signals(design: &Design, seed: NodeId) -> Vec<NodeId> {
     out
 }
 
+/// The same-path sibling group of a signal — a port and its backing net read as
+/// the **one** signal they are (#285).
+///
+/// A module port is two model nodes at one canonical path with *no edge between
+/// them*: the `Port` carries only the external connection, the backing
+/// `Net`/`Var` every internal one. [`seed_signals`] already folds a *seed* that
+/// way; this is the same fold applied at every hop, so a port reached mid-walk
+/// unifies with its backing net exactly as a seeded one does. Walking the two
+/// halves separately gave each its own join and its own anchor, which drew the
+/// port twice — once on each side of the wall, with nothing between them.
+///
+/// A node that is not itself a signal groups alone: a `Memory` array is both a
+/// signal and a box, and folding a box into a group would let the group's
+/// representative name a node some builder already emitted pins for.
+fn signal_group(design: &Design, sig: NodeId) -> Vec<NodeId> {
+    let is_signal = |id: NodeId| {
+        matches!(
+            design.node(id).map(|n| n.kind),
+            Some(NodeKind::Port | NodeKind::Net | NodeKind::Var)
+        )
+    };
+    let Some(n) = design.node(sig).filter(|_| is_signal(sig)) else {
+        return vec![sig];
+    };
+    let mut out: Vec<NodeId> = design
+        .nodes_at_path(&n.path)
+        .iter()
+        .copied()
+        .filter(|&m| is_signal(m))
+        .collect();
+    if out.is_empty() {
+        out.push(sig);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// [`signal_group`], memoized on every member.
+///
+/// Keyed on each member rather than on the query, so the second half of a dual
+/// node is free — and so the wall-crossing arm, which asks per *candidate edge*
+/// rather than per signal, stays O(distinct signals touched). Handed out as an
+/// `Rc` because that arm is the hot one on a high-fan-out net: a clone must be a
+/// refcount bump, not a fresh allocation per candidate edge.
+fn group_of(
+    cache: &mut std::collections::HashMap<NodeId, std::rc::Rc<[NodeId]>>,
+    design: &Design,
+    sig: NodeId,
+) -> std::rc::Rc<[NodeId]> {
+    if let Some(g) = cache.get(&sig) {
+        return g.clone();
+    }
+    let g: std::rc::Rc<[NodeId]> = signal_group(design, sig).into();
+    for &m in g.iter() {
+        cache.insert(m, g.clone());
+    }
+    g
+}
+
 /// The box a reached node belongs to, plus the scope that box lives in.
 ///
 /// The generalization of `nearest_instance` that every box kind needs: walk up
@@ -2488,6 +2548,13 @@ pub fn trace_graph(
     let mut more_on: std::collections::HashMap<NodeId, u32> = std::collections::HashMap::new();
 
     let mut visited: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    let mut group_cache: std::collections::HashMap<NodeId, std::rc::Rc<[NodeId]>> =
+        std::collections::HashMap::new();
+    // The anchor of every step's own seed. A walk that reaches nothing must still
+    // draw the signal the user pointed at: an empty graph reads as "no such
+    // signal" and is indistinguishable from a failed lookup — the silent discard
+    // ADR 0003 forbids, and what a fan-in on any undriven input returned (#285).
+    let mut seed_anchors: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
 
     for step in steps {
         // Per step, not per call: a later step re-seeds a fresh frontier, and
@@ -2496,21 +2563,61 @@ pub fn trace_graph(
         // is still walked — `visited` gates only what the *next* hop picks up.
         let mut frontier = seed_signals(design, step.seed);
         visited.extend(frontier.iter().copied());
+        for &s in &frontier {
+            seed_anchors.insert(group_of(&mut group_cache, design, s)[0]);
+        }
 
         for _hop in 0..step.depth.max(1) {
             let mut next: Vec<NodeId> = Vec::new();
+            // Two frontier entries at one path are one signal, so the group is
+            // walked once. Per hop rather than per call, because the rule above —
+            // a step's own frontier is always walked — must survive a re-seed on
+            // ground an earlier step covered.
+            let mut done: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
             for &sig in &frontier {
+                let members = group_of(&mut group_cache, design, sig);
+                let rep = members[0];
+                if !done.insert(rep) {
+                    continue;
+                }
+                // A sibling folded into this group counts as walked.
+                visited.extend(members.iter().copied());
+                // A group is one or two nodes, so a linear scan beats hashing —
+                // and this is asked per candidate edge on a high-fan-out net.
+                let in_group = |id: NodeId| members.contains(&id);
+                let crossing = members.len() > 1;
+                let is_seed = seed_anchors.contains(&rep);
+
                 let mut drivers: Vec<(NodeId, Option<String>)> = Vec::new();
                 let mut loads: Vec<(NodeId, Option<String>)> = Vec::new();
                 let mut sig_pins: Vec<NodeId> = Vec::new();
 
-                // Ascending model-edge order, so the kept set — and therefore pin
-                // allocation and the wire sequence — is byte-stable across runs.
-                let cands: Vec<&Edge> = design
-                    .edge_indices_of(sig)
+                // Ascending model-edge order across the *whole* group, so the kept
+                // set — and therefore pin allocation and the wire sequence — is
+                // byte-stable across runs, and a port's two halves are budgeted as
+                // the one signal they are rather than getting a cap each.
+                let mut idx: Vec<u32> = members
+                    .iter()
+                    .flat_map(|&m| design.edge_indices_of(m).iter().copied())
+                    .collect();
+                idx.sort_unstable();
+                idx.dedup();
+                // `near` is the group member this edge actually touches. Both
+                // `follows` and `edge_drives` read `Edge.dir` relative to `e.port`,
+                // so they must be asked about the member the walk stands on — never
+                // about the representative, which may be the other half.
+                let cands: Vec<(NodeId, &Edge)> = idx
                     .iter()
                     .map(|&i| &design.edges()[i as usize])
-                    .filter(|e| follows(e, sig, step.dir))
+                    .filter_map(|e| {
+                        let near = if in_group(e.port) { e.port } else { e.endpoint };
+                        // An edge *between* two group members is kept, not skipped:
+                        // an ordinary port and its backing net have none, but a
+                        // modport-specialized port shares its canonical path with
+                        // the member it views and is genuinely wired to it, and
+                        // that edge is how the bare bundle is reached (#269).
+                        follows(e, near, step.dir).then_some((near, e))
+                    })
                     .collect();
                 let total = cands.len();
                 let mut kept = 0usize;
@@ -2521,18 +2628,57 @@ pub fn trace_graph(
                 // empty with `truncated` set but no pin anywhere to hang a `more`
                 // count on — indistinguishable from "nothing found" in the UI, which
                 // is precisely the silent discard this cap exists to prevent.
-                for e in cands {
+                for (near, e) in cands {
                     if kept >= step.fanout.unwrap_or(limits.fanout).max(1) {
                         dropped += 1;
                         continue;
                     }
-                    let other = if e.port == sig { e.endpoint } else { e.port };
+                    let other = if e.port == near { e.endpoint } else { e.port };
                     let Some((bx, scope)) = cone_box_of(design, other, projection, &mut scopes)
                     else {
-                        // No enclosing box: a module port or free net. Emit it as a
-                        // stub so the wire has a real endpoint, and keep walking —
-                        // this is how the trace crosses a hierarchy wall.
-                        if other != sig && visited.insert(other) {
+                        // No enclosing box: a module port or free net. Stand its
+                        // anchor up *now* and wire to it, then keep walking — this
+                        // is how the trace crosses a hierarchy wall. Emitting here
+                        // rather than only queueing is what makes the crossing
+                        // visible at the hop that reaches it; queueing alone left a
+                        // one-hop trace showing nothing at all, and a seed whose
+                        // only candidate crossed the wall came back empty (#285).
+                        //
+                        // The anchor is the far side's *group* representative, not
+                        // the node the edge happened to name, or the next hop would
+                        // stand up a second node for the same signal — the very
+                        // duplication this fix removes, one level out.
+                        let far = group_of(&mut group_cache, design, other)[0];
+                        // Same guards the group anchor below applies: a node the
+                        // scope graph draws inline (a constant tie, a folded
+                        // inverter) or a gate primitive is not a signal this view
+                        // may stand up as a node of its own.
+                        if !stubs.contains(&far)
+                            && !emitted.contains(&far)
+                            && !is_drawn_inline(design, far, projection)
+                            && !is_gate(design, far)
+                        {
+                            let side = if edge_drives(e, near) {
+                                Side::East
+                            } else {
+                                Side::West
+                            };
+                            if let Some(node) = make_signal_stub(design, far, side) {
+                                emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                                nodes.push(node);
+                                stubs.insert(far);
+                            }
+                        }
+                        if stubs.contains(&far) {
+                            kept += 1;
+                            sig_pins.push(far);
+                            if edge_drives(e, near) {
+                                drivers.push((far, e.select.clone()));
+                            } else {
+                                loads.push((far, e.select.clone()));
+                            }
+                        }
+                        if !in_group(other) && visited.insert(other) {
                             next.push(other);
                         }
                         continue;
@@ -2603,10 +2749,30 @@ pub fn trace_graph(
                     }
                     kept += 1;
                     sig_pins.push(pin);
-                    if edge_drives(e, sig) {
+                    if edge_drives(e, near) {
                         drivers.push((pin, e.select.clone()));
                     } else {
                         loads.push((pin, e.select.clone()));
+                    }
+                    // A module boundary. An `Instance` node carries no edges of its
+                    // own — connectivity attaches to its `Port` children — so the
+                    // enqueue below finds nothing and the walk would stop at the
+                    // wall forever, byte-identical at every further depth. Enqueue
+                    // the port the edge actually landed on instead: its group picks
+                    // up the backing net inside the module, which is where that
+                    // module's own logic hangs (#285). One port, not all of them,
+                    // so growth stays proportional to what was traced.
+                    if other != bx
+                        && matches!(
+                            design.node(bx).map(|n| n.kind),
+                            Some(NodeKind::Instance | NodeKind::Interface)
+                        )
+                    {
+                        for m in group_of(&mut group_cache, design, other).iter().copied() {
+                            if !in_group(m) && visited.insert(m) {
+                                next.push(m);
+                            }
+                        }
                     }
                     // Next hop: this box's other signals — but never one the scope
                     // graph draws inline. `child_boxes` makes no box for those, so
@@ -2621,7 +2787,7 @@ pub fn trace_graph(
                             || (projection == Projection::GateLevel
                                 && is_gate(design, be.port)
                                 && is_kind(design, bsig, NodeKind::Param));
-                        if bsig != sig && !inline && visited.insert(bsig) {
+                        if !in_group(bsig) && !inline && visited.insert(bsig) {
                             next.push(bsig);
                         }
                     }
@@ -2632,6 +2798,7 @@ pub fn trace_graph(
                 // complementary side is empty, so it never duplicates a real
                 // box-to-box wire.
                 let mut stub_pin = None;
+                let one_sided = drivers.is_empty() != loads.is_empty();
                 // A signal that is itself a box (a `Memory` array is both) already
                 // has real pins from its own builder; synthesizing a stub pin keyed
                 // on its model id would name a pin that box never emitted. A node
@@ -2640,10 +2807,17 @@ pub fn trace_graph(
                 // Nor does a gate primitive: a stub stands in for a *signal* the
                 // trace reaches, and at ProcessLevel a gate is interior to its block
                 // — stubbing it drew a `Mux` the scope graph never shows (#268).
-                if (drivers.is_empty() != loads.is_empty())
-                    && !emitted.contains(&sig)
-                    && !is_drawn_inline(design, sig, projection)
-                    && !is_gate(design, sig)
+                //
+                // Three reasons to want one, not one (#285). One-sided, as before.
+                // A `crossing` — a port and its backing net — needs an anchor even
+                // with both sides present, because it *is* the point where the two
+                // sides meet; without it they are drawn as two disconnected islands
+                // sharing a label. And a step's own seed always gets one, so a walk
+                // that finds nothing still draws the signal it was asked about.
+                if (one_sided || crossing || is_seed)
+                    && !members.iter().any(|m| emitted.contains(m))
+                    && !is_drawn_inline(design, rep, projection)
+                    && !is_gate(design, rep)
                 {
                     let stub_side = if drivers.is_empty() {
                         Side::East
@@ -2657,19 +2831,24 @@ pub fn trace_graph(
                     // graph instead of a small one. Stubs stay bounded anyway, since
                     // the signals reaching this point come from boxes the budget
                     // already capped.
-                    if !stubs.contains(&sig) {
-                        if let Some(node) = make_signal_stub(design, sig, stub_side) {
+                    if !stubs.contains(&rep) {
+                        if let Some(node) = make_signal_stub(design, rep, stub_side) {
                             emitted_pins.extend(node.ports.iter().map(|p| p.id));
                             nodes.push(node);
-                            stubs.insert(sig);
+                            stubs.insert(rep);
                         }
                     }
-                    if stubs.contains(&sig) {
-                        stub_pin = Some(sig);
-                        if drivers.is_empty() {
-                            drivers.push((sig, None));
-                        } else {
-                            loads.push((sig, None));
+                    if stubs.contains(&rep) {
+                        stub_pin = Some(rep);
+                        // Only a one-sided signal hangs its anchor *in* a side; a
+                        // crossing with both sides present is routed through it
+                        // below instead, and a bare seed has no side to join.
+                        if one_sided {
+                            if drivers.is_empty() {
+                                drivers.push((rep, None));
+                            } else {
+                                loads.push((rep, None));
+                            }
                         }
                     }
                 }
@@ -2690,15 +2869,43 @@ pub fn trace_graph(
                 }
                 debug_assert!(kept + dropped as usize <= total);
 
-                join_signal(
-                    design.node(sig),
-                    &root,
-                    &drivers,
-                    &loads,
-                    &mut seen_pairs,
-                    &mut next_edge,
-                    &mut edges,
-                );
+                match stub_pin.filter(|_| !one_sided && !drivers.is_empty() && !loads.is_empty()) {
+                    // The port *is* the crossing point, so route through it rather
+                    // than crossing drivers x loads: the logic inside the module and
+                    // the logic outside it meet at one node instead of being drawn
+                    // as two islands with the same label (#285). Also strictly fewer
+                    // wires — |d| + |l| rather than |d| x |l|.
+                    Some(anchor) => {
+                        let mid = [(anchor, None)];
+                        join_signal(
+                            design.node(rep),
+                            &root,
+                            &drivers,
+                            &mid,
+                            &mut seen_pairs,
+                            &mut next_edge,
+                            &mut edges,
+                        );
+                        join_signal(
+                            design.node(rep),
+                            &root,
+                            &mid,
+                            &loads,
+                            &mut seen_pairs,
+                            &mut next_edge,
+                            &mut edges,
+                        );
+                    }
+                    None => join_signal(
+                        design.node(rep),
+                        &root,
+                        &drivers,
+                        &loads,
+                        &mut seen_pairs,
+                        &mut next_edge,
+                        &mut edges,
+                    ),
+                }
             }
             frontier = next;
             if frontier.is_empty() {
@@ -2750,12 +2957,17 @@ pub fn trace_graph(
     // an edge-less box on canvas reads as a claim about the design that the
     // model does not make (#269). A pin carrying a `more` count stays: that
     // count *is* the missing connectivity, reported rather than hidden.
+    // A step's own seed is the exception (#285): it is not a claim about the
+    // design, it is the thing the user pointed at, and drawing it with no wires
+    // is the honest answer "nothing in this direction". Dropping it returned an
+    // empty graph, which says "no such signal" instead.
     let wired: std::collections::HashSet<NodeId> =
         edges.iter().flat_map(|e| [e.source, e.target]).collect();
     nodes.retain(|n| {
-        n.ports
-            .iter()
-            .any(|p| wired.contains(&p.id) || p.more.is_some())
+        seed_anchors.contains(&n.id)
+            || n.ports
+                .iter()
+                .any(|p| wired.contains(&p.id) || p.more.is_some())
     });
 
     SchematicGraph {

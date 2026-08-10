@@ -391,6 +391,24 @@ measured **31 µs/box** (227 boxes in 7.11 ms), roughly 4× the ~8 µs the extra
 1M because `fanout: 32` binds at the first hop — which is the behaviour #244 PR1 asserted but,
 until this run, had never measured (see the fixture note below).
 
+**#285 changed what this row measures, not what it costs.** Making a module port one signal and
+letting the walk descend through an instance box roughly doubles what a trace *draws*, because
+it now reaches the logic behind a boundary instead of stopping at it. Measured before/after on
+one machine (so comparable to each other, not to the table above):
+
+| | `cone_with` | boxes | µs/box |
+|---|--:|--:|--:|
+| before #285 | 4.15 ms | 227 | 18.3 |
+| after #285 | 14.36 ms | 460 | 31.2 |
+
+Per-box cost lands back on the **31 µs/box** the box budget was sized against, so the extra wall
+time is extra *content*, not extra cost per unit — and it stays inside the one-frame budget with
+`truncated` still set. Two allocations had to go to get there: the group lookup hands out an
+`Rc<[NodeId]>` rather than a fresh `Vec` (it is asked per *candidate edge* in the wall-crossing
+arm, not per signal), and group membership is a linear scan of one or two ids rather than a
+`HashSet` built per signal. Without those the same row measured 16.7 ms / 36 µs per box — over
+the frame bar.
+
 Two caveats worth keeping:
 
 - **`truncated` is set on `golden` too.** #244 PR1's description reasoned that no committed

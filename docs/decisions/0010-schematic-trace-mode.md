@@ -1,9 +1,9 @@
 # ADR 0010 — Trace mode: a seeded, boundary-crossing projection over the model spine
 
-- **Status:** Accepted; implemented (#244 PR1–PR5, with #268/#269 folded in)
+- **Status:** Accepted; implemented (#244 PR1–PR5, with #268/#269 folded in; amended by #285)
 - **Date:** 2026-08-09
 - **Deciders:** project maintainers
-- **Relates to:** ROADMAP Phase 3c/3d and Phase 4; issue #244 (this change); consumes
+- **Relates to:** ROADMAP Phase 3c/3d and Phase 4; issue #244 (this change); issue #285 (§5); consumes
   [ADR 0003](0003-storage-backend-for-parse-scalability.md)'s third outcome; follows the
   additional-projection pattern [ADR 0005](0005-optional-gate-level-projection.md) established
   over [ADR 0004](0004-internal-logic-schematic-granularity.md)
@@ -43,7 +43,7 @@ hierarchy boundaries as it goes. Its graph is "flat" only in the sense that it i
 walls while following connectivity. It is **not** a bulk flatten of the design, so the ROADMAP
 non-goal stands unamended.
 
-Five sub-decisions define it.
+Six sub-decisions define it — the last added by #285, after the first five shipped.
 
 ### 1. The trace is a list of steps, and is re-derived — never merged
 
@@ -114,7 +114,36 @@ inside an opaque `Ff` promoted to boxes. All three were found by a *general* cro
 missed. A future mode that changes what counts as a box must extend the shared predicate, never
 fork it.
 
-### 5. Cross-probe identity is unchanged
+### 5. A module port is one signal, and a boundary is transparent in both directions (#285)
+
+Amended after the fact. A port is **two model nodes at one canonical path with no edge between
+them**: the `Port` carries only the external connection, the backing `Net`/`Var` every internal
+one. §4's principle — *the extractor is the scope graph's own machinery, seeded differently* —
+says nothing about which model nodes make up *one signal*, and the first cut walked the two
+halves independently. Each got its own `join_signal` and its own anchor, so a traced port was
+drawn **twice**, once on each side of the wall, in two disconnected components. That, not a
+missing wall-crossing, is what "the trace stops at the boundary" actually was.
+
+Three rules follow, and they generalize what `seed_signals` already did for a *seed*:
+
+- **The same-path sibling group is the unit of the walk**, at every hop, not just at the seed.
+  One budget, one anchor, one join. A crossing with both sides present routes drivers → anchor →
+  loads rather than crossing them, so the two sides meet at the port instead of past it.
+- **The group's representative is a pure function of the model** (its lowest member id), never of
+  walk order — which is what lets the wall-crossing arm name the far side's anchor *before* that
+  side is walked and still get the node the walk would later stand up.
+- **A wall crossing materializes its anchor at the hop that reaches it.** The old
+  `cone_box_of == None` arm's comment promised exactly that and only queued for the next hop, so
+  a one-hop expansion — the UI's default — showed nothing, and a fan-in on any undriven input
+  returned `{"nodes":[],"edges":[]}` with nothing set. An `Instance` node carries no edges of its
+  own, so the same walk enqueues the port it landed on rather than the box, which is how a trace
+  now descends into a module instead of dead-ending at it.
+
+And one extension of §3: **absence is visible too.** A step's seed is always drawn and is exempt
+from the orphan drop, so "nothing in this direction" is a picture rather than an empty canvas
+indistinguishable from a failed lookup.
+
+### 6. Cross-probe identity is unchanged
 
 Every box keeps its model `NodeId`, every wire its `net_path`, every pin its canonical `path`.
 A step names its seed by **path**, not by id — which is what a pin, a wire and a pop-out's
@@ -161,8 +190,12 @@ snapshot already carry. So Append-to-waveform and Show-in-source work in trace m
 - **Bulk / whole-design flattening.** The ROADMAP non-goal stands. A trace is always seeded and
   always incremental.
 - **Post-synthesis / netlist-level tracing** — [ADR 0001](0001-scope-rtl-vs-netlist.md).
-- **Descending into a module when its port is traced** — the walk crosses walls, but seeding on
-  a boundary port should also show the logic *behind* it (#285).
+- **Drawing the hierarchy the walk crosses.** §5 makes a boundary transparent, but the result is
+  a *flat* canvas: the logic behind a wall is drawn as a peer of the logic outside it, with
+  nothing saying which module it belongs to. Nesting each descended instance as a labelled
+  container needs a containment link on `SchNode` and compound-node layout in `elk.ts`, neither
+  of which exists — the renderer has never needed nesting, because every other view shows
+  exactly one scope (#293).
 - **Inline expand controls on every glyph.** FF/latch, memory, gate and mux pins reach trace
   expansion through the right-click menu but not yet through an inline control, because their
   south-wall pins need a placement the west/east rule cannot express (#286).
