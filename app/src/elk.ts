@@ -27,6 +27,17 @@ export interface ElkChild {
   layoutOptions: Record<string, string>;
   x?: number;
   y?: number;
+  /**
+   * Boxes drawn *inside* this one — an instance the trace descended through
+   * (#293). Present only in trace mode, and only on a node some other node
+   * names as its `parent`; a graph with no containment omits it entirely and is
+   * laid out exactly as it was before, which is what keeps the hierarchy view
+   * byte-identical.
+   *
+   * ELK calls such a node compound and sizes it from its children, so the
+   * `width`/`height` computed for the opaque form are advisory once this is set.
+   */
+  children?: ElkChild[];
 }
 export interface ElkEdge {
   id: string;
@@ -448,6 +459,11 @@ export interface LayoutOpts {
 /// spoken for by the pin triangle and its signal-name label.
 export const AFFORD_GUTTER = 16;
 
+/** Height of a container's title band — the instance path sits in it (#293). */
+export const CONTAINER_LABEL_H = 22;
+/** Breathing room between a container's wall and the boxes it holds (#293). */
+export const CONTAINER_PAD = 14;
+
 /// Extra room for the widest "+N" badge on one wall, on top of the gutter. Sized
 /// like the const-label (5.6 px/char at 9 px), since it is the same kind of small
 /// outboard text.
@@ -492,9 +508,11 @@ export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
     wired.add(e.target);
   }
 
-  const children: ElkChild[] = graph.nodes.map((n): ElkChild =>
+  const flat: ElkChild[] = graph.nodes.map((n): ElkChild =>
     withAffordanceMargins(sizeChild(n), n, opts.affordances === true),
   );
+  const children = nest(flat, graph);
+  const nested = children.length !== flat.length;
 
   function sizeChild(n: SchNode): ElkChild {
     // Inferred storage (register / level latch): an FF-style symbol with
@@ -620,6 +638,66 @@ export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
     };
   }
 
+  /**
+   * Promote a box to a container: ELK sizes a compound node from its children,
+   * so the width and height computed for the opaque form no longer hold.
+   *
+   * That is exactly why the ports must drop to `FIXED_SIDE`. They were placed
+   * with `FIXED_POS` at explicit coordinates measured against the *old* size —
+   * keep that and every pin lands somewhere in the container's interior once it
+   * grows, instead of on the wall it belongs to. Side is all we actually need to
+   * assert; where on the wall is ELK's business once there are children to
+   * route around.
+   *
+   * The top padding is the label band. `H_LEFT V_TOP INSIDE` puts the instance
+   * path at the top edge rather than centring it over the contents.
+   */
+  function asContainer(child: ElkChild): ElkChild {
+    return {
+      ...child,
+      layoutOptions: {
+        ...child.layoutOptions,
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.padding": `[top=${CONTAINER_LABEL_H + CONTAINER_PAD},left=${CONTAINER_PAD},bottom=${CONTAINER_PAD},right=${CONTAINER_PAD}]`,
+        "elk.nodeLabels.placement": "H_LEFT V_TOP INSIDE",
+      },
+      ports: child.ports.map(({ x: _x, y: _y, ...p }) => p),
+    };
+  }
+
+  /**
+   * Fold the flat child list into the containment tree `SchNode.parent` names
+   * (#293), returning the top-level children.
+   *
+   * A `parent` naming a node that is not on canvas is ignored rather than
+   * trusted — the backend guarantees it cannot happen, but a dangling parent
+   * here would silently drop the box out of the drawing entirely, which is a
+   * much worse failure than drawing it at the top level.
+   */
+  function nest(all: ElkChild[], g: SchematicGraph): ElkChild[] {
+    const byId = new Map(all.map((c) => [c.id, c]));
+    const isContainer = new Set<string>();
+    for (const n of g.nodes) {
+      if (n.parent !== undefined && byId.has(nodeId(n.parent))) {
+        isContainer.add(nodeId(n.parent));
+      }
+    }
+    if (!isContainer.size) return all;
+    for (const id of isContainer) {
+      const c = byId.get(id);
+      if (c) byId.set(id, asContainer(c));
+    }
+    const top: ElkChild[] = [];
+    for (const n of g.nodes) {
+      const c = byId.get(nodeId(n.id));
+      if (!c) continue;
+      const p = n.parent !== undefined ? byId.get(nodeId(n.parent)) : undefined;
+      if (p && p !== c) (p.children ??= []).push(c);
+      else top.push(c);
+    }
+    return top;
+  }
+
   // An edge endpoint is a port if some box exposes it, else the box itself.
   const endpoint = (id: number) => (portOwner.has(id) ? portId(id) : nodeId(id));
   // #117: collapse each bundle trunk group into one box->port edge so ELK
@@ -668,6 +746,22 @@ export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
       "elk.spacing.edgeNode": "12",
       "elk.spacing.edgeEdge": "8",
       "elk.layered.spacing.edgeNodeBetweenLayers": "12",
+      // Only when something is actually nested (#293), so a graph with no
+      // containment — every hierarchy-view graph — is handed to ELK with the
+      // exact option set it had before and cannot shift by a pixel.
+      //
+      // `INCLUDE_CHILDREN` is what lets a wire cross a container wall at all:
+      // the default resolves to `SEPARATE_CHILDREN`, which lays each compound
+      // out on its own and refuses to route between levels. `edgeCoords: ROOT`
+      // keeps every routed point in root space, so the renderer's wire loop
+      // needs no ancestor-offset arithmetic — the alternative is per-container
+      // coordinates and an offset bug waiting to happen.
+      ...(nested
+        ? {
+            "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+            "elk.json.edgeCoords": "ROOT",
+          }
+        : {}),
     },
     children,
     edges,

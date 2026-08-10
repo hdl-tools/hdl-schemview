@@ -3,6 +3,8 @@
 import { api } from "./api";
 import {
   chooseLabelSegment,
+  CONTAINER_LABEL_H,
+  CONTAINER_PAD,
   FF_LABEL_PAD,
   ffRole,
   fitZoom,
@@ -1396,7 +1398,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     }
   };
   for (const tg of trunkByRep.values()) {
-    const box = (laid.children ?? []).find((c: any) => c.id === nodeId(tg.box));
+    const box = findLaidChild(laid.children, nodeId(tg.box));
     if (!box) continue;
     const dir: 1 | -1 = tg.side === "east" ? 1 : -1;
     const members: { pt: Pt; e: (typeof tg.edges)[number] }[] = [];
@@ -1415,46 +1417,71 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   }
 
   // 2. Boxes.
-  for (const c of laid.children ?? []) {
+  //
+  // A stack rather than a plain loop, because trace mode nests an instance the
+  // walk descended through and draws the boxes behind its wall inside it (#293).
+  // Each entry carries the SVG group to draw into: ELK reports a child's x/y
+  // relative to its parent, and every glyph helper already translates by its own
+  // (c.x, c.y) into whatever group it is handed — so nesting the groups makes
+  // SVG transform composition do the coordinate maths, with no ancestor offsets
+  // to accumulate and get wrong. Wires need no equivalent because
+  // `elk.json.edgeCoords: ROOT` keeps every routed point in root space.
+  const stack: Array<{ c: any; host: SVGElement }> = (laid.children ?? [])
+    .slice()
+    .reverse()
+    .map((c: any) => ({ c, host: root }));
+  while (stack.length) {
+    const { c, host } = stack.pop() as { c: any; host: SVGElement };
     const id = Number(String(c.id).slice(1));
     const node = graph.nodes.find((n) => n.id === id);
 
+    // An instance with boxes behind its wall: draw the container, then queue its
+    // contents into it. Checked before the kind dispatch, because the container
+    // and the opaque `Instance` box are the same object in two states.
+    if (c.children?.length) {
+      const inner = renderContainer(host, c, node, id);
+      for (let i = c.children.length - 1; i >= 0; i--) {
+        stack.push({ c: c.children[i], host: inner });
+      }
+      continue;
+    }
+
     // Boundary I/O pin (the scope's own port): a frame pin + label, not a box.
     if (node?.kind === "Port") {
-      renderBoundaryPin(root, c, node, id);
+      renderBoundaryPin(host, c, node, id);
       continue;
     }
     // Inferred storage (register FF / level latch): an FF-style symbol with
     // labelled west input rows.
     if (node?.kind === "FF" || node?.kind === "Latch") {
-      renderStorage(root, c, node, id);
+      renderStorage(host, c, node, id);
       continue;
     }
     // Continuous assign: a small anonymous square function node (#135).
     if (node?.kind === "Assign") {
-      renderAssign(root, c, id);
+      renderAssign(host, c, id);
       continue;
     }
     // Memory array (#112): an array-stack glyph with addr/din/dout pins.
     if (node?.kind === "Memory") {
-      renderMemory(root, c, node, id);
+      renderMemory(host, c, node, id);
       continue;
     }
     // SystemVerilog interface: a modport-qualified port draws as a square
     // frame pin (#125); an interface *instance* keeps the hexagon bundle box.
     if (node?.kind === "Interface") {
-      if (node.modport) renderBundlePin(root, c, node, id);
-      else renderInterface(root, c, node, id);
+      if (node.modport) renderBundlePin(host, c, node, id);
+      else renderInterface(host, c, node, id);
       continue;
     }
     // Gate-level primitives (#157): a mux trapezoid (select on the south wall)
     // or an IEEE distinctive-shape / datapath gate glyph.
     if (node?.kind === "Mux") {
-      renderMux(root, c, node, id);
+      renderMux(host, c, node, id);
       continue;
     }
     if (node && isGateKind(node.kind)) {
-      renderGate(root, c, node, id);
+      renderGate(host, c, node, id);
       continue;
     }
 
@@ -1587,7 +1614,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         g.appendChild(t);
       }
     }
-    root.appendChild(g);
+    host.appendChild(g);
   }
 
   // 3. Net labels last, so they stay legible over wires and box edges. Their
@@ -1668,6 +1695,104 @@ function scheduleWireLabels() {
 
 // A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
 // the port name on the outboard side (inputs on the left, outputs on the right).
+/**
+ * Find a laid-out child by id anywhere in the container tree, rebased to root
+ * coordinates (#293).
+ *
+ * ELK reports a nested child's position relative to its container. The box
+ * glyphs never need this — they are drawn into nested SVG groups and let
+ * transform composition handle it — but the bundle trunk below computes its
+ * geometry by hand and draws into the root group, so it needs absolute numbers.
+ * A flat scan of the top level would also have *silently* dropped the fan-out of
+ * any bundle consumer that ended up inside a container.
+ */
+function findLaidChild(children: any[] | undefined, id: string, dx = 0, dy = 0): any {
+  for (const c of children ?? []) {
+    const x = dx + (c.x ?? 0);
+    const y = dy + (c.y ?? 0);
+    if (c.id === id) return { ...c, x, y };
+    const hit = findLaidChild(c.children, id, x, y);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * An instance the trace descended through, drawn as a labelled box holding the
+ * logic behind its wall (#293).
+ *
+ * Returns the group its contents must be drawn into. The container and the
+ * opaque `Instance` box are the same model object in two states, so this keeps
+ * the same node id, the same click/cross-probe behaviour and the same pins —
+ * only the body changes, from empty to occupied.
+ */
+function renderContainer(
+  parent: SVGElement,
+  c: any,
+  node: SchNode | undefined,
+  id: number,
+): SVGElement {
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const rect = document.createElementNS(SVGNS, "rect");
+  rect.setAttribute("class", "container");
+  rect.setAttribute("width", String(c.width));
+  rect.setAttribute("height", String(c.height));
+  rect.setAttribute("rx", "4");
+  if (node) {
+    rect.dataset.nodeId = String(id);
+    rect.onclick = () => selectNode(id);
+    rect.oncontextmenu = (ev) => crossProbe(id, ev);
+  }
+  g.appendChild(rect);
+
+  // The instance path in the band `toElk` reserved at the top, left-aligned so
+  // it reads as a title on the wall rather than floating over the contents.
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "container-label");
+  t.setAttribute("x", String(CONTAINER_PAD));
+  t.setAttribute("y", String(CONTAINER_LABEL_H - 6));
+  t.textContent = c.labels?.[0]?.text ?? node?.label ?? "";
+  g.appendChild(t);
+
+  // Pins on the wall. Unlike an opaque box these sit where ELK put them
+  // (FIXED_SIDE), because a compound node is sized from its children and the
+  // fixed coordinates the opaque form used no longer describe this box.
+  const portById = new Map<number, SchPort>();
+  node?.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const pid = Number(String(p.id).slice(1));
+    const sp = portById.get(pid);
+    if (!sp) continue;
+    const west = sp.side !== "east";
+    const px = west ? 0 : c.width;
+    const py = p.y ?? 0;
+    const tri = document.createElementNS(SVGNS, "path");
+    tri.setAttribute("class", `pin ${west ? "pin-in" : "pin-out"}`);
+    tri.setAttribute(
+      "d",
+      west
+        ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
+        : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
+    );
+    tri.onclick = () => selectNode(pid);
+    tri.oncontextmenu = (ev) => crossProbe(pid, ev);
+    g.appendChild(tri);
+    drawPinAffordances(g, sp, px, py, west);
+    const lab = document.createElementNS(SVGNS, "text");
+    lab.setAttribute("class", "pin-label");
+    lab.setAttribute("x", String(west ? px + 6 : px - 6));
+    lab.setAttribute("y", String(py + 3));
+    lab.setAttribute("text-anchor", west ? "start" : "end");
+    lab.textContent = sp.name;
+    g.appendChild(lab);
+  }
+
+  parent.appendChild(g);
+  return g;
+}
+
 function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number) {
   const sp = node.ports[0];
   const p = c.ports?.[0];

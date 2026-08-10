@@ -27,6 +27,8 @@ import {
   labelGeometry,
   chooseLabelSegment,
   placementsEqual,
+  CONTAINER_LABEL_H,
+  CONTAINER_PAD,
 } from "./elk";
 import type { LabelPlacement, Pt, VRect } from "./elk";
 import type { SchematicGraph, SchPort } from "./types";
@@ -66,6 +68,100 @@ const graph: SchematicGraph = {
     { id: 0, source: 11, target: 2, net: "bus.out" }, // port -> box
   ],
 };
+
+// #293 — an instance the trace descended through becomes a container, and the
+// boxes behind its wall are drawn inside it rather than as its peers.
+const contained: SchematicGraph = {
+  root: "top",
+  nodes: [
+    {
+      id: 1,
+      kind: "Instance",
+      label: "core",
+      path: "top.core",
+      expandable: true,
+      ports: [{ id: 10, name: "mem_valid", side: "east" }],
+    },
+    // Behind core's wall.
+    {
+      id: 2,
+      kind: "FF",
+      label: "$ff2",
+      path: "top.core.$ff2",
+      expandable: false,
+      parent: 1,
+      ports: [{ id: 20, name: "q", side: "east" }],
+    },
+    // Outside it, at the top level.
+    { id: 3, kind: "Instance", label: "mem", path: "top.mem", expandable: false, ports: [] },
+  ],
+  edges: [{ id: 0, source: 20, target: 10, net: "mem_valid" }],
+};
+
+describe("containment (#293)", () => {
+  it("draws a contained box inside its container, not beside it", () => {
+    const e = toElk(contained);
+    expect(e.children.map((c) => c.id)).toEqual([nodeId(1), nodeId(3)]);
+    const core = e.children.find((c) => c.id === nodeId(1))!;
+    expect(core.children?.map((c) => c.id)).toEqual([nodeId(2)]);
+    // The peer must not also appear at the top level, or it is drawn twice.
+    expect(e.children.some((c) => c.id === nodeId(2))).toBe(false);
+  });
+
+  it("turns a container's pins side-only so they stay on the wall when it grows", () => {
+    // FIXED_POS coordinates were measured against the opaque box's size; ELK
+    // resizes a compound from its children, so keeping them would strand every
+    // pin somewhere in the interior.
+    const core = toElk(contained).children.find((c) => c.id === nodeId(1))!;
+    expect(core.layoutOptions["elk.portConstraints"]).toBe("FIXED_SIDE");
+    for (const p of core.ports) {
+      expect(p.x).toBeUndefined();
+      expect(p.y).toBeUndefined();
+    }
+    expect(core.layoutOptions["elk.padding"]).toContain(
+      `top=${CONTAINER_LABEL_H + CONTAINER_PAD}`,
+    );
+  });
+
+  it("asks ELK to route across container walls, in root coordinates", () => {
+    const e = toElk(contained);
+    // Without INCLUDE_CHILDREN the default is SEPARATE_CHILDREN, which lays each
+    // compound out alone and will not route the ff -> port wire at all.
+    expect(e.layoutOptions["elk.hierarchyHandling"]).toBe("INCLUDE_CHILDREN");
+    expect(e.layoutOptions["elk.json.edgeCoords"]).toBe("ROOT");
+  });
+
+  it("leaves a graph with no containment exactly as it was", () => {
+    // The hierarchy view shows one scope and so never nests. It must reach ELK
+    // with the same option set and the same flat shape as before #293, or its
+    // layout shifts for a feature it does not use.
+    const e = toElk(graph);
+    expect(e.layoutOptions["elk.hierarchyHandling"]).toBeUndefined();
+    expect(e.layoutOptions["elk.json.edgeCoords"]).toBeUndefined();
+    expect(e.children.every((c) => c.children === undefined)).toBe(true);
+    expect(e.children.map((c) => c.id)).toEqual([nodeId(1), nodeId(2)]);
+  });
+
+  it("keeps a box whose container is not on canvas rather than dropping it", () => {
+    // The backend guarantees a parent is always drawn; if that ever breaks,
+    // drawing the box at the top level is a far better failure than losing it.
+    const orphaned: SchematicGraph = {
+      ...contained,
+      nodes: [contained.nodes[1], contained.nodes[2]],
+    };
+    const e = toElk(orphaned);
+    expect(e.children.map((c) => c.id)).toEqual([nodeId(2), nodeId(3)]);
+  });
+
+  it("routes a wire that crosses the container wall", async () => {
+    // The point of the whole option set: a ff inside core wired to core's own
+    // boundary pin must still produce a routed edge.
+    const laid: any = await layout(contained);
+    const e = (laid.edges ?? []).find((x: any) => x.id === "e0");
+    expect(e, "the cross-wall edge must survive layout").toBeTruthy();
+    expect(e.sections?.length).toBeGreaterThan(0);
+  });
+});
 
 describe("toElk", () => {
   it("maps boxes to children with ports on the right sides", () => {

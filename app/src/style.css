@@ -350,6 +350,12 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 
 /* schematic primitives */
 .box { fill:var(--box); stroke:var(--box-stroke); cursor:pointer; }
+/* An instance the trace descended through (#293): a wall around the logic behind
+   it, not another block. Unfilled and dashed so the boxes inside read as the
+   content and this reads as the boundary they sit behind — a solid fill would
+   make a module look like one more gate on the canvas. */
+.container { fill:none; stroke:var(--box-stroke); stroke-dasharray:4 3; cursor:pointer; }
+.container-label { fill:var(--sublabel); font-size:10px; font-weight:600; }
 .box-label { fill:var(--label); font-size:12px; font-weight:600; }
 .box-sublabel { fill:var(--sublabel); font-size:10px; }
 .pin { cursor:pointer; }
