@@ -123,12 +123,17 @@ describe("containment (#293)", () => {
     );
   });
 
-  it("asks ELK to route across container walls, in root coordinates", () => {
+  it("asks ELK to route across container walls", () => {
     const e = toElk(contained);
     // Without INCLUDE_CHILDREN the default is SEPARATE_CHILDREN, which lays each
     // compound out alone and will not route the ff -> port wire at all.
     expect(e.layoutOptions["elk.hierarchyHandling"]).toBe("INCLUDE_CHILDREN");
-    expect(e.layoutOptions["elk.json.edgeCoords"]).toBe("ROOT");
+    // And deliberately *not* edgeCoords: elkjs 0.9.3 ignores it under either
+    // option id, silently, so the wires drew offset by their container's origin
+    // with nothing to say why. The renderer rebases from each edge's reported
+    // `container` instead. Asserted so nobody re-adds it and trusts it.
+    expect(e.layoutOptions["elk.json.edgeCoords"]).toBeUndefined();
+    expect(e.layoutOptions["org.eclipse.elk.json.edgeCoords"]).toBeUndefined();
   });
 
   it("leaves a graph with no containment exactly as it was", () => {
@@ -151,6 +156,46 @@ describe("containment (#293)", () => {
     };
     const e = toElk(orphaned);
     expect(e.children.map((c) => c.id)).toEqual([nodeId(2), nodeId(3)]);
+  });
+
+  it("lands a cross-wall wire on the pins it connects, in root coordinates", async () => {
+    // The renderer draws wires into the root group but draws boxes into nested
+    // groups, so a routed point only meets its pin if ELK reports edge geometry
+    // in root space. If it reports container-relative coordinates instead, every
+    // wire inside a container floats off by that container's origin — visible,
+    // wrong, and silent.
+    const laid: any = await layout(contained);
+    const abs = (id: string, kids: any[] = laid.children, dx = 0, dy = 0): any => {
+      for (const c of kids) {
+        const x = dx + (c.x ?? 0);
+        const y = dy + (c.y ?? 0);
+        if (c.id === id) return { c, x, y };
+        const hit = abs(id, c.children ?? [], x, y);
+        if (hit) return hit;
+      }
+      return undefined;
+    };
+    const portAbs = (nid: string, pid: string) => {
+      const box = abs(nid)!;
+      const p = box.c.ports.find((q: any) => q.id === pid)!;
+      return { x: box.x + (p.x ?? 0), y: box.y + (p.y ?? 0) };
+    };
+    const ff = portAbs(nodeId(2), portId(20)); // inside the container
+    const wall = portAbs(nodeId(1), portId(10)); // on the container's wall
+    const e = (laid.edges ?? []).find((x: any) => x.id === "e0");
+    expect(e?.sections?.length, "the cross-wall edge must survive layout").toBeTruthy();
+    // ELK reports the points relative to the node it names in `container`, so
+    // rebase exactly as the renderer does. This is the contract the renderer
+    // depends on: if ELK ever reported root coordinates instead, `container`
+    // would be absent and the offset would fall back to zero.
+    const org = e.container ? abs(String(e.container)) : undefined;
+    const off = { x: org?.x ?? 0, y: org?.y ?? 0 };
+    const at = (p: any) => ({ x: p.x + off.x, y: p.y + off.y });
+    const sec = e.sections[0];
+    const near = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y);
+    // Generous tolerance: we are catching a whole-container offset, not pixels.
+    expect(near(at(sec.startPoint), ff)).toBeLessThan(12);
+    expect(near(at(sec.endPoint), wall)).toBeLessThan(12);
   });
 
   it("routes a wire that crosses the container wall", async () => {

@@ -752,16 +752,16 @@ export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
       //
       // `INCLUDE_CHILDREN` is what lets a wire cross a container wall at all:
       // the default resolves to `SEPARATE_CHILDREN`, which lays each compound
-      // out on its own and refuses to route between levels. `edgeCoords: ROOT`
-      // keeps every routed point in root space, so the renderer's wire loop
-      // needs no ancestor-offset arithmetic — the alternative is per-container
-      // coordinates and an offset bug waiting to happen.
-      ...(nested
-        ? {
-            "elk.hierarchyHandling": "INCLUDE_CHILDREN",
-            "elk.json.edgeCoords": "ROOT",
-          }
-        : {}),
+      // out on its own and refuses to route between levels.
+      //
+      // There is deliberately no `elk.json.edgeCoords: ROOT` here. It would say
+      // "report routed points in root space" declaratively, but elkjs 0.9.3
+      // ignores it under both `elk.json.*` and `org.eclipse.elk.json.*` — and an
+      // ignored option is silent, so the wires simply drew offset by their
+      // container's origin with nothing to indicate why. The renderer rebases
+      // using the `container` each edge reports instead: that is data ELK
+      // returns, so it cannot quietly stop arriving.
+      ...(nested ? { "elk.hierarchyHandling": "INCLUDE_CHILDREN" } : {}),
     },
     children,
     edges,

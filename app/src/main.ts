@@ -1293,6 +1293,22 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const labelByText = new Map<string, LabelItem>();
   // The laid-out ELK edges keep their `e<schId>` ids, so map back to the model
   // edge for the net's canonical path (clicking a wire cross-probes that net).
+  // Absolute (root-space) origin of every laid-out node, containers included.
+  // Boxes never need this — they nest as SVG groups and let transform
+  // composition do it — but wires are all drawn into the root group while ELK
+  // reports a contained edge's points relative to its container (#293).
+  const ORIGIN = { x: 0, y: 0 };
+  const originOf = new Map<string, { x: number; y: number }>();
+  const mapOrigins = (kids: any[] | undefined, dx: number, dy: number) => {
+    for (const c of kids ?? []) {
+      const x = dx + (c.x ?? 0);
+      const y = dy + (c.y ?? 0);
+      originOf.set(String(c.id), { x, y });
+      if (c.children) mapOrigins(c.children, x, y);
+    }
+  };
+  mapOrigins(laid.children, 0, 0);
+
   const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
   // Bundle trunks (#117): the member taps of a raw access port were collapsed
   // to one ELK edge (keyed by the first member's id); the trunk cross-probes
@@ -1327,9 +1343,18 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     const handlers = wireHandlers(netPath);
     const wireLeft = handlers?.left ?? null;
     const wireMenu = handlers?.menu ?? null;
+    // ELK reports a routed point relative to the node that *contains* the edge,
+    // which it names in `container` — for an edge between two boxes inside an
+    // instance that is the container, not the root (#293). Wires are drawn into
+    // the root group, so rebase. `elk.json.edgeCoords: ROOT` would say this
+    // declaratively but is silently ignored by elkjs 0.9.3 under either option
+    // id, and a silently-ignored option is not something correctness may rest
+    // on — `container` is reported data, so it cannot go quietly missing.
+    const off = originOf.get(String(e.container)) ?? ORIGIN;
     const segs: [Pt, Pt][] = [];
     for (const sec of e.sections ?? []) {
-      const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
+      const raw = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
+      const pts = raw.map((p: any) => ({ x: p.x + off.x, y: p.y + off.y }));
       const points = pts.map((p: any) => `${p.x},${p.y}`).join(" ");
       const path = document.createElementNS(SVGNS, "polyline");
       path.setAttribute("class", netPath ? "wire clickable" : "wire");
@@ -1417,6 +1442,8 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   }
 
   // 2. Boxes.
+  //
+  // (`originOf` is built just above the wire pass; see its note there.)
   //
   // A stack rather than a plain loop, because trace mode nests an instance the
   // walk descended through and draws the boxes behind its wall inside it (#293).
