@@ -2159,7 +2159,7 @@ fn edge_drives(e: &Edge, sig: NodeId) -> bool {
 /// same-path siblings, because a port and its backing net are two nodes for one
 /// wire (the golden's `bus.valid` is a `Var` *and* a `Port`) and a seed on
 /// either must reach both.
-fn seed_signals(design: &Design, seed: NodeId) -> Vec<NodeId> {
+fn seed_signals(design: &Design, seed: NodeId, dir: Dir) -> Vec<NodeId> {
     let Some(n) = design.node(seed) else {
         return Vec::new();
     };
@@ -2167,9 +2167,31 @@ fn seed_signals(design: &Design, seed: NodeId) -> Vec<NodeId> {
         || is_gate(design, seed)
         || is_kind(design, seed, NodeKind::Memory)
     {
+        // Reached only when the seed is *not* a box in this projection — a gate
+        // at process level is interior to its block, so it has no pins of its own
+        // to anchor on and its neighbours are the best frontier available.
+        // ([`trace_graph`] walks a seed that *is* a box as itself.)
+        //
+        // Even then, only the neighbours on the side asked for. Folding in both
+        // sides made a directional expansion walk the wrong one as well: fan-out
+        // from a gate followed its operands and drew their neighbourhood (#286).
+        // `Edge.dir` is relative to `e.port`, so which end the seed stands on
+        // decides the test; `Inout` keeps both.
+        let drives = |e: &Edge| {
+            if e.port == seed {
+                e.dir == Dir::Out
+            } else {
+                e.dir != Dir::Out
+            }
+        };
         let mut out: Vec<NodeId> = design
             .edges_of(seed)
             .iter()
+            .filter(|e| match dir {
+                Dir::Out => drives(e),
+                Dir::In => !drives(e),
+                Dir::Inout => true,
+            })
             .map(|e| if e.port == seed { e.endpoint } else { e.port })
             .collect();
         out.sort_unstable();
@@ -2427,8 +2449,18 @@ fn cone_pin_for(
             // edge. Each candidate must actually live in `bx`: `pin_in_box`'s
             // bundle rules are keyed on the scope, so a member of a *different*
             // bundle would otherwise resolve to that bundle's raw port.
+            // ...and, last, `inner`'s same-path siblings. A module port is two
+            // nodes and only the `Port` half bears the box's pin (#285); when the
+            // walk arrives from a *gate* inside the instance, neither end of the
+            // edge is that half — the edge runs gate-to-backing-`Var` — so the
+            // pin resolved to nothing and the connection was dropped by the
+            // `anchored` test below (#286).
+            let mut cands: Vec<NodeId> = vec![inner, e.port, e.endpoint];
+            if let Some(n) = design.node(inner) {
+                cands.extend(design.nodes_at_path(&n.path).iter().copied());
+            }
             let anchors = cache.anchors(design, scope, projection);
-            for cand in [inner, e.port, e.endpoint] {
+            for cand in cands {
                 if !within_box(design, cand, bx) {
                     continue;
                 }
@@ -2601,13 +2633,53 @@ pub fn trace_graph(
     // signal" and is indistinguishable from a failed lookup — the silent discard
     // ADR 0003 forbids, and what a fan-in on any undriven input returned (#285).
     let mut seed_anchors: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    // Seeds that are themselves boxes, and the scope each lives in (#286).
+    let mut box_seeds: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
 
     for step in steps {
+        // Is the seed a *box* rather than a signal? Asked of `cone_box_of`, so
+        // the answer is the scope graph's own — a gate is a box at gate level
+        // and interior to its block at process level, and this follows without
+        // a second opinion.
+        //
+        // A box seed is walked as itself, never expanded into its neighbours.
+        // The model wires a gate **directly** to the next gate, with no net node
+        // between, so a neighbour *is* the box on the far side: seeding there
+        // would show what *that* box drives, one level past what was asked for.
+        // Standing on the box instead lets `follows` apply the direction, which
+        // is the filter it exists for.
+        let seed_box = cone_box_of(design, step.seed, projection, &mut scopes)
+            .filter(|&(bx, _)| bx == step.seed);
         // Per step, not per call: a later step re-seeds a fresh frontier, and
         // `visited` carries over so the walk does not re-expand ground an
         // earlier step already covered. A seed that is itself already visited
         // is still walked — `visited` gates only what the *next* hop picks up.
-        let mut frontier = seed_signals(design, step.seed);
+        let mut frontier = match seed_box {
+            Some((bx, scope)) => {
+                box_seeds.insert(bx, scope);
+                // Emitted up front, because a box seed anchors its wires on its
+                // *own* pins — one per operand — rather than on the single stub a
+                // signal converges to. Without it the join has a load and no
+                // driver, draws nothing, and the orphan pass then removes the box
+                // the far side reached, so a trace seeded on a gate came back
+                // empty. It also gives a box seed the guarantee a signal seed
+                // already had: a trace always draws the thing it was seeded on.
+                if !emitted.contains(&bx) && !stubs.contains(&bx) {
+                    let scope_path = design
+                        .node(scope)
+                        .map(|n| n.path.clone())
+                        .unwrap_or_else(|| root.clone());
+                    if let Some(node) = cone_box_node(design, bx, &scope_path, &mut pins) {
+                        emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                        nodes.push(node);
+                        emitted.insert(bx);
+                    }
+                }
+                seed_anchors.insert(bx);
+                vec![bx]
+            }
+            None => seed_signals(design, step.seed, step.dir),
+        };
         visited.extend(frontier.iter().copied());
         for &s in &frontier {
             seed_anchors.insert(group_of(&mut group_cache, design, s)[0]);
@@ -2633,6 +2705,10 @@ pub fn trace_graph(
                 let in_group = |id: NodeId| members.contains(&id);
                 let crossing = members.len() > 1;
                 let is_seed = seed_anchors.contains(&rep);
+                // The scope of a box seed, when this frontier entry is one: its
+                // own pins are the anchors, so each edge is joined pin-to-pin
+                // rather than through a shared stub.
+                let seed_scope = box_seeds.get(&rep).copied();
 
                 let mut drivers: Vec<(NodeId, Option<String>)> = Vec::new();
                 let mut loads: Vec<(NodeId, Option<String>)> = Vec::new();
@@ -2800,6 +2876,40 @@ pub fn trace_graph(
                     } else {
                         loads.push((pin, e.select.clone()));
                     }
+                    // A box seed exposes one pin per operand, so there is no
+                    // single node the whole "signal" converges on and the
+                    // drivers x loads join has nothing to cross. Wire this edge
+                    // directly, seed pin to far pin, in the orientation the model
+                    // gives. `cone_pin_for` picks the seed's own pin the same way
+                    // it picks any box's, so the id is one its builder emitted.
+                    if let Some(sc) = seed_scope {
+                        let np = cone_pin_for(
+                            design,
+                            &mut scopes,
+                            sc,
+                            projection,
+                            rep,
+                            near,
+                            e,
+                            &mut pins,
+                        );
+                        if emitted_pins.contains(&np) {
+                            let (d, l) = if edge_drives(e, near) {
+                                (pin, np)
+                            } else {
+                                (np, pin)
+                            };
+                            join_signal(
+                                design.node(rep),
+                                &root,
+                                &[(d, e.select.clone())],
+                                &[(l, e.select.clone())],
+                                &mut seen_pairs,
+                                &mut next_edge,
+                                &mut edges,
+                            );
+                        }
+                    }
                     // A module boundary. An `Instance` node carries no edges of its
                     // own — connectivity attaches to its `Port` children — so the
                     // enqueue below finds nothing and the walk would stop at the
@@ -2915,6 +3025,12 @@ pub fn trace_graph(
                 }
                 debug_assert!(kept + dropped as usize <= total);
 
+                // A box seed already wired every edge pin-to-pin above; crossing
+                // its drivers with its loads here would wire its inputs straight
+                // to its outputs, drawing a connection the model does not make.
+                if seed_scope.is_some() {
+                    continue;
+                }
                 match stub_pin.filter(|_| !one_sided && !drivers.is_empty() && !loads.is_empty()) {
                     // The port *is* the crossing point, so route through it rather
                     // than crossing drivers x loads: the logic inside the module and

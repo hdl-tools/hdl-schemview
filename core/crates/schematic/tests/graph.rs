@@ -2259,6 +2259,97 @@ fn cone_with_descends_through_an_instance() {
 // ---------------------------------------------------------------------------
 
 const CORE: &str = "picorv32_soc.g_lane[0].core";
+const AND813: &str = "picorv32_soc.g_lane[0].core.$assign200.$and813";
+const FF214: &str = "picorv32_soc.g_lane[0].core.$ff214";
+
+#[test]
+fn cone_with_from_a_gate_follows_only_the_side_asked_for() {
+    // A gate's output pin carries the *gate's* own path, so the frontend's ▶
+    // control seeds the gate itself — and `seed_signals` folded in every signal
+    // the gate touches, operands included. Fan-out therefore walked the inputs
+    // and drew their neighbourhood, which is the opposite of what ▶ means (#286).
+    let d = design();
+    let gate = id(&d, AND813);
+    let paths = |g: &SchematicGraph| {
+        g.nodes
+            .iter()
+            .map(|n| n.path.clone())
+            .collect::<std::collections::HashSet<_>>()
+    };
+    let fan_out = paths(&cone_with(
+        &d,
+        gate,
+        Dir::Out,
+        ConeLimits::depth(1),
+        Projection::GateLevel,
+    ));
+    let fan_in = paths(&cone_with(
+        &d,
+        gate,
+        Dir::In,
+        ConeLimits::depth(1),
+        Projection::GateLevel,
+    ));
+    // A trace seeded on a box must draw that box — its own pins are what anchor
+    // its wires, so without it the join has one side and nothing is drawn at all.
+    assert!(
+        fan_out.contains(AND813) && fan_in.contains(AND813),
+        "a trace must draw the box it was seeded on"
+    );
+    // `$ff214` drives `mem_valid`, one of this gate's *operands*. Reaching it
+    // from a **fan-out** is the bug: ▶ walked the operands and drew their
+    // neighbourhood instead of what the gate drives.
+    assert!(
+        !fan_out.contains(FF214),
+        "fan-out must not walk the gate's operands: {fan_out:?}"
+    );
+    // The two directions must genuinely differ, or the filter is not engaging.
+    let out_only: Vec<_> = fan_out.difference(&fan_in).collect();
+    let in_only: Vec<_> = fan_in.difference(&fan_out).collect();
+    assert!(
+        !out_only.is_empty(),
+        "fan-out reached nothing fan-in did not: {fan_out:?}"
+    );
+    assert!(
+        !in_only.is_empty() || fan_in.len() < fan_out.len(),
+        "fan-in is indistinguishable from fan-out: {fan_in:?}"
+    );
+}
+
+#[test]
+fn cone_with_on_a_gate_wires_the_box_it_was_seeded_on() {
+    // The anchor half of the same defect. A gate is never stubbed (#268), and the
+    // model wires gate-to-gate with no net node between, so a gate seed had
+    // nothing to anchor on: the join saw a load and no driver, drew no wire, and
+    // the orphan pass then removed the box on the far side — an empty graph.
+    let d = design();
+    for dir in [Dir::In, Dir::Out] {
+        let g = cone_with(
+            &d,
+            id(&d, AND813),
+            dir,
+            ConeLimits::depth(1),
+            Projection::GateLevel,
+        );
+        assert!(
+            !g.edges.is_empty(),
+            "{dir:?}: a gate seed must anchor its own wires, got {} boxes and no wires",
+            g.nodes.len()
+        );
+        let pins: std::collections::HashSet<NodeId> = g
+            .nodes
+            .iter()
+            .flat_map(|n| n.ports.iter().map(|p| p.id))
+            .collect();
+        for e in &g.edges {
+            assert!(
+                pins.contains(&e.source) && pins.contains(&e.target),
+                "{dir:?}: edge {} does not land on emitted pins",
+                e.id
+            );
+        }
+    }
+}
 
 #[test]
 fn cone_with_names_the_instance_that_contains_a_box() {
