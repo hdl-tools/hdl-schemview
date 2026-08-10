@@ -359,6 +359,10 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 .box-label { fill:var(--label); font-size:12px; font-weight:600; }
 .box-sublabel { fill:var(--sublabel); font-size:10px; }
 .pin { cursor:pointer; }
+/* Invisible click target where a wire meets a glyph that draws no pin of its own
+   — gates and muxes use leads and bubbles rather than triangles (#286). `fill`
+   rather than `fill:none` because a none-filled shape takes no pointer events. */
+.pin-hit { fill:transparent; cursor:pointer; }
 .pin-in { fill:var(--pin); }
 .pin-out { fill:var(--pin-out); }
 /* Storage enable input (latch gate / FF clock-enable): its own tint so the

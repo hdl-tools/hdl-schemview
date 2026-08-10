@@ -458,6 +458,12 @@ export interface LayoutOpts {
 /// box next door. Outboard rather than inboard because the inward band is already
 /// spoken for by the pin triangle and its signal-name label.
 export const AFFORD_GUTTER = 16;
+/**
+ * Band reserved *below* a box carrying a south pin, for the control and badge
+ * that drop under it (#286). Covers the control at pin+15 and the `+N` badge at
+ * pin+25, plus clearance.
+ */
+export const AFFORD_SOUTH_DROP = 28;
 
 /** Height of a container's title band — the instance path sits in it (#293). */
 export const CONTAINER_LABEL_H = 22;
@@ -487,11 +493,18 @@ function withAffordanceMargins(child: ElkChild, n: SchNode, on: boolean): ElkChi
   const prevLeft = prev ? Number(/left=([\d.]+)/.exec(prev)?.[1] ?? 0) : 0;
   const left = (west.length ? AFFORD_GUTTER : 0) + badgeWidth(west) + prevLeft;
   const right = (east.length ? AFFORD_GUTTER : 0) + badgeWidth(east);
+  // A south pin — a mux select, an FF async reset — has no vertical wall to sit
+  // outboard of, so its control drops *below* the box instead (#286). Detected
+  // from the ELK port side rather than `SchPort.side`, which only distinguishes
+  // west from east and would put a select in the west band it is not drawn in.
+  const bottom = child.ports.some((p) => p.layoutOptions["elk.port.side"] === "SOUTH")
+    ? AFFORD_SOUTH_DROP
+    : 0;
   return {
     ...child,
     layoutOptions: {
       ...child.layoutOptions,
-      "elk.margins": `[left=${left.toFixed(1)},top=0.0,right=${right.toFixed(1)},bottom=0.0]`,
+      "elk.margins": `[left=${left.toFixed(1)},top=0.0,right=${right.toFixed(1)},bottom=${bottom.toFixed(1)}]`,
     },
   };
 }

@@ -1194,30 +1194,69 @@ function storedTraceSteps(label: string): TraceStep[] {
 //
 // `sideOverride` is for glyphs whose pin side is not read off `SchPort.side` (a
 // gate's operands are positional).
+/**
+ * An invisible click/right-click target where a wire meets a glyph that draws no
+ * pin of its own (#286).
+ *
+ * Gates and muxes are drawn with leads, bubbles and notches rather than the pin
+ * triangles the box glyphs use, so their pins had no element — nothing to
+ * select, and nothing for the context menu to hit. This restores the same
+ * behaviour every other pin has without changing how the glyph looks.
+ */
+function pinHit(cx: number, cy: number, pid: number): SVGElement {
+  const hit = document.createElementNS(SVGNS, "circle");
+  hit.setAttribute("class", "pin-hit");
+  hit.setAttribute("cx", String(cx));
+  hit.setAttribute("cy", String(cy));
+  hit.setAttribute("r", "6");
+  hit.onclick = (e) => {
+    e.stopPropagation();
+    selectNode(pid);
+  };
+  hit.oncontextmenu = (e) => crossProbe(pid, e);
+  return hit;
+}
+
+/**
+ * Which wall a pin sits on. `south` exists because an FF's async-reset bubble
+ * and a mux's select both hang under the box (#286): there is no `edgeX` to sit
+ * outboard of, so the west/east rule cannot place them and they get their own.
+ */
+type PinWall = "west" | "east" | "south";
+
 function drawPinAffordances(
   g: SVGElement,
   sp: SchPort | undefined,
   edgeX: number,
   py: number,
-  west: boolean,
+  wall: PinWall,
 ) {
   if (schemMode !== "trace" || !sp?.path) return;
   const path = sp.path;
-  const out = edgeX + (west ? -1 : 1) * 4;
-  const anchor = west ? "end" : "start";
+  const west = wall === "west";
+  const south = wall === "south";
+  // Offset off the pin's centre line, because a wire arrives horizontally at
+  // exactly `py` and a control centred there is drawn on top of the wire it
+  // expands. A south pin's wire arrives vertically instead, so it drops straight
+  // down the centre and the same reasoning puts nothing in its way.
+  const out = south ? edgeX : edgeX + (west ? -4 : 4);
+  const anchor = south ? "middle" : west ? "end" : "start";
+  const btnY = south ? py + 15 : py - 5;
 
-  // The expand control. West is fan-in (what drives this), east fan-out (what
-  // reads it) — the same sense the right-click submenu uses.
-  const dir: Dir = west ? "in" : "out";
+  // The expand control. Fan-in is "what drives this" and fan-out "what reads
+  // it" — the same sense the right-click submenu uses. A south pin is an input
+  // (a select, a reset), so it expands fan-in. The glyph follows the *meaning*
+  // rather than the wall, so ◀ always reads as fan-in wherever it is drawn.
+  const dir: Dir = wall === "east" ? "out" : "in";
   const btn = document.createElementNS(SVGNS, "text");
   btn.setAttribute("class", "pin-afford");
   btn.setAttribute("x", String(out));
-  btn.setAttribute("y", String(py - 5));
+  btn.setAttribute("y", String(btnY));
   btn.setAttribute("text-anchor", anchor);
-  btn.textContent = west ? "◀" : "▶";
+  btn.textContent = dir === "in" ? "◀" : "▶";
   btn.append(
     Object.assign(document.createElementNS(SVGNS, "title"), {
-      textContent: `Expand ${west ? "fan-in" : "fan-out"} of ${path}`,
+      textContent: `Expand ${dir === "in" ? "fan-in" : "fan-out"} of ${path}`,
     }),
   );
   btn.onclick = (e) => {
@@ -1233,7 +1272,7 @@ function drawPinAffordances(
   const badge = document.createElementNS(SVGNS, "text");
   badge.setAttribute("class", "more-badge");
   badge.setAttribute("x", String(out));
-  badge.setAttribute("y", String(py + 9));
+  badge.setAttribute("y", String(south ? py + 25 : py + 9));
   badge.setAttribute("text-anchor", anchor);
   badge.textContent = `+${sp.more}`;
   badge.append(
@@ -1607,7 +1646,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       arrow.onclick = () => selectNode(pid);
       arrow.oncontextmenu = probePin;
       g.appendChild(arrow);
-      drawPinAffordances(g, sp, edgeX, py, west);
+      drawPinAffordances(g, sp, edgeX, py, west ? "west" : "east");
 
       // A logic node (comb/latch/assign) is a process, not a module: its pins are
       // bare wire stubs, so skip the per-pin signal-name labels (the wire already
@@ -1806,7 +1845,7 @@ function renderContainer(
     tri.onclick = () => selectNode(pid);
     tri.oncontextmenu = (ev) => crossProbe(pid, ev);
     g.appendChild(tri);
-    drawPinAffordances(g, sp, px, py, west);
+    drawPinAffordances(g, sp, px, py, west ? "west" : "east");
     const lab = document.createElementNS(SVGNS, "text");
     lab.setAttribute("class", "pin-label");
     lab.setAttribute("x", String(west ? px + 6 : px - 6));
@@ -1853,7 +1892,7 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   g.appendChild(arrow);
   // A boundary pin is where a trace leaves the drawn scope, so it is the most
   // likely thing to want expanded. A constant tie-off is inert and gets none.
-  if (!isConst) drawPinAffordances(g, sp, px, py, input);
+  if (!isConst) drawPinAffordances(g, sp, px, py, input ? "west" : "east");
 
   const t = document.createElementNS(SVGNS, "text");
   t.setAttribute("class", isConst ? "const-label" : "pin-label");
@@ -2239,7 +2278,29 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
       t.style.pointerEvents = "none";
       t.textContent = sp.constant;
       g.appendChild(t);
+    } else {
+      // Selectable and expandable, like any other pin (#286). A gate draws leads
+      // rather than triangles, so there was no element here at all — not merely
+      // no inline control, but nothing to click or right-click either. The hit
+      // target is invisible and sits where the wire lands; the ◀ control is the
+      // visible affordance, and it only appears in trace mode.
+      //
+      // Skipped for a constant tie: there is nothing upstream to expand, and its
+      // value label already occupies this margin.
+      g.appendChild(pinHit(0, py, sp.id));
+      drawPinAffordances(g, sp, 0, py, "west");
     }
+  }
+  // The output. Its wire lands on the east wall past any inversion bubble, so
+  // the control clears the bubble by construction rather than by nudging.
+  const eastPort = (c.ports ?? []).find(
+    (p: any) => portById.get(Number(String(p.id).slice(1)))?.side === "east",
+  );
+  const eastSp = eastPort && portById.get(Number(String(eastPort.id).slice(1)));
+  if (eastSp) {
+    const ey = eastPort.y ?? midY;
+    g.appendChild(pinHit(W, ey, eastSp.id));
+    drawPinAffordances(g, eastSp, W, ey, "east");
   }
   // A dangling output (#202): the driven net has no in-scope reader, so no wire
   // labels it. Float the net name just past the east tip, dimmed, and let it
@@ -2306,7 +2367,16 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
       g.appendChild(t);
       continue;
     }
-    if (sp.role !== "sel") continue;
+    // Data branches and the result connect straight to the trapezoid with no pin
+    // glyph, so like a gate they had nothing to click (#286). Give them the same
+    // hit target and inline control every other pin has.
+    if (sp.role !== "sel") {
+      const east = sp.side === "east";
+      const py = p.y ?? 0;
+      g.appendChild(pinHit(east ? W : 0, py, pid));
+      drawPinAffordances(g, sp, east ? W : 0, py, east ? "east" : "west");
+      continue;
+    }
     const px = p.x ?? 0;
     const lab = document.createElementNS(SVGNS, "text");
     lab.setAttribute("class", "pin-label");
@@ -2322,6 +2392,11 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
     };
     lab.textContent = "sel";
     g.appendChild(lab);
+    // The select sits on the south wall, so its control drops below the pin
+    // rather than sitting outboard of a vertical edge — the placement the
+    // west/east rule cannot express (#286). Below the "sel" label, not beside
+    // it, so the two do not overlap on a narrow mux.
+    drawPinAffordances(g, sp, px, H, "south");
   }
   // A dangling output (#202): float the driven net's name past the east wall, dimmed,
   // and cross-probe it, so a mux whose result nothing in scope reads stays searchable.
@@ -2445,7 +2520,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
     arrow.onclick = () => selectNode(pid);
     arrow.oncontextmenu = probePin;
     g.appendChild(arrow);
-    drawPinAffordances(g, sp, edgeX, py, west);
+    drawPinAffordances(g, sp, edgeX, py, west ? "west" : "east");
     if (sp) {
       const t = document.createElementNS(SVGNS, "text");
       t.setAttribute("class", "pin-label");

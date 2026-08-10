@@ -27,6 +27,7 @@ import {
   labelGeometry,
   chooseLabelSegment,
   placementsEqual,
+  AFFORD_SOUTH_DROP,
   CONTAINER_LABEL_H,
   CONTAINER_PAD,
 } from "./elk";
@@ -97,6 +98,43 @@ const contained: SchematicGraph = {
   ],
   edges: [{ id: 0, source: 20, target: 10, net: "mem_valid" }],
 };
+
+describe("south-wall affordance room (#286)", () => {
+  const muxGraph = (on: boolean) =>
+    toElk(
+      {
+        root: "s",
+        nodes: [
+          {
+            id: 1,
+            kind: "Mux",
+            label: "mux",
+            path: "s.m",
+            expandable: false,
+            ports: [
+              { id: 10, name: "a", side: "west", path: "s.a" },
+              { id: 11, name: "y", side: "east", path: "s.y" },
+              { id: 12, name: "s", side: "west", role: "sel", path: "s.sel" },
+            ],
+          },
+        ],
+        edges: [],
+      },
+      { affordances: on },
+    ).children[0];
+
+  it("reserves a band below a box with a south pin", () => {
+    // The select's control drops below the box, where the west/east gutters
+    // reserve nothing — without this it lands on whatever ELK puts underneath.
+    const m = muxGraph(true).layoutOptions["elk.margins"];
+    expect(m).toContain(`bottom=${AFFORD_SOUTH_DROP.toFixed(1)}`);
+  });
+
+  it("reserves nothing below when affordances are off", () => {
+    const m = muxGraph(false).layoutOptions["elk.margins"];
+    expect(m === undefined || m.includes("bottom=0")).toBe(true);
+  });
+});
 
 describe("containment (#293)", () => {
   it("draws a contained box inside its container, not beside it", () => {
