@@ -139,6 +139,22 @@ export interface SchNode {
    * wire anchored at the square (unconnected members omitted).
    */
   modport?: string;
+  /**
+   * The instance that contains this box, when the graph spans more than one
+   * scope (#293).
+   *
+   * Trace mode is the only view that puts objects from several scopes on one
+   * canvas — every other view *is* a single scope, so the frame carries the
+   * answer. Once the walk crosses a wall, "which module is this in?" becomes a
+   * question the drawing has to answer.
+   *
+   * The container is the nearest ancestor `Instance`; generate blocks dissolve,
+   * exactly as the backend's `child_boxes` dissolves them. Absent for a box
+   * directly under the design top, so a trace is never wrapped in one useless
+   * outer box — and always absent from the hierarchy view, which shows one
+   * scope and so nests nothing.
+   */
+  parent?: number;
 }
 export interface SchEdge {
   id: number;

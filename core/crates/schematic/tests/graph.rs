@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use svxprobe_model::{Design, Dir, NodeId, NodeKind};
 use svxprobe_schematic::{
     cone, cone_with, scope_graph, scope_graph_with, trace_graph, ConeLimits, PinRole, Projection,
-    SchematicGraph, Side, TraceStep,
+    SchNode, SchematicGraph, Side, TraceStep,
 };
 
 fn design() -> Design {
@@ -2200,8 +2200,16 @@ fn cone_with_on_an_undriven_input_still_draws_the_seed() {
             ConeLimits::depth(1),
             Projection::ProcessLevel,
         );
+        // Visible as a node of its own, or as a pin on the container the walk
+        // pulled in behind the wall (#293) — the port sits on the instance box.
+        // Either way the user sees the signal they asked about; what must not
+        // happen is an empty graph.
+        let drawn = g.nodes.iter().any(|n| n.path == seed)
+            || g.nodes
+                .iter()
+                .any(|n| n.ports.iter().any(|p| p.path == seed));
         assert!(
-            g.nodes.iter().any(|n| n.path == seed),
+            drawn,
             "{seed}: fan-in must still draw the seed, got {:?}",
             g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
         );
@@ -2238,6 +2246,126 @@ fn cone_with_descends_through_an_instance() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// #293 — the hierarchy the walk crosses is drawn, not flattened away.
+//
+// #285 made a boundary transparent; the result was a *flat* canvas, with the
+// logic behind a wall drawn as a peer of the logic outside it. `SchNode.parent`
+// names the instance that contains a box, so the renderer can nest it. The
+// containing instance is the nearest ancestor `Instance` — generate blocks
+// dissolve, exactly as `child_boxes` dissolves them — and a box directly under
+// the design top has no container at all, so the top is never drawn as a box
+// wrapping the whole canvas.
+// ---------------------------------------------------------------------------
+
+const CORE: &str = "picorv32_soc.g_lane[0].core";
+
+#[test]
+fn cone_with_names_the_instance_that_contains_a_box() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, TOP_CLK),
+        Dir::Out,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let core = id(&d, CORE);
+    let inside: Vec<&SchNode> = g
+        .nodes
+        .iter()
+        .filter(|n| n.path.starts_with("picorv32_soc.g_lane[0].core."))
+        .collect();
+    // Anti-vacuity: containment is trivially satisfied if the walk never
+    // descended. #285's own test guards the descent; this one needs it too.
+    assert!(!inside.is_empty(), "vacuous: nothing behind the wall");
+    for n in &inside {
+        assert_eq!(
+            n.parent,
+            Some(core),
+            "{} is behind the core wall and must name it as its container",
+            n.path
+        );
+    }
+}
+
+#[test]
+fn cone_with_draws_a_containing_instance_once_and_uncontained() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, TOP_CLK),
+        Dir::Out,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let core = id(&d, CORE);
+    // The opaque box and the container are the same object in two states, so
+    // reaching an instance from outside *and* descending into it must promote
+    // the one node rather than add a second.
+    let drawn: Vec<&SchNode> = g.nodes.iter().filter(|n| n.id == core).collect();
+    assert_eq!(
+        drawn.len(),
+        1,
+        "the instance must be drawn once, got {:?}",
+        drawn.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+    // Its own nearest ancestor instance is the design top, which is not a
+    // container — otherwise every trace would sit inside one useless outer box.
+    assert_eq!(drawn[0].parent, None, "a box under the top is uncontained");
+}
+
+#[test]
+fn cone_with_containers_are_emitted_and_acyclic() {
+    // A `parent` naming a node that is not on canvas cannot be nested, and a
+    // cycle would hang a recursive renderer rather than draw wrongly.
+    every_cone(|g, seed, proj, depth| {
+        let ids: std::collections::HashSet<NodeId> = g.nodes.iter().map(|n| n.id).collect();
+        for n in &g.nodes {
+            if let Some(p) = n.parent {
+                assert!(
+                    ids.contains(&p),
+                    "{seed} {proj:?} depth {depth}: {} names container {p}, which is not drawn",
+                    n.path
+                );
+                assert_ne!(
+                    p, n.id,
+                    "{seed} {proj:?} depth {depth}: {} contains itself",
+                    n.path
+                );
+            }
+        }
+        let parent_of: std::collections::HashMap<NodeId, Option<NodeId>> =
+            g.nodes.iter().map(|n| (n.id, n.parent)).collect();
+        for n in &g.nodes {
+            let (mut cur, mut hops) = (n.parent, 0usize);
+            while let Some(c) = cur {
+                hops += 1;
+                assert!(
+                    hops <= g.nodes.len(),
+                    "{seed} {proj:?} depth {depth}: container cycle above {}",
+                    n.path
+                );
+                cur = *parent_of.get(&c).unwrap_or(&None);
+            }
+        }
+    });
+}
+
+#[test]
+fn scope_graph_draws_no_containers() {
+    // Hierarchy mode shows exactly one scope, so nothing in it is nested — and
+    // `parent` skips serialization when absent, keeping that output byte-identical.
+    let d = design();
+    for scope in ["picorv32_soc", "picorv32_soc.g_lane[0]", CORE] {
+        let g = scope_graph(&d, scope).expect("scope graph");
+        assert!(
+            g.nodes.iter().all(|n| n.parent.is_none()),
+            "{scope}: the scope view must not nest"
+        );
+    }
+}
+
 /// Every seed x projection x depth a cone invariant is checked against — one
 /// place to widen the sweep, since the assertions below are all "for every cone".
 fn every_cone(mut f: impl FnMut(&SchematicGraph, &str, Projection, usize)) {
@@ -2265,15 +2393,22 @@ fn cone_with_wires_every_box_it_emits() {
     every_cone(|g, seed, proj, depth| {
         let wired: std::collections::HashSet<NodeId> =
             g.edges.iter().flat_map(|e| [e.source, e.target]).collect();
+        // A container earns its place from what it holds, not from its own pins:
+        // an instance the walk descended through is often wired entirely by the
+        // boxes inside it (#293). It is not an orphan — it is the wall.
+        let holds: std::collections::HashSet<NodeId> =
+            g.nodes.iter().filter_map(|n| n.parent).collect();
         let orphans: Vec<&str> = g
             .nodes
             .iter()
             // A pin carrying a `more` count is the reported remainder of a
             // capped fan-out — connectivity stated, not missing.
             .filter(|n| {
-                !n.ports
-                    .iter()
-                    .any(|p| wired.contains(&p.id) || p.more.is_some())
+                !holds.contains(&n.id)
+                    && !n
+                        .ports
+                        .iter()
+                        .any(|p| wired.contains(&p.id) || p.more.is_some())
             })
             .map(|n| n.path.as_str())
             .collect();
@@ -2593,14 +2728,24 @@ fn trace_graph_joins_both_directions_of_one_net_at_a_single_node() {
         proj,
     );
     let only_in = trace_graph(&d, &[step(&d, MEM_VALID, Dir::In, 1)], limits, proj);
+    // A crossing may be drawn as a node of its own, or — once containment pulls
+    // in the instance behind the wall (#293) — as a pin on that container. Both
+    // are one junction; what must never happen is two of them.
+    //
+    // Keyed on the signal's own **model** ids, not on `path`: every consumer's
+    // pin carries the net path too, but only an anchor is keyed on the model
+    // node itself (a logic box's pins are `PinAlloc`-synthesized).
+    let anchors: std::collections::HashSet<NodeId> =
+        d.nodes_at_path(MEM_VALID).iter().copied().collect();
     let junction = |g: &SchematicGraph| -> Vec<NodeId> {
         let mut v: Vec<NodeId> = g
             .nodes
             .iter()
-            .filter(|n| n.path == MEM_VALID)
-            .map(|n| n.id)
+            .flat_map(|n| n.ports.iter().map(|p| p.id).chain(std::iter::once(n.id)))
+            .filter(|id| anchors.contains(id))
             .collect();
         v.sort_unstable();
+        v.dedup();
         v
     };
     // Exactly one node, since #285: a port and its backing net are two model

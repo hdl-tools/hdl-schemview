@@ -142,6 +142,22 @@ pub struct SchNode {
     /// sublabels it with the view (`mem_if.mem`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modport: Option<String>,
+    /// The instance that contains this box, when the graph spans more than one
+    /// scope (#293).
+    ///
+    /// Trace mode is the only view that puts objects from several scopes on one
+    /// canvas — every other view *is* a single scope, so the frame carries the
+    /// answer. Once the walk crosses a wall, "which module is this in?" becomes
+    /// a question the drawing has to answer, and flattening it away discards a
+    /// fact the elaborated hierarchy already states.
+    ///
+    /// The container is the nearest ancestor `Instance`; generate blocks
+    /// dissolve, exactly as [`child_boxes`] dissolves them. `None` for a box
+    /// directly under the design top, so a trace is never wrapped in one
+    /// useless outer box. Always `None` from [`scope_graph`], which keeps that
+    /// output byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<NodeId>,
     /// Word count of a `Memory` box (#112) — labels the array (e.g. `512`).
     /// `None` for every non-memory node.
     #[serde(rename = "memDepth", skip_serializing_if = "Option::is_none")]
@@ -780,6 +796,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
     }
     let label = relative_to(&n.path, scope);
     Some(SchNode {
+        parent: None,
         id: bx,
         kind: n.kind,
         label,
@@ -808,6 +825,7 @@ fn make_box(design: &Design, bx: NodeId, scope: &str) -> Option<SchNode> {
 fn make_const_node(lit: &str, port: NodeId) -> SchNode {
     let id = CONST_ID_BASE + port;
     SchNode {
+        parent: None,
         id,
         kind: NodeKind::Port,
         label: lit.to_string(),
@@ -871,6 +889,7 @@ fn make_ff_box(design: &Design, ff: NodeId, scope: &str, pins: &mut PinAlloc) ->
         })
         .collect();
     Some(SchNode {
+        parent: None,
         id: ff,
         kind: NodeKind::Ff,
         label: if n.name.is_empty() {
@@ -929,6 +948,7 @@ fn make_logic_box(design: &Design, bx: NodeId, pins: &mut PinAlloc) -> Option<Sc
         _ => "comb",
     };
     Some(SchNode {
+        parent: None,
         id: bx,
         kind: n.kind,
         label: label.into(),
@@ -987,6 +1007,7 @@ fn make_memory_box(
         })
         .collect();
     Some(SchNode {
+        parent: None,
         id: mem,
         kind: NodeKind::Memory,
         label: relative_to(&n.path, scope),
@@ -1063,6 +1084,7 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
         constant: None,
     });
     Some(SchNode {
+        parent: None,
         id: gate,
         kind: n.kind,
         label: gate_label(n),
@@ -1093,6 +1115,7 @@ fn make_boundary_pin(design: &Design, port: NodeId) -> Option<SchNode> {
     let n = design.node(port)?;
     let side = boundary_side(n.dir.unwrap_or(Dir::In));
     Some(SchNode {
+        parent: None,
         id: port,
         kind: NodeKind::Port,
         label: n.name.clone(),
@@ -1208,6 +1231,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
             }
         }
         nodes.push(SchNode {
+            parent: None,
             id: mp,
             kind: NodeKind::Modport,
             label: relative_to(&mn.path, scope_path),
@@ -1287,6 +1311,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
         };
         let fid = MODPORT_FRAME_BASE + mp;
         nodes.push(SchNode {
+            parent: None,
             id: fid,
             kind: NodeKind::Port,
             label: mn.name.clone(),
@@ -2160,6 +2185,26 @@ fn seed_signals(design: &Design, seed: NodeId) -> Vec<NodeId> {
     out
 }
 
+/// The instance that contains `node` on canvas, or `None` for one directly under
+/// the design top (#293).
+///
+/// The nearest ancestor `Instance`, with generate blocks dissolving exactly as
+/// [`child_boxes`] dissolves them — so `g_lane[0].core` contains its own logic
+/// while `g_lane[0]` itself is not a container. The design top is excluded
+/// deliberately: it contains everything, so drawing it would wrap every trace in
+/// one outer box that says nothing.
+fn containing_instance(design: &Design, node: NodeId) -> Option<NodeId> {
+    let mut cur = design.node(node)?.parent?;
+    loop {
+        let n = design.node(cur)?;
+        if n.kind == NodeKind::Instance {
+            // A top-level instance is the design itself, not a container.
+            return n.parent.map(|_| cur);
+        }
+        cur = n.parent?;
+    }
+}
+
 /// The same-path sibling group of a signal — a port and its backing net read as
 /// the **one** signal they are (#285).
 ///
@@ -2412,6 +2457,7 @@ fn cone_pin_for(
 fn make_signal_stub(design: &Design, sig: NodeId, side: Side) -> Option<SchNode> {
     let n = design.node(sig)?;
     Some(SchNode {
+        parent: None,
         id: sig,
         kind: n.kind,
         label: n.name.clone(),
@@ -2914,6 +2960,51 @@ pub fn trace_graph(
         }
     }
 
+    // Containment (#293): name the instance behind whose wall each box sits, and
+    // stand up any container the walk did not otherwise emit.
+    //
+    // Before the collision reconciliation below, deliberately. A container is an
+    // `Instance`, and `make_box` keys its pins on its own `Port` children — which
+    // is exactly the model id a crossing anchor's stub is keyed on. Emitting the
+    // container here lets that collision resolve the way it already does ("the
+    // box wins"), which for a boundary is the *right* answer: the crossing point
+    // degenerates into a pin on the container's wall, with the outside wired to
+    // it from one side and the inside from the other. Emitting containers after
+    // reconciliation would leave two nodes claiming one id, which no layout
+    // engine can anchor.
+    let mut containers: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+    if !nodes.is_empty() {
+        let mut want: Vec<NodeId> = Vec::new();
+        for n in &nodes {
+            let mut cur = containing_instance(design, n.id);
+            while let Some(c) = cur {
+                if !nodes.iter().any(|x| x.id == c) && !want.contains(&c) {
+                    want.push(c);
+                }
+                cur = containing_instance(design, c);
+            }
+        }
+        for c in want {
+            let scope_path = design
+                .node(c)
+                .and_then(|n| n.parent)
+                .and_then(|p| design.node(p))
+                .map(|n| n.path.clone())
+                .unwrap_or_else(|| root.clone());
+            if let Some(node) = cone_box_node(design, c, &scope_path, &mut pins) {
+                emitted_pins.extend(node.ports.iter().map(|p| p.id));
+                nodes.push(node);
+                emitted.insert(c);
+                containers.insert(c);
+            }
+        }
+        // Every container in every chain is on canvas now, so no `parent` can
+        // name a node the renderer cannot find.
+        for n in &mut nodes {
+            n.parent = containing_instance(design, n.id);
+        }
+    }
+
     // A stub's pin id *is* its model id, so a signal some box also exposes as a
     // pin — an instance's own `Port` child, most often — ends up with that one id
     // on two nodes, which no layout engine can anchor. Reconciled here rather
@@ -2965,10 +3056,48 @@ pub fn trace_graph(
         edges.iter().flat_map(|e| [e.source, e.target]).collect();
     nodes.retain(|n| {
         seed_anchors.contains(&n.id)
+            || containers.contains(&n.id)
             || n.ports
                 .iter()
                 .any(|p| wired.contains(&p.id) || p.more.is_some())
     });
+    // A container earns its place from what it holds, not from its own pins —
+    // an instance the walk descended through is often wired entirely by the
+    // boxes inside it. So it is exempt above and then dropped here if the pass
+    // left it empty, which also unhooks anything that named it (#293). Repeated
+    // until stable, because dropping an inner container can empty an outer one.
+    loop {
+        let holds: std::collections::HashSet<NodeId> =
+            nodes.iter().filter_map(|n| n.parent).collect();
+        let before = nodes.len();
+        nodes.retain(|n| {
+            !containers.contains(&n.id)
+                || holds.contains(&n.id)
+                || n.ports.iter().any(|p| wired.contains(&p.id))
+        });
+        // Anything whose container just went is no longer nested, or `parent`
+        // would name a node the renderer cannot find.
+        let live: std::collections::HashSet<NodeId> = nodes.iter().map(|n| n.id).collect();
+        for n in &mut nodes {
+            if n.parent.is_some_and(|p| !live.contains(&p)) {
+                n.parent = None;
+            }
+        }
+        if nodes.len() == before {
+            break;
+        }
+    }
+
+    // In a cone an unwired pin means "beyond the frontier", not "floating in the
+    // design" — dimming it would state a falsehood the scope graph is entitled to
+    // state and this view is not. `make_box` decides `dangling` from the *model*,
+    // which is right for a scope and wrong here, and containment made it visible
+    // by pulling in whole instances the walk never wired (#293).
+    for n in &mut nodes {
+        for p in &mut n.ports {
+            p.dangling = false;
+        }
+    }
 
     SchematicGraph {
         root,
