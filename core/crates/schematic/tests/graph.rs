@@ -2316,6 +2316,55 @@ fn cone_with_from_a_gate_follows_only_the_side_asked_for() {
     );
 }
 
+const OR812: &str = "picorv32_soc.g_lane[0].core.$assign200.$or812";
+
+#[test]
+fn trace_graph_expands_a_gate_an_earlier_step_reached() {
+    // The trace bar's ▶ on a gate drawn by an earlier step must expand *that*
+    // gate. Reported: only the first gate expands, later ones do nothing.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let one = trace_graph(&d, &[step(&d, AND813, Dir::Out, 1)], lim, p);
+    let two = trace_graph(
+        &d,
+        &[step(&d, AND813, Dir::Out, 1), step(&d, OR812, Dir::Out, 1)],
+        lim,
+        p,
+    );
+    // Anti-vacuity: step 1 must actually have drawn the gate step 2 expands.
+    assert!(
+        box_paths(&one).contains(OR812),
+        "vacuous: step 1 never drew {OR812}"
+    );
+    assert!(
+        two.nodes.len() > one.nodes.len(),
+        "expanding a gate an earlier step drew added nothing: {:?} -> {:?}",
+        box_paths(&one),
+        box_paths(&two)
+    );
+}
+
+#[test]
+fn trace_graph_expands_fan_in_of_a_gate_operand() {
+    // A gate's *input* pin carries the operand's path — for gate-to-gate wiring
+    // that is the upstream gate itself. ◀ on it must expand that gate's fan-in.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let one = trace_graph(&d, &[step(&d, OR812, Dir::Out, 1)], lim, p);
+    let two = trace_graph(
+        &d,
+        &[step(&d, OR812, Dir::Out, 1), step(&d, AND813, Dir::In, 1)],
+        lim,
+        p,
+    );
+    assert!(
+        two.nodes.len() > one.nodes.len() || two.edges.len() > one.edges.len(),
+        "fan-in on a gate operand added nothing: {:?} -> {:?}",
+        box_paths(&one),
+        box_paths(&two)
+    );
+}
+
 #[test]
 fn cone_with_on_a_gate_wires_the_box_it_was_seeded_on() {
     // The anchor half of the same defect. A gate is never stubbed (#268), and the
