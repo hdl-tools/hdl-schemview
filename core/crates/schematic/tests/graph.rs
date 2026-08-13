@@ -2366,6 +2366,32 @@ fn trace_graph_expands_fan_in_of_a_gate_operand() {
 }
 
 #[test]
+fn trace_graph_fan_in_on_a_gate_input_adds_the_driver() {
+    // The shape a user actually builds: seed a signal, get gates, then click ◀ on
+    // a gate's input pin — whose path *is* an operand signal. Fan-out first, so
+    // the driver is genuinely absent before the second step.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let seed = "picorv32_soc.g_lane[0].core.mem_valid";
+    let one = trace_graph(&d, &[step(&d, seed, Dir::Out, 1)], lim, p);
+    let two = trace_graph(
+        &d,
+        &[step(&d, seed, Dir::Out, 1), step(&d, seed, Dir::In, 1)],
+        lim,
+        p,
+    );
+    assert!(
+        !box_paths(&one).contains(FF214),
+        "vacuous: fan-out already drew the driver"
+    );
+    assert!(
+        box_paths(&two).contains(FF214),
+        "fan-in on a gate input must add the driver: {:?}",
+        box_paths(&two)
+    );
+}
+
+#[test]
 fn cone_with_on_a_gate_wires_the_box_it_was_seeded_on() {
     // The anchor half of the same defect. A gate is never stubbed (#268), and the
     // model wires gate-to-gate with no net node between, so a gate seed had

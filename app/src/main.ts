@@ -1070,6 +1070,34 @@ function showTruncation(truncated: boolean) {
   }
 }
 
+/** Cleared on the next expansion, so a stale note never outlives its step. */
+let traceNoteTimer: number | undefined;
+
+/**
+ * Say that an expansion changed nothing (#286).
+ *
+ * A step whose result is already on canvas produces an identical graph, and the
+ * canvas simply does not move — which is exactly how a *working* control reads
+ * when it is dead. Fan-in on a gate's input pin hits this constantly, because
+ * that pin names the signal the trace was very often seeded on, and a "both ◀▶"
+ * seed has already drawn its fan-in. Reporting it is the difference between "the
+ * answer is already here" and "this button is broken".
+ */
+function noteTrace(msg: string) {
+  const el = document.getElementById("trace-banner");
+  if (!el) return;
+  window.clearTimeout(traceNoteTimer);
+  el.hidden = false;
+  el.textContent = msg;
+  traceNoteTimer = window.setTimeout(() => {
+    if (el.textContent === msg) el.hidden = true;
+  }, 4000);
+}
+
+/** Node/wire counts — a trace only ever grows, so equality means "no change". */
+const traceSize = (g: SchematicGraph | null) =>
+  g ? `${g.nodes.length}:${g.edges.length}` : "";
+
 // Fetch and draw the current step list. Keeps the zoom level rather than
 // zoom-to-fit, because a trace grows in place: refitting on every expansion would
 // yank the canvas out from under the user.
@@ -1135,8 +1163,18 @@ async function enterHierarchy() {
 // would silently draw someone else's question.
 async function startTrace(path: string, dir: Dir, fanout?: number) {
   const step: TraceStep = { path, dir, ...(fanout === undefined ? {} : { fanout }) };
-  traceSteps = schemMode === "trace" ? pushTraceStep(traceSteps, step) : [step];
+  const extending = schemMode === "trace";
+  const before = extending ? traceSize(state.graph) : "";
+  traceSteps = extending ? pushTraceStep(traceSteps, step) : [step];
   await enterTrace();
+  // Nothing new: either the identical step was already in the list, or the walk
+  // re-derived a graph that already held everything it found. Both leave the
+  // canvas untouched, which is indistinguishable from a control that does not
+  // work — so say which it is (#286).
+  if (extending && before && traceSize(state.graph) === before) {
+    const verb = dir === "in" ? "Fan-in" : dir === "out" ? "Fan-out" : "Fan-in and fan-out";
+    noteTrace(`${verb} of ${path} is already on the canvas — nothing further to add.`);
+  }
 }
 
 // Rewind to a step in the trace bar, mirroring how a breadcrumb frame truncates
