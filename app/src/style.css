@@ -372,6 +372,11 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
    — gates and muxes use leads and bubbles rather than triangles (#286). `fill`
    rather than `fill:none` because a none-filled shape takes no pointer events. */
 .pin-hit { fill:transparent; cursor:pointer; }
+/* Selected, it stops being invisible: on a glyph that draws no pin of its own
+   there is nothing else to carry the highlight, and a selection with no feedback
+   reads as a dead click (#295). Unselected it stays fully transparent, so the
+   glyph is unchanged. */
+.pin-hit.sel { fill:var(--sel); }
 .pin-in { fill:var(--pin); }
 .pin-out { fill:var(--pin-out); }
 /* Storage enable input (latch gate / FF clock-enable): its own tint so the
