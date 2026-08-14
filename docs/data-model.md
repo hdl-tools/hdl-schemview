@@ -143,8 +143,15 @@ Side { West, East }                                                 // drives EL
 
 ```rust
 SchNode { id, kind, label, path, expandable, ports: Vec<SchPort>,
-          module, constant, modport, mem_depth, init_source }
+          module, constant, modport, mem_depth, init_source, parent }
 ```
+
+`parent` is the instance that **contains** this box, present only when the graph spans more
+than one scope — i.e. trace mode (#293). Every other view *is* a single scope, so the frame
+carries the answer and nothing nests. It names the nearest ancestor `Instance`; generate
+blocks dissolve exactly as `child_boxes` dissolves them, and a box directly under the design
+top has none, so a trace is never wrapped in one outer box that says nothing. `elk.ts` folds
+these into ELK compound nodes and the renderer draws each as a labelled container.
 
 `modport` marks an `Interface` node as a modport-qualified *port's* bundle — drawn as a
 square frame pin at the view boundary rather than the hexagon bundle box an interface
