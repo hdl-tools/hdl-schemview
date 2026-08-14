@@ -2438,6 +2438,49 @@ fn trace_graph_fan_in_on_a_sibling_operand_still_wires_its_driver() {
 }
 
 #[test]
+fn trace_graph_wires_a_fan_in_seed_to_the_readers_already_drawn() {
+    // The reported sequence: "Trace from here > Both" on `mem_valid`, then expand
+    // fan-in of `mem_ready` from a pin on a box inside `core` that reads it.
+    //
+    // Fan-in means "what drives this", so the walk correctly adds only the driver
+    // — and the new wire then stopped dead at the module boundary, disconnected
+    // from the very pin that was clicked. Direction governs what a step
+    // *discovers*; it must not govern what the seed is *connected* to.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::ProcessLevel);
+    let valid = "picorv32_soc.g_lane[1].core.mem_valid";
+    let ready = "picorv32_soc.g_lane[1].core.mem_ready";
+    let g = trace_graph(
+        &d,
+        &[step(&d, valid, Dir::Inout, 1), step(&d, ready, Dir::In, 1)],
+        lim,
+        p,
+    );
+    let inside: std::collections::HashSet<NodeId> = g
+        .nodes
+        .iter()
+        .filter(|n| n.path.starts_with("picorv32_soc.g_lane[1].core.$"))
+        .flat_map(|n| n.ports.iter().map(|p| p.id))
+        .collect();
+    // Anti-vacuity: step 1 must have drawn boxes inside the module for step 2 to
+    // connect to, or "it wired up" would hold because there was nothing there.
+    assert!(!inside.is_empty(), "vacuous: no logic inside the module");
+    let ready_wires: Vec<(NodeId, NodeId)> = g
+        .edges
+        .iter()
+        .filter(|e| e.net.as_deref() == Some("mem_ready"))
+        .map(|e| (e.source, e.target))
+        .collect();
+    assert!(
+        ready_wires
+            .iter()
+            .any(|(s, t)| inside.contains(s) || inside.contains(t)),
+        "the fan-in wire stops at the boundary instead of reaching the logic that \
+         reads it: {ready_wires:?}"
+    );
+}
+
+#[test]
 fn cone_with_on_a_gate_wires_the_box_it_was_seeded_on() {
     // The anchor half of the same defect. A gate is never stubbed (#268), and the
     // model wires gate-to-gate with no net node between, so a gate seed had

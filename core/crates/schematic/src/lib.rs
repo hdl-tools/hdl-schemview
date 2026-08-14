@@ -2776,20 +2776,30 @@ pub fn trace_graph(
                 // `follows` and `edge_drives` read `Edge.dir` relative to `e.port`,
                 // so they must be asked about the member the walk stands on — never
                 // about the representative, which may be the other half.
-                let cands: Vec<(NodeId, &Edge)> = idx
+                //
+                // An edge *between* two group members is kept, not skipped: an
+                // ordinary port and its backing net have none, but a
+                // modport-specialized port shares its canonical path with the
+                // member it views and is genuinely wired to it, and that edge is
+                // how the bare bundle is reached (#269).
+                //
+                // Edges the direction *rejects* are carried along too, flagged.
+                // Direction decides what a step newly **discovers**; it must not
+                // decide what the seed is **connected** to. Expanding fan-in from
+                // a pin on a box that reads the signal otherwise draws the driver
+                // and leaves it dangling at the boundary, disconnected from the
+                // very pin that was clicked — the answer detached from the
+                // question (#286). Such an edge is wired only to something already
+                // on canvas, so it adds no boxes and grows nothing.
+                let cands: Vec<(NodeId, &Edge, bool)> = idx
                     .iter()
                     .map(|&i| &design.edges()[i as usize])
-                    .filter_map(|e| {
+                    .map(|e| {
                         let near = if in_group(e.port) { e.port } else { e.endpoint };
-                        // An edge *between* two group members is kept, not skipped:
-                        // an ordinary port and its backing net have none, but a
-                        // modport-specialized port shares its canonical path with
-                        // the member it views and is genuinely wired to it, and
-                        // that edge is how the bare bundle is reached (#269).
-                        follows(e, near, step.dir).then_some((near, e))
+                        (near, e, follows(e, near, step.dir))
                     })
                     .collect();
-                let total = cands.len();
+                let total = cands.iter().filter(|(_, _, f)| *f).count();
                 let mut kept = 0usize;
                 let mut dropped = 0u32;
 
@@ -2798,12 +2808,25 @@ pub fn trace_graph(
                 // empty with `truncated` set but no pin anywhere to hang a `more`
                 // count on — indistinguishable from "nothing found" in the UI, which
                 // is precisely the silent discard this cap exists to prevent.
-                for (near, e) in cands {
-                    if kept >= step.fanout.unwrap_or(limits.fanout).max(1) {
+                for (near, e, followed) in cands {
+                    if followed && kept >= step.fanout.unwrap_or(limits.fanout).max(1) {
                         dropped += 1;
                         continue;
                     }
                     let other = if e.port == near { e.endpoint } else { e.port };
+                    // A connection the direction rejected: wire it only if the far
+                    // side is already drawn. Never let it stand anything up, and
+                    // never charge it against the fan-out budget — it is not a
+                    // discovery, it is the seed meeting what is already there.
+                    if !followed {
+                        let drawn = match cone_box_of(design, other, projection, &mut scopes) {
+                            Some((bx, _)) => emitted.contains(&bx),
+                            None => stubs.contains(&group_of(&mut group_cache, design, other)[0]),
+                        };
+                        if !drawn {
+                            continue;
+                        }
+                    }
                     // Which side the far end sits on, for an anchor's own pin.
                     let far_side = if edge_drives(e, near) {
                         Side::East
@@ -2911,7 +2934,9 @@ pub fn trace_graph(
                             emitted.insert(bx);
                         }
                     }
-                    kept += 1;
+                    if followed {
+                        kept += 1;
+                    }
                     sig_pins.push(pin);
                     if edge_drives(e, near) {
                         drivers.push((pin, e.select.clone()));
@@ -2950,10 +2975,12 @@ pub fn trace_graph(
                             );
                         }
                     }
-                    let Some(bx) = far_box else {
-                        // A free-net anchor: keep walking through the signal itself,
-                        // the way the wall-crossing arm always did.
-                        if !in_group(other) && visited.insert(other) {
+                    let Some(bx) = far_box.filter(|_| followed) else {
+                        // A free-net anchor, or a connection the direction rejected:
+                        // keep walking through the signal itself, the way the
+                        // wall-crossing arm always did — but only when this hop was
+                        // one the direction actually asked for.
+                        if followed && !in_group(other) && visited.insert(other) {
                             next.push(other);
                         }
                         continue;
