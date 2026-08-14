@@ -1286,43 +1286,68 @@ function drawPinAffordances(
   // (a select, a reset), so it expands fan-in. The glyph follows the *meaning*
   // rather than the wall, so ◀ always reads as fan-in wherever it is drawn.
   const dir: Dir = wall === "east" ? "out" : "in";
-  const btn = document.createElementNS(SVGNS, "text");
-  btn.setAttribute("class", "pin-afford");
-  btn.setAttribute("x", String(out));
-  btn.setAttribute("y", String(btnY));
-  btn.setAttribute("text-anchor", anchor);
-  btn.textContent = dir === "in" ? "◀" : "▶";
-  btn.append(
-    Object.assign(document.createElementNS(SVGNS, "title"), {
-      textContent: `Expand ${dir === "in" ? "fan-in" : "fan-out"} of ${path}`,
-    }),
-  );
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    void startTrace(path, dir);
+
+  /**
+   * One control: a transparent hit rect with the glyph drawn over it.
+   *
+   * An SVG `<text>` only receives a click on its **painted glyph**, so a bare 9px
+   * arrow is a target the size of the arrow itself — visible, and almost
+   * unhittable. That is the whole of "the glyph exists but clicking does nothing"
+   * (#286): the control was never broken, it was three pixels wide. The rect
+   * carries the pointer events and the tooltip; the text is inert and only draws.
+   */
+  const control = (cls: string, glyph: string, y: number, tip: string, go: () => void) => {
+    // The glyph grows away from `out` in the direction the anchor points, so the
+    // hit area is centred where it actually lands rather than on the anchor.
+    const cx = south ? out : out + (west ? -4 : 4);
+    const grp = document.createElementNS(SVGNS, "g");
+    grp.setAttribute("class", "afford");
+    const hit = document.createElementNS(SVGNS, "rect");
+    hit.setAttribute("class", "afford-hit");
+    hit.setAttribute("x", String(cx - 9));
+    hit.setAttribute("y", String(y - 11));
+    hit.setAttribute("width", "18");
+    hit.setAttribute("height", "16");
+    hit.append(Object.assign(document.createElementNS(SVGNS, "title"), { textContent: tip }));
+    grp.appendChild(hit);
+    const txt = document.createElementNS(SVGNS, "text");
+    txt.setAttribute("class", cls);
+    txt.setAttribute("x", String(out));
+    txt.setAttribute("y", String(y));
+    txt.setAttribute("text-anchor", anchor);
+    txt.textContent = glyph;
+    grp.appendChild(txt);
+    grp.onclick = (e) => {
+      e.stopPropagation();
+      go();
+    };
+    g.appendChild(grp);
   };
-  g.appendChild(btn);
+
+  // Fan-in is "what drives this" and fan-out "what reads it" — the same sense the
+  // right-click submenu uses. A south pin is an input (a select, a reset), so it
+  // expands fan-in. The glyph follows the *meaning* rather than the wall, so ◀
+  // always reads as fan-in wherever it is drawn.
+  control(
+    "pin-afford",
+    dir === "in" ? "◀" : "▶",
+    btnY,
+    `Expand ${dir === "in" ? "fan-in" : "fan-out"} of ${path}`,
+    () => void startTrace(path, dir),
+  );
 
   if (!sp.more) return;
   // The remainder the cap dropped. Clicking lifts the cap for *this* step only —
   // raising the shared budget would un-cap every other signal in the trace and
   // drag a global clock's whole fan-out onto a canvas nobody asked for.
-  const badge = document.createElementNS(SVGNS, "text");
-  badge.setAttribute("class", "more-badge");
-  badge.setAttribute("x", String(out));
-  badge.setAttribute("y", String(south ? py + 25 : py + 9));
-  badge.setAttribute("text-anchor", anchor);
-  badge.textContent = `+${sp.more}`;
-  badge.append(
-    Object.assign(document.createElementNS(SVGNS, "title"), {
-      textContent: `${sp.more} more connection(s) not drawn — click to expand this signal past the fan-out cap`,
-    }),
+  const more = sp.more;
+  control(
+    "more-badge",
+    `+${more}`,
+    south ? py + 25 : py + 9,
+    `${more} more connection(s) not drawn — click to expand this signal past the fan-out cap`,
+    () => void startTrace(path, dir, TRACE_FANOUT + more),
   );
-  badge.onclick = (e) => {
-    e.stopPropagation();
-    void startTrace(path, dir, TRACE_FANOUT + (sp.more ?? 0));
-  };
-  g.appendChild(badge);
 }
 
 function setupModeToggle() {

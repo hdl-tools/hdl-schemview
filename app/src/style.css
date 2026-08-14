@@ -387,8 +387,15 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 /* Trace-mode pin controls (#244 PR4), drawn in the outboard gutter elk.ts reserves.
    Muted until hovered: on a busy trace there is one per pin, and a canvas of live
    accent-coloured glyphs would compete with the wires that carry the meaning. */
-.pin-afford { fill:var(--muted); font-size:9px; cursor:pointer; }
-.pin-afford:hover { fill:var(--accent); }
+.pin-afford { fill:var(--muted); font-size:9px; }
+/* The control is a transparent hit rect with the glyph drawn over it: an SVG
+   <text> only takes a click on its painted glyph, so a bare 9px arrow is a target
+   the size of the arrow (#286). The rect takes the pointer events; the glyph is
+   inert and only draws, so hover has to be driven from the group. */
+.afford { cursor:pointer; }
+.afford-hit { fill:transparent; }
+.afford .pin-afford, .afford .more-badge { pointer-events:none; }
+.afford:hover .pin-afford { fill:var(--accent); }
 /* The remainder a fan-out cap dropped. Uses the same colour pair as #trace-banner,
    so "something was truncated" reads the same at pin level and pane level. */
 .more-badge { fill:var(--trunc-fg); font-size:9px; font-weight:600; cursor:pointer; }
