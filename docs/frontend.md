@@ -88,6 +88,15 @@ per-kind dispatch rather than threaded through all six sizers, and it **parses a
 to** any `elk.margins` a sizer already set (gate and mux set them for constant labels)
 instead of clobbering it.
 
+`assignChild` is the **one** sizer that also reads `affordances` (#295). The gutter is
+horizontal and an assign's problem is vertical: its pins sit ~6px apart, closer than a
+control is tall (`AFFORD_PITCH` = 16, the height of the control's hit rect), so no
+outboard margin can fix it. In trace mode its inputs spread by `affordSpread` —
+cumulative rather than evenly over a span, because a row carrying a `+N` badge owes the
+next one a further `AFFORD_BADGE_DROP` to clear it. Only that glyph, and only because
+`Assign` is a plain rect whose height means nothing to its shape (a mux's trapezoid inset,
+an FF's clock wedge and a curved gate's `edgeXAt` are all functions of theirs).
+
 Gate-level primitives get IEEE distinctive glyphs: `renderGate`/`renderMux` draw the
 flat-back-D AND, curved OR, notched XOR, N-variant output bubbles, Not/Buf triangles and
 datapath op boxes, with wires meeting the shape directly and west input leads reaching the
@@ -145,6 +154,14 @@ A `Hierarchy | Trace` segmented control in the schematic `.tab-aux`, wired from 
   `Trace:` lead-in so the two are not confusable. `#trace-banner` surfaces
   `SchematicGraph.truncated` at pane level: a cap may drop connections, but never
   invisibly.
+- **Every pin is a target, even where no pin is drawn.** Gates, muxes and assigns connect
+  wires straight to the glyph, so `pinHit` puts an invisible circle where the wire lands
+  (#286, #295). Its radius is derived from the laid geometry — half the pin gap, and at
+  most a quarter of the glyph's width — so an assign's 16px-wide square does not have its
+  body clicks swallowed. Right-click cross-probes by **`SchPort.path`**, not by pin id:
+  a synthesized logic-box pin id comes from `PinAlloc` at `1 << 30` and is not a node id,
+  so `crossProbe` would resolve nothing and silently do nothing (`probeHandler` is the
+  one place that rule lives).
 - `drawPinAffordances` draws the ◀/▶ expand button and the `+N` badge from `SchPort.more`,
   as **one helper called from each pin loop** rather than a copy per box shape (the loops
   have already drifted — an FF labels its dangling Q inside the box because its east gutter

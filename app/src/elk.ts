@@ -211,22 +211,40 @@ function storageChild(n: SchNode): ElkChild {
 // down the west wall, the single output leaves the east wall centre. No label —
 // the wires' net labels carry the meaning; the square only marks "a function
 // happens here". Height grows a couple px per input so heavy fan-in reads.
-function assignChild(n: SchNode): ElkChild {
+//
+// In trace mode the inputs spread much further apart, because each carries a
+// control taller than the ~6px pitch this glyph is otherwise happy with — see
+// `affordSpread`. This is the only sizer whose geometry varies with the view, and
+// it is the only one that may: `Assign` is a plain rounded rect, so its height
+// carries no shape semantics (a mux's trapezoid inset, an FF's clock wedge and a
+// curved gate's `edgeXAt` are all functions of their height, and would deform).
+function assignChild(n: SchNode, opts: LayoutOpts): ElkChild {
   const west = n.ports.filter((p) => p.side !== "east");
   const east = n.ports.filter((p) => p.side === "east");
   const rows = Math.max(west.length, 1);
   const w = 16;
-  const h = Math.max(16, 4 + rows * 6);
+  const afford = opts.affordances === true;
+  // Trace mode uses the GATE_TOP/MUX_TOP inset, so the topmost control overhangs
+  // the box by 8px into the `nodeNode` gap — the same property every gate has had
+  // since #286, rather than a bespoke inset invented for one glyph.
+  const top = afford ? 8 : 4;
+  const ys = afford ? affordSpread(west, top) : [];
+  const h = afford
+    ? Math.max(16, (ys.length ? ys[ys.length - 1] : top) + top)
+    : Math.max(16, 4 + rows * 6);
   const ports: ElkPort[] = [];
-  const top = 4;
   const span = Math.max(0, h - 2 * top);
+  const westY = (i: number) => {
+    if (afford) return ys[i];
+    return west.length > 1 ? top + (span * i) / (west.length - 1) : h / 2;
+  };
   west.forEach((p, i) => {
     ports.push({
       id: portId(p.id),
       width: 0,
       height: 0,
       x: 0,
-      y: west.length > 1 ? top + (span * i) / (west.length - 1) : h / 2,
+      y: westY(i),
       layoutOptions: { "elk.port.side": "WEST" },
     });
   });
@@ -464,6 +482,39 @@ export const AFFORD_GUTTER = 16;
  * pin+25, plus clearance.
  */
 export const AFFORD_SOUTH_DROP = 28;
+/**
+ * Minimum vertical distance between two pins that both carry a trace control
+ * (#295) — the height of the control's hit rect.
+ *
+ * A control on a west/east pin at `py` is an 18x16 rect spanning `[py-16, py]`
+ * (glyph baseline `py-5`, rect top `y-11`). Anything closer than 16 and the two
+ * rects overlap, so adjacent pins steal each other's clicks — which is exactly
+ * what an assign's ~6px pitch does.
+ */
+export const AFFORD_PITCH = 16;
+/**
+ * Extra drop owed to a pin whose `+N` badge is drawn (#295).
+ *
+ * The badge hangs *below* its control, spanning `[py-2, py+14]`, so the next pin
+ * down needs `16 + 14` to clear it. Charged per badged row rather than uniformly:
+ * a badge exists only where the fan-out cap actually dropped connections, and a
+ * flat 30 would make a 4-input assign 16x106.
+ */
+export const AFFORD_BADGE_DROP = 14;
+
+/// Pin `y`s down a wall, spaced so no control (or badge) overlaps its neighbour.
+///
+/// Cumulative rather than an even spread over a span, because the room a row owes
+/// the next one depends on whether *it* carries a badge.
+function affordSpread(ports: SchPort[], top: number): number[] {
+  const ys: number[] = [];
+  let y = top;
+  ports.forEach((_, i) => {
+    if (i) y += AFFORD_PITCH + (ports[i - 1].more ? AFFORD_BADGE_DROP : 0);
+    ys.push(y);
+  });
+  return ys;
+}
 
 /** Height of a container's title band — the instance path sits in it (#293). */
 export const CONTAINER_LABEL_H = 22;
@@ -484,6 +535,11 @@ function badgeWidth(ports: SchPort[]): number {
 /// the same reservation for every box shape, and the sizers already disagree about
 /// whether they emit margins at all (only gate/mux do, for #199). Parses any left
 /// margin they set so the two reservations add instead of clobbering each other.
+///
+/// One sizer is nonetheless affordance-aware — `assignChild` (#295). The gutter is
+/// horizontal, and an assign's problem is vertical: its pins are closer together
+/// than a control is tall, which no outboard margin can fix. Only that glyph, and
+/// only because its height means nothing to its shape.
 function withAffordanceMargins(child: ElkChild, n: SchNode, on: boolean): ElkChild {
   if (!on) return child;
   const west = n.ports.filter((p) => p.side !== "east");
@@ -532,7 +588,7 @@ export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
     // labelled west input rows, clock wedge, south reset bubble, east Qs.
     if (n.kind === "FF" || n.kind === "Latch") return storageChild(n);
     // Continuous assign: a stadium capsule (inputs west, output east).
-    if (n.kind === "Assign") return assignChild(n);
+    if (n.kind === "Assign") return assignChild(n, opts);
     // Memory array (#112): an array box, addr/din west, dout east.
     if (n.kind === "Memory") return memoryChild(n);
     // Gate-level primitives (#157): a mux trapezoid (select on the south wall) or

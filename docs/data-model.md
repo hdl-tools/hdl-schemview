@@ -153,6 +153,15 @@ blocks dissolve exactly as `child_boxes` dissolves them, and a box directly unde
 top has none, so a trace is never wrapped in one outer box that says nothing. `elk.ts` folds
 these into ELK compound nodes and the renderer draws each as a labelled container.
 
+`ports` is the **whole** port list from `scope_graph`, and only the pins the walk wired
+from `cone_with`. A scope graph *is* that scope, so "here are this instance's connections"
+is its content and every port belongs; a cone's content is "this is what the signal
+reaches", where an untouched port is a pin, a label and a reserved gutter saying nothing —
+and containment (#293) made that loud, since a traced module is pulled in whole. Pins
+carrying `more` and a step's own seed survive the prune, and only `Instance`/`Interface`
+are pruned: a gate's operands are the glyph's own shape, and an AND drawn with one input
+would misstate the primitive.
+
 `modport` marks an `Interface` node as a modport-qualified *port's* bundle — drawn as a
 square frame pin at the view boundary rather than the hexagon bundle box an interface
 *instance* gets. A bare bundle with `Modport` children reports `expandable`, and
@@ -172,7 +181,7 @@ SchPort { id, name, side: Side, path, width, role, bundle, dangling, constant, m
 | `width` | Like `[31:0]`, else `None` — with an enum-table fallback (`lane_state_e` → `[1:0]`) |
 | `role` | `PinRole { Clk, Reset, Enable, Addr, Din, Dout, Write, Read, Sel, Inv }`. Tags a synthesized FF/latch pin from model facts (`Node.type_` clock name, `Node.reset`, `Node.enable`) or a MEMORY glyph pin from `Edge.mem_port`. `Sel` is a mux's select input (south wall); `Inv` marks a folded inverter drawn as a bubble, whose `path` stays the *un-inverted* operand so cross-probe still lands on it |
 | `bundle` | A whole-interface pin, drawn square instead of the directional triangle |
-| `dangling` | Nothing connects to this pin — shown **dimmed rather than pruned**. A dangling FF Q or gate output gets a name label, since no wire labels it |
+| `dangling` | Nothing connects to this pin — shown **dimmed rather than pruned**. A dangling FF Q or gate output gets a name label, since no wire labels it. Always `false` from `cone_with`: in a cone an unwired pin means "beyond the frontier", not "floating in the design" |
 | `constant` | The inline tie value drawn just outside the pin's west wall when the operand is a literal or parameter |
 | `more` | The count of connections a `ConeLimits` cap dropped — what the trace view's `+N` badge reads |
 

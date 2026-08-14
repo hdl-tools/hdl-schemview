@@ -1241,6 +1241,24 @@ function storedTraceSteps(label: string): TraceStep[] {
 // `sideOverride` is for glyphs whose pin side is not read off `SchPort.side` (a
 // gate's operands are positional).
 /**
+ * Right-click a pin: cross-probe the signal it carries, falling back to the
+ * containing box so the gesture is never dead.
+ *
+ * The pin's **path** is the identity here, not its id. A synthesized logic-box
+ * pin (gate, mux, assign, FF) is handed its id by `PinAlloc` at `LOGIC_PIN_BASE`
+ * (1 << 30) and it is a *port* id, never a node id — so `crossProbe`, which
+ * resolves `pathOf` against `graph.nodes`, finds nothing and silently does
+ * nothing. Only a module-instance or boundary pin carries a real node id.
+ */
+function probeHandler(sp: SchPort | undefined, fallbackId: number) {
+  return (e: MouseEvent) => {
+    e.preventDefault();
+    if (sp?.path) crossProbePath(sp.path, e);
+    else crossProbe(fallbackId, e);
+  };
+}
+
+/**
  * An invisible click/right-click target where a wire meets a glyph that draws no
  * pin of its own (#286).
  *
@@ -1248,18 +1266,29 @@ function storedTraceSteps(label: string): TraceStep[] {
  * triangles the box glyphs use, so their pins had no element — nothing to
  * select, and nothing for the context menu to hit. This restores the same
  * behaviour every other pin has without changing how the glyph looks.
+ *
+ * `r` defaults to the comfortable 6px a wide glyph affords; a caller whose pins
+ * sit closer together than that passes a smaller one, since two overlapping
+ * targets steal each other's clicks (#295).
  */
-function pinHit(cx: number, cy: number, pid: number): SVGElement {
+function pinHit(cx: number, cy: number, sp: SchPort, fallbackId: number, r = 6): SVGElement {
   const hit = document.createElementNS(SVGNS, "circle");
-  hit.setAttribute("class", "pin-hit");
+  // Selection is re-applied at *draw* time, like every other glyph: a trace
+  // expansion re-renders, and a pin that only ever got `.sel` from its click
+  // handler would lose the highlight the moment the walk grew.
+  hit.setAttribute("class", "pin-hit" + (state.selected === sp.id ? " sel" : ""));
   hit.setAttribute("cx", String(cx));
   hit.setAttribute("cy", String(cy));
-  hit.setAttribute("r", "6");
+  hit.setAttribute("r", String(r));
+  // Keying selection on a pin id is safe: node ids and synthesized pin ids are
+  // disjoint by construction (pins start at 1 << 30), so a selected pin can
+  // never light up an unrelated box.
+  hit.dataset.nodeId = String(sp.id);
   hit.onclick = (e) => {
     e.stopPropagation();
-    selectNode(pid);
+    selectNode(sp.id);
   };
-  hit.oncontextmenu = (e) => crossProbe(pid, e);
+  hit.oncontextmenu = probeHandler(sp, fallbackId);
   return hit;
 }
 
@@ -1596,7 +1625,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     }
     // Continuous assign: a small anonymous square function node (#135).
     if (node?.kind === "Assign") {
-      renderAssign(host, c, id);
+      renderAssign(host, c, node, id);
       continue;
     }
     // Memory array (#112): an array-stack glyph with addr/din/dout pins.
@@ -1708,11 +1737,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // A pin selects + highlights (left) and cross-probes to source + waveform
       // (right) by its own model path; if the pin has no path, fall back to the
       // containing box so right-click is never a dead gesture.
-      const probePin = (e: MouseEvent) => {
-        e.preventDefault();
-        if (sp?.path) crossProbePath(sp.path, e);
-        else crossProbe(id, e);
-      };
+      const probePin = probeHandler(sp, id);
       arrow.dataset.nodeId = String(pid);
       arrow.onclick = () => selectNode(pid);
       arrow.oncontextmenu = probePin;
@@ -1914,7 +1939,7 @@ function renderContainer(
         : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
     );
     tri.onclick = () => selectNode(pid);
-    tri.oncontextmenu = (ev) => crossProbe(pid, ev);
+    tri.oncontextmenu = probeHandler(sp, pid);
     g.appendChild(tri);
     drawPinAffordances(g, sp, px, py, west ? "west" : "east");
     const lab = document.createElementNS(SVGNS, "text");
@@ -1951,11 +1976,10 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
       : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
   );
   // A real boundary I/O pin selects (left) and cross-probes to source + waveform
-  // (right), like a box; a constant tie-off is inert.
-  const probePin = (ev: MouseEvent) => {
-    ev.preventDefault();
-    crossProbe(id, ev);
-  };
+  // (right), like a box; a constant tie-off is inert. Deliberately probes the
+  // Port *node* rather than `sp.path`: a port is two half-edges (#285), and this
+  // glyph is the boundary one.
+  const probePin = probeHandler(undefined, id);
   if (!isConst) {
     arrow.onclick = () => selectNode(id);
     arrow.oncontextmenu = probePin;
@@ -2358,7 +2382,7 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
       //
       // Skipped for a constant tie: there is nothing upstream to expand, and its
       // value label already occupies this margin.
-      g.appendChild(pinHit(0, py, sp.id));
+      g.appendChild(pinHit(0, py, sp, id));
       drawPinAffordances(g, sp, 0, py, "west");
     }
   }
@@ -2370,7 +2394,7 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
   const eastSp = eastPort && portById.get(Number(String(eastPort.id).slice(1)));
   if (eastSp) {
     const ey = eastPort.y ?? midY;
-    g.appendChild(pinHit(W, ey, eastSp.id));
+    g.appendChild(pinHit(W, ey, eastSp, id));
     drawPinAffordances(g, eastSp, W, ey, "east");
   }
   // A dangling output (#202): the driven net has no in-scope reader, so no wire
@@ -2444,7 +2468,7 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
     if (sp.role !== "sel") {
       const east = sp.side === "east";
       const py = p.y ?? 0;
-      g.appendChild(pinHit(east ? W : 0, py, pid));
+      g.appendChild(pinHit(east ? W : 0, py, sp, id));
       drawPinAffordances(g, sp, east ? W : 0, py, east ? "east" : "west");
       continue;
     }
@@ -2611,7 +2635,12 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
 // A continuous assign: a small anonymous square (#135) — no text label, no pin
 // glyphs (at 16 px they would outsize the box). The wire net labels carry the
 // meaning; the shape keeps selection and click/right-click cross-probe.
-function renderAssign(parent: SVGElement, c: any, id: number) {
+//
+// Its pins draw no glyph either, so like a gate they had nothing to click and
+// nothing for the context menu to hit (#295) — which mattered more here than
+// anywhere, an assign being the commonest box in the process-level view. Each pin
+// now gets the invisible hit target and, in trace mode, the ◀/▶ control.
+function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
   const g = document.createElementNS(SVGNS, "g");
   g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
@@ -2631,6 +2660,33 @@ function renderAssign(parent: SVGElement, c: any, id: number) {
   tip.textContent = "assign";
   rect.appendChild(tip);
   g.appendChild(rect);
+
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  const laid = (c.ports ?? [])
+    .map((p: any) => ({ p, sp: portById.get(Number(String(p.id).slice(1))) }))
+    .filter((e: any) => e.sp);
+  // The hit radius comes from the geometry ELK actually laid, not from the view:
+  // one rule then covers both, and the renderer needs to know nothing about trace
+  // mode. Two bounds matter — half the pin gap, so neighbours cannot swallow each
+  // other's clicks on a 6px-pitch hierarchy assign; and a quarter of the width,
+  // because on a 16px-wide glyph a 6px circle at the wall covers three-eighths of
+  // the box and, drawn after the rect, would steal clicks meant for the node.
+  const ys = laid
+    .filter((e: any) => e.sp.side !== "east")
+    .map((e: any) => e.p.y ?? 0)
+    .sort((a: number, b: number) => a - b);
+  const gaps = ys.slice(1).map((y: number, i: number) => y - ys[i]);
+  const gap = gaps.length ? Math.min(...gaps) : Infinity;
+  const r = Math.max(2.5, Math.min(5, c.width / 4, gap / 2));
+
+  for (const { p, sp } of laid) {
+    const east = sp.side === "east";
+    const px = east ? c.width : 0;
+    const py = p.y ?? 0;
+    g.appendChild(pinHit(px, py, sp, id, r));
+    drawPinAffordances(g, sp, px, py, east ? "east" : "west");
+  }
   parent.appendChild(g);
 }
 
@@ -3106,8 +3162,8 @@ function applySelection() {
   const host = $("schematic");
   host
     .querySelectorAll(
-      ".box.sel, .pin.sel, .pin-label.sel, .box-label.sel, .box-sublabel.sel, " +
-        ".wire.sel, .wire-label.sel",
+      ".box.sel, .pin.sel, .pin-hit.sel, .pin-label.sel, .box-label.sel, " +
+        ".box-sublabel.sel, .wire.sel, .wire-label.sel",
     )
     .forEach((el) => el.classList.remove("sel"));
   if (state.selected != null) {

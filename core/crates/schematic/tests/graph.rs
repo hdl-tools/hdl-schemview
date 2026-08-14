@@ -1799,6 +1799,100 @@ fn cone_with_emits_every_box_kind() {
 }
 
 #[test]
+fn cone_with_shows_only_the_instance_pins_the_walk_used() {
+    let d = design();
+    let core = id(&d, "picorv32_soc.g_lane[0].core");
+
+    // The scope graph draws the whole port list, and is right to: it *is* that
+    // scope, so "here are this instance's connections" is its content.
+    let scope = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+    let all = scope
+        .nodes
+        .iter()
+        .find(|n| n.id == core)
+        .expect("core in the scope graph")
+        .ports
+        .len();
+    // Anti-vacuity: on a narrow instance there would be nothing to prune, and
+    // every assertion below would hold for the wrong reason.
+    assert!(
+        all > 8,
+        "expected a wide instance to prune, got {all} ports"
+    );
+
+    let g = cone_with(
+        &d,
+        id(&d, "picorv32_soc.clk"),
+        Dir::Inout,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let boxed = g
+        .nodes
+        .iter()
+        .find(|n| n.id == core)
+        .expect("the clock cone reaches core");
+    assert!(
+        boxed.ports.len() < all,
+        "cone kept all {all} ports; nothing was pruned"
+    );
+
+    // Every pin left carries connectivity — it is wired, or it reports what the
+    // fan-out cap dropped. Anything else is clutter this view cannot justify.
+    let wired: std::collections::HashSet<NodeId> =
+        g.edges.iter().flat_map(|e| [e.source, e.target]).collect();
+    for p in &boxed.ports {
+        assert!(
+            wired.contains(&p.id) || p.more.is_some(),
+            "kept an unwired pin {} ({})",
+            p.name,
+            p.path
+        );
+    }
+    // ...and pruning lost nothing: every wire on canvas still lands on something
+    // that exists, which is the invariant the whole view rests on.
+    let pins: std::collections::HashSet<NodeId> = g
+        .nodes
+        .iter()
+        .flat_map(|n| n.ports.iter().map(|p| p.id))
+        .collect();
+    let ids: std::collections::HashSet<NodeId> = g.nodes.iter().map(|n| n.id).collect();
+    for e in &g.edges {
+        for end in [e.source, e.target] {
+            assert!(
+                pins.contains(&end) || ids.contains(&end),
+                "edge end {end} resolves to nothing after pruning"
+            );
+        }
+    }
+}
+
+#[test]
+fn scope_graph_keeps_every_instance_pin() {
+    // The prune is a property of the cone, not of `make_box`: the hierarchy view
+    // must still show the ports a signal never touches.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+    let core = g
+        .nodes
+        .iter()
+        .find(|n| n.path == "picorv32_soc.g_lane[0].core")
+        .expect("core box");
+    let model_ports = d
+        .node(core.id)
+        .expect("core node")
+        .children
+        .iter()
+        .filter(|&&c| d.node(c).is_some_and(|n| n.kind == NodeKind::Port))
+        .count();
+    assert_eq!(
+        core.ports.len(),
+        model_ports,
+        "the scope graph must draw every port the model declares"
+    );
+}
+
+#[test]
 fn cone_with_endpoints_resolve_to_emitted_pins() {
     let d = design();
     for seed in [RESETN, VALID, MEM_VALID] {

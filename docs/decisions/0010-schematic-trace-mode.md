@@ -180,6 +180,14 @@ snapshot already carry. So Append-to-waveform and Show-in-source work in trace m
   `elk.json.edgeCoords: ROOT` is *silently ignored* by elkjs 0.9.3 and correctness may not rest
   on an option that can go quietly missing.
 
+- **An instance shows the pins the walk used, not its whole port list.** The corollary of
+  containment: pulling a traced module in whole also pulls in every port it has, so one
+  crossed signal drew 27 pins on a `picorv32`'s wall. A cone's content is *"this is what the
+  signal reaches"*, and a port the walk never wired says nothing about that — unlike a scope
+  graph, which **is** that scope and where the full list is the content. Pruned in `cone_with`
+  beside the sibling rule that resets `dangling` (an unwired pin there means "beyond the
+  frontier", not "floating in the design"). Pins carrying `more` and a step's own seed stay;
+  gates and FFs are untouched, their pins being the glyph's own shape.
 - **The hierarchical view is unchanged.** `scope_graph`/`expand` output stays byte-identical,
   verified by dumping `svxprobe graph --json` across scopes and cones before and after each
   step and comparing. The layout gutter trace controls need is reserved only when the view asks
@@ -200,8 +208,13 @@ snapshot already carry. So Append-to-waveform and Show-in-source work in trace m
 - **Bulk / whole-design flattening.** The ROADMAP non-goal stands. A trace is always seeded and
   always incremental.
 - **Post-synthesis / netlist-level tracing** — [ADR 0001](0001-scope-rtl-vs-netlist.md).
-- **Inline expand controls on every glyph.** `Assign` (#295), FF/latch and memory pins still
-  have no pin element at all, so they can be reached only through the right-click menu on the
-  *box*. Gate and mux pins were closed by #286; the FF is the awkward remainder, because its
-  east gutter is not reserved — a dangling Q is labelled *inside* the box, so an outboard
-  control means deciding whether that label moves out too.
+- **Inline expand controls on every glyph.** FF/latch and memory pins still have no pin
+  element at all, so they can be reached only through the right-click menu on the *box*.
+  Gate and mux pins were closed by #286 and `Assign` by #295; the FF is the awkward
+  remainder, because its east gutter is not reserved — a dangling Q is labelled *inside*
+  the box, so an outboard control means deciding whether that label moves out too.
+
+  #295 also settled how a **dense** glyph earns the room: a control is 16px tall, so a
+  glyph whose pins sit closer than that spreads them when — and only when — affordances
+  are on. That is the one place a per-kind sizer may read the view, and it is allowed
+  because an assign's height means nothing to its shape.

@@ -28,6 +28,8 @@ import {
   chooseLabelSegment,
   placementsEqual,
   AFFORD_SOUTH_DROP,
+  AFFORD_PITCH,
+  AFFORD_BADGE_DROP,
   CONTAINER_LABEL_H,
   CONTAINER_PAD,
 } from "./elk";
@@ -133,6 +135,100 @@ describe("south-wall affordance room (#286)", () => {
   it("reserves nothing below when affordances are off", () => {
     const m = muxGraph(false).layoutOptions["elk.margins"];
     expect(m === undefined || m.includes("bottom=0")).toBe(true);
+  });
+});
+
+describe("assign pin room for trace controls (#295)", () => {
+  // `more` marks the row whose "+N" badge is drawn, which is what makes that row
+  // owe the next one extra clearance.
+  const assign = (on: boolean, inputs = 3, more?: number) =>
+    toElk(
+      {
+        root: "s",
+        nodes: [
+          {
+            id: 1,
+            kind: "Assign",
+            label: "assign",
+            path: "s.a",
+            expandable: false,
+            ports: [
+              ...Array.from({ length: inputs }, (_, i) => ({
+                id: 10 + i,
+                name: `x${i}`,
+                side: "west" as const,
+                path: `s.x${i}`,
+                ...(more !== undefined && i === 0 ? { more } : {}),
+              })),
+              { id: 20, name: "y", side: "east" as const, path: "s.y" },
+            ],
+          },
+        ],
+        edges: [],
+      },
+      { affordances: on },
+    ).children[0];
+
+  const gaps = (c: any) => {
+    const ys = westYs(c);
+    return ys.slice(1).map((y, i) => y - ys[i]);
+  };
+
+  it("leaves the hierarchy view exactly as it was", () => {
+    // The whole point of doing this in the sizer: a view that draws no controls
+    // must not pay a pixel for them. Asserted on the y's, which the existing
+    // assign test never checked.
+    const c = assign(false);
+    expect(c.height).toBe(22);
+    expect(westYs(c)).toEqual([4, 11, 18]);
+    expect(assign(false, 1).height).toBe(16);
+    expect(assign(false, 4).height).toBe(28);
+    // ...and the pitch it leaves is indeed too small for a control, which is the
+    // reason trace mode needs its own.
+    expect(Math.min(...gaps(assign(false, 4)))).toBeLessThan(AFFORD_PITCH);
+  });
+
+  it("spreads the inputs at least a control apart in trace mode", () => {
+    const c = assign(true);
+    expect(westYs(c)).toEqual([8, 24, 40]);
+    for (const g of gaps(c)) expect(g).toBeGreaterThanOrEqual(AFFORD_PITCH);
+    expect(c.height).toBe(48); // last pin, plus the top inset again
+    // The glyph is still the same square, and the result still leaves east centred.
+    expect(c.width).toBe(16);
+    expect(c.layoutOptions["elk.portConstraints"]).toBe("FIXED_POS");
+    const east = c.ports.filter((p) => p.layoutOptions["elk.port.side"] === "EAST");
+    expect(east.length).toBe(1);
+    expect(east[0].y).toBe(c.height / 2);
+    expect(east[0].x).toBe(16);
+  });
+
+  it("owes a badged row extra room, and only that row", () => {
+    // A "+N" badge hangs below its own control, so the row under it has to clear
+    // both. Charged per badged row: an unbadged neighbour still gets the pitch.
+    const c = assign(true, 3, 5);
+    const g = gaps(c);
+    expect(g[0]).toBe(AFFORD_PITCH + AFFORD_BADGE_DROP);
+    expect(g[1]).toBe(AFFORD_PITCH);
+    expect(c.height).toBeGreaterThan(assign(true, 3).height);
+  });
+
+  it("leaves a single-input assign alone in both views", () => {
+    // One pin has no neighbour to collide with, so the boundary case must not
+    // grow: it is centred on the wall either way.
+    for (const on of [false, true]) {
+      const c = assign(on, 1);
+      expect(c.height).toBe(16);
+      expect(westYs(c)).toEqual([8]);
+    }
+  });
+
+  it("actually varies with the flag", () => {
+    // Anti-vacuity: a sizer that ignored `affordances` would satisfy every
+    // "at least" assertion above by accident.
+    for (const rows of [2, 3, 4]) {
+      expect(assign(true, rows).height).not.toBe(assign(false, rows).height);
+      expect(westYs(assign(true, rows))).not.toEqual(westYs(assign(false, rows)));
+    }
   });
 });
 
