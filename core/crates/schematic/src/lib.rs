@@ -3279,6 +3279,32 @@ pub fn trace_graph(
         }
     }
 
+    // An instance shows the pins the walk actually used, not its whole port list.
+    //
+    // Same reasoning as the `dangling` reset below, one step further: a scope
+    // graph *is* that scope, so "here are this instance's connections" is its
+    // content and every port belongs. A cone's content is "this is what the
+    // signal reaches", and a port the walk never wired says nothing about that —
+    // it is a pin, a label and a reserved gutter of pure clutter. Containment
+    // (#293) sharpened it, since a traced module is now pulled in whole: a
+    // picorv32 crossed by one signal drew every port it has on the wall.
+    //
+    // A pin carrying `more` stays — that count *is* connectivity, reported rather
+    // than hidden — as does a step's own seed, which is the thing the user
+    // pointed at rather than a claim about the design.
+    //
+    // `Instance`/`Interface` only: those are the boxes whose pins `make_box`
+    // takes from the model's port list. A gate's operands or an FF's clock are
+    // the glyph's own shape, and a 3-input AND drawn with one input would
+    // misstate the primitive rather than de-clutter it.
+    for n in &mut nodes {
+        if n.kind != NodeKind::Instance && n.kind != NodeKind::Interface {
+            continue;
+        }
+        n.ports
+            .retain(|p| wired.contains(&p.id) || p.more.is_some() || seed_anchors.contains(&p.id));
+    }
+
     // In a cone an unwired pin means "beyond the frontier", not "floating in the
     // design" — dimming it would state a falsehood the scope graph is entitled to
     // state and this view is not. `make_box` decides `dangling` from the *model*,
