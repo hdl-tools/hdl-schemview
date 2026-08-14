@@ -236,6 +236,80 @@ describe("containment (#293)", () => {
     expect(near(at(sec.endPoint), wall)).toBeLessThan(12);
   });
 
+  it("routes every wire of a container wired on both walls", async () => {
+    // The shape a real trace produces (#286): a container with pins on both
+    // walls, several children, a wire in from outside, and wires between the
+    // children and the container's own pins in both directions. The narrow
+    // fixture above has one child and one wire, and passed while the real graph
+    // lost a wire.
+    const g: SchematicGraph = {
+      root: "top",
+      nodes: [
+        {
+          id: 1,
+          kind: "Instance",
+          label: "core",
+          path: "top.core",
+          expandable: true,
+          ports: [
+            { id: 10, name: "mem_valid", side: "east", path: "top.core.mem_valid" },
+            { id: 11, name: "mem_ready", side: "west", path: "top.core.mem_ready" },
+          ],
+        },
+        {
+          id: 2,
+          kind: "FF",
+          label: "$ff2",
+          path: "top.core.$ff2",
+          expandable: false,
+          parent: 1,
+          ports: [{ id: 20, name: "q", side: "east", path: "top.core.q" }],
+        },
+        {
+          id: 3,
+          kind: "And",
+          label: "and",
+          path: "top.core.$and3",
+          expandable: false,
+          parent: 1,
+          ports: [
+            { id: 30, name: "a", side: "west", path: "top.core.mem_ready" },
+            { id: 31, name: "y", side: "east", path: "top.core.y" },
+          ],
+        },
+        {
+          id: 4,
+          kind: "Interface",
+          label: "bus",
+          path: "top.bus",
+          expandable: true,
+          ports: [{ id: 40, name: "b", side: "east", path: "top.bus.b" }],
+        },
+      ],
+      edges: [
+        { id: 0, source: 20, target: 10, net: "mem_valid" }, // child -> container east pin
+        { id: 1, source: 40, target: 11, net: "mem_ready" }, // outside -> container west pin
+        { id: 2, source: 11, target: 30, net: "mem_ready" }, // container west pin -> child
+      ],
+    };
+    const laid: any = await layout(g);
+    const collect = (kids: any[]): any[] =>
+      kids.flatMap((c) => [c, ...collect(c.children ?? [])]);
+    const all = collect(laid.children ?? []);
+    const everywhere = [...(laid.edges ?? []), ...all.flatMap((c: any) => c.edges ?? [])];
+    for (const id of ["e0", "e1", "e2"]) {
+      const e = everywhere.find((x: any) => x.id === id);
+      expect(e, `${id} must survive layout`).toBeTruthy();
+      expect(e.sections?.length, `${id} must be routed`).toBeGreaterThan(0);
+      // And it must be reachable from the root edge list, which is the only
+      // place the renderer looks.
+      expect(
+        (laid.edges ?? []).some((x: any) => x.id === id),
+        `${id} was relocated out of the root edge list, where the renderer cannot see it`,
+      ).toBe(true);
+    }
+  });
+
   it("routes a wire that crosses the container wall", async () => {
     // The point of the whole option set: a ff inside core wired to core's own
     // boundary pin must still produce a routed edge.

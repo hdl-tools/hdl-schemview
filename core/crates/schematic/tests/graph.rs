@@ -2392,6 +2392,52 @@ fn trace_graph_fan_in_on_a_gate_input_adds_the_driver() {
 }
 
 #[test]
+fn trace_graph_fan_in_on_a_sibling_operand_still_wires_its_driver() {
+    // The exact reported shape: trace `mem_ready` both ways, then click ◀ on the
+    // *other* input of the gate that reads it (`mem_valid`). Alone that step
+    // works; accumulated after the first it drew no wire. Seeding from hierarchy
+    // mode replaces the step list, which is why clicking the signal directly
+    // "worked" — it was a one-step trace, a different graph entirely.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let ready = "picorv32_soc.g_lane[0].core.mem_ready";
+    let valid = "picorv32_soc.g_lane[0].core.mem_valid";
+
+    let alone = trace_graph(&d, &[step(&d, valid, Dir::In, 1)], lim, p);
+    let after = trace_graph(
+        &d,
+        &[step(&d, ready, Dir::Inout, 1), step(&d, valid, Dir::In, 1)],
+        lim,
+        p,
+    );
+    // Anti-vacuity: the single-step form must genuinely reach the driver.
+    assert!(
+        box_paths(&alone).contains(FF214),
+        "vacuous: one-step fan-in never reached {FF214}"
+    );
+    assert!(
+        box_paths(&after).contains(FF214),
+        "accumulated fan-in lost the driver: {:?}",
+        box_paths(&after)
+    );
+    // And it must be *wired*, not merely present — the reported symptom was a
+    // missing wire, which an "is the box there" check would sail straight past.
+    let pins: std::collections::HashSet<NodeId> = after
+        .nodes
+        .iter()
+        .filter(|n| n.path == FF214)
+        .flat_map(|n| n.ports.iter().map(|p| p.id))
+        .collect();
+    assert!(
+        after
+            .edges
+            .iter()
+            .any(|e| pins.contains(&e.source) || pins.contains(&e.target)),
+        "the driver was drawn but nothing wires it"
+    );
+}
+
+#[test]
 fn cone_with_on_a_gate_wires_the_box_it_was_seeded_on() {
     // The anchor half of the same defect. A gate is never stubbed (#268), and the
     // model wires gate-to-gate with no net node between, so a gate seed had
