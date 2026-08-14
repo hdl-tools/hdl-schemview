@@ -3,6 +3,8 @@
 import { api } from "./api";
 import {
   chooseLabelSegment,
+  CONTAINER_LABEL_H,
+  CONTAINER_PAD,
   FF_LABEL_PAD,
   ffRole,
   fitZoom,
@@ -1069,10 +1071,44 @@ function showTruncation(truncated: boolean) {
   }
 }
 
+/** Cleared on the next expansion, so a stale note never outlives its step. */
+let traceNoteTimer: number | undefined;
+
+/**
+ * Say that an expansion changed nothing (#286).
+ *
+ * A step whose result is already on canvas produces an identical graph, and the
+ * canvas simply does not move — which is exactly how a *working* control reads
+ * when it is dead. Fan-in on a gate's input pin hits this constantly, because
+ * that pin names the signal the trace was very often seeded on, and a "both ◀▶"
+ * seed has already drawn its fan-in. Reporting it is the difference between "the
+ * answer is already here" and "this button is broken".
+ */
+function noteTrace(msg: string) {
+  const el = document.getElementById("trace-banner");
+  if (!el) return;
+  window.clearTimeout(traceNoteTimer);
+  el.hidden = false;
+  el.textContent = msg;
+  traceNoteTimer = window.setTimeout(() => {
+    if (el.textContent === msg) el.hidden = true;
+  }, 4000);
+}
+
+/** Node/wire counts — a trace only ever grows, so equality means "no change". */
+const traceSize = (g: SchematicGraph | null) =>
+  g ? `${g.nodes.length}:${g.edges.length}` : "";
+
 // Fetch and draw the current step list. Keeps the zoom level rather than
 // zoom-to-fit, because a trace grows in place: refitting on every expansion would
 // yank the canvas out from under the user.
-async function renderTrace() {
+/**
+ * Draw the current step list. Returns whether it actually drew: a caller that
+ * reports "nothing changed" must not say so when the render never happened
+ * (#286) — a superseded or failed fetch leaves `state.graph` untouched, which is
+ * indistinguishable from an expansion that found nothing.
+ */
+async function renderTrace(): Promise<boolean> {
   const gen = ++traceGen;
   if (!traceSteps.length) {
     state.graph = null;
@@ -1081,7 +1117,7 @@ async function renderTrace() {
     showTruncation(false);
     $("schematic").textContent =
       "Trace mode — right-click a signal, box or wire and pick “Trace from here”, or press `a` to search this scope.";
-    return;
+    return true;
   }
   let graph: SchematicGraph;
   try {
@@ -1090,24 +1126,25 @@ async function renderTrace() {
     });
   } catch (e) {
     log("error", `trace failed: ${e}`);
-    return;
+    return false;
   }
-  if (gen !== traceGen) return; // superseded by a newer expansion
+  if (gen !== traceGen) return false; // superseded by a newer expansion
   state.graph = graph;
   state.selected = null;
   renderBreadcrumb();
   await renderSchematic(graph, { k: zoom.k, scrollLeft: 0, scrollTop: 0 });
   showTruncation(graph.truncated === true);
   refreshSchemPalette();
+  return true;
 }
 
 // Switch to trace mode and draw. Separate from `startTrace` so an already-tracing
 // pane re-renders instead of no-opping on "the mode is already trace".
-async function enterTrace() {
+async function enterTrace(): Promise<boolean> {
   schemMode = "trace";
   applyModeButtons();
   activateTab("schematic-pane");
-  await renderTrace();
+  return await renderTrace();
 }
 
 // Back to the hierarchy view, on whatever scope the nav stack last held (or the
@@ -1134,8 +1171,18 @@ async function enterHierarchy() {
 // would silently draw someone else's question.
 async function startTrace(path: string, dir: Dir, fanout?: number) {
   const step: TraceStep = { path, dir, ...(fanout === undefined ? {} : { fanout }) };
-  traceSteps = schemMode === "trace" ? pushTraceStep(traceSteps, step) : [step];
-  await enterTrace();
+  const extending = schemMode === "trace";
+  const before = extending ? traceSize(state.graph) : "";
+  traceSteps = extending ? pushTraceStep(traceSteps, step) : [step];
+  const drew = await enterTrace();
+  // Nothing new: either the identical step was already in the list, or the walk
+  // re-derived a graph that already held everything it found. Both leave the
+  // canvas untouched, which is indistinguishable from a control that does not
+  // work — so say which it is (#286).
+  if (drew && extending && before && traceSize(state.graph) === before) {
+    const verb = dir === "in" ? "Fan-in" : dir === "out" ? "Fan-out" : "Fan-in and fan-out";
+    noteTrace(`${verb} of ${path} is already on the canvas — nothing further to add.`);
+  }
 }
 
 // Rewind to a step in the trace bar, mirroring how a breadcrumb frame truncates
@@ -1193,58 +1240,122 @@ function storedTraceSteps(label: string): TraceStep[] {
 //
 // `sideOverride` is for glyphs whose pin side is not read off `SchPort.side` (a
 // gate's operands are positional).
+/**
+ * An invisible click/right-click target where a wire meets a glyph that draws no
+ * pin of its own (#286).
+ *
+ * Gates and muxes are drawn with leads, bubbles and notches rather than the pin
+ * triangles the box glyphs use, so their pins had no element — nothing to
+ * select, and nothing for the context menu to hit. This restores the same
+ * behaviour every other pin has without changing how the glyph looks.
+ */
+function pinHit(cx: number, cy: number, pid: number): SVGElement {
+  const hit = document.createElementNS(SVGNS, "circle");
+  hit.setAttribute("class", "pin-hit");
+  hit.setAttribute("cx", String(cx));
+  hit.setAttribute("cy", String(cy));
+  hit.setAttribute("r", "6");
+  hit.onclick = (e) => {
+    e.stopPropagation();
+    selectNode(pid);
+  };
+  hit.oncontextmenu = (e) => crossProbe(pid, e);
+  return hit;
+}
+
+/**
+ * Which wall a pin sits on. `south` exists because an FF's async-reset bubble
+ * and a mux's select both hang under the box (#286): there is no `edgeX` to sit
+ * outboard of, so the west/east rule cannot place them and they get their own.
+ */
+type PinWall = "west" | "east" | "south";
+
 function drawPinAffordances(
   g: SVGElement,
   sp: SchPort | undefined,
   edgeX: number,
   py: number,
-  west: boolean,
+  wall: PinWall,
 ) {
   if (schemMode !== "trace" || !sp?.path) return;
   const path = sp.path;
-  const out = edgeX + (west ? -1 : 1) * 4;
-  const anchor = west ? "end" : "start";
+  const west = wall === "west";
+  const south = wall === "south";
+  // Offset off the pin's centre line, because a wire arrives horizontally at
+  // exactly `py` and a control centred there is drawn on top of the wire it
+  // expands. A south pin's wire arrives vertically instead, so it drops straight
+  // down the centre and the same reasoning puts nothing in its way.
+  const out = south ? edgeX : edgeX + (west ? -4 : 4);
+  const anchor = south ? "middle" : west ? "end" : "start";
+  const btnY = south ? py + 15 : py - 5;
 
-  // The expand control. West is fan-in (what drives this), east fan-out (what
-  // reads it) — the same sense the right-click submenu uses.
-  const dir: Dir = west ? "in" : "out";
-  const btn = document.createElementNS(SVGNS, "text");
-  btn.setAttribute("class", "pin-afford");
-  btn.setAttribute("x", String(out));
-  btn.setAttribute("y", String(py - 5));
-  btn.setAttribute("text-anchor", anchor);
-  btn.textContent = west ? "◀" : "▶";
-  btn.append(
-    Object.assign(document.createElementNS(SVGNS, "title"), {
-      textContent: `Expand ${west ? "fan-in" : "fan-out"} of ${path}`,
-    }),
-  );
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    void startTrace(path, dir);
+  // The expand control. Fan-in is "what drives this" and fan-out "what reads
+  // it" — the same sense the right-click submenu uses. A south pin is an input
+  // (a select, a reset), so it expands fan-in. The glyph follows the *meaning*
+  // rather than the wall, so ◀ always reads as fan-in wherever it is drawn.
+  const dir: Dir = wall === "east" ? "out" : "in";
+
+  /**
+   * One control: a transparent hit rect with the glyph drawn over it.
+   *
+   * An SVG `<text>` only receives a click on its **painted glyph**, so a bare 9px
+   * arrow is a target the size of the arrow itself — visible, and almost
+   * unhittable. That is the whole of "the glyph exists but clicking does nothing"
+   * (#286): the control was never broken, it was three pixels wide. The rect
+   * carries the pointer events and the tooltip; the text is inert and only draws.
+   */
+  const control = (cls: string, glyph: string, y: number, tip: string, go: () => void) => {
+    // The glyph grows away from `out` in the direction the anchor points, so the
+    // hit area is centred where it actually lands rather than on the anchor.
+    const cx = south ? out : out + (west ? -4 : 4);
+    const grp = document.createElementNS(SVGNS, "g");
+    grp.setAttribute("class", "afford");
+    const hit = document.createElementNS(SVGNS, "rect");
+    hit.setAttribute("class", "afford-hit");
+    hit.setAttribute("x", String(cx - 9));
+    hit.setAttribute("y", String(y - 11));
+    hit.setAttribute("width", "18");
+    hit.setAttribute("height", "16");
+    hit.append(Object.assign(document.createElementNS(SVGNS, "title"), { textContent: tip }));
+    grp.appendChild(hit);
+    const txt = document.createElementNS(SVGNS, "text");
+    txt.setAttribute("class", cls);
+    txt.setAttribute("x", String(out));
+    txt.setAttribute("y", String(y));
+    txt.setAttribute("text-anchor", anchor);
+    txt.textContent = glyph;
+    grp.appendChild(txt);
+    grp.onclick = (e) => {
+      e.stopPropagation();
+      go();
+    };
+    g.appendChild(grp);
   };
-  g.appendChild(btn);
+
+  // Fan-in is "what drives this" and fan-out "what reads it" — the same sense the
+  // right-click submenu uses. A south pin is an input (a select, a reset), so it
+  // expands fan-in. The glyph follows the *meaning* rather than the wall, so ◀
+  // always reads as fan-in wherever it is drawn.
+  control(
+    "pin-afford",
+    dir === "in" ? "◀" : "▶",
+    btnY,
+    `Expand ${dir === "in" ? "fan-in" : "fan-out"} of ${path}`,
+    () => void startTrace(path, dir),
+  );
 
   if (!sp.more) return;
   // The remainder the cap dropped. Clicking lifts the cap for *this* step only —
   // raising the shared budget would un-cap every other signal in the trace and
   // drag a global clock's whole fan-out onto a canvas nobody asked for.
-  const badge = document.createElementNS(SVGNS, "text");
-  badge.setAttribute("class", "more-badge");
-  badge.setAttribute("x", String(out));
-  badge.setAttribute("y", String(py + 9));
-  badge.setAttribute("text-anchor", anchor);
-  badge.textContent = `+${sp.more}`;
-  badge.append(
-    Object.assign(document.createElementNS(SVGNS, "title"), {
-      textContent: `${sp.more} more connection(s) not drawn — click to expand this signal past the fan-out cap`,
-    }),
+  const more = sp.more;
+  control(
+    "more-badge",
+    `+${more}`,
+    south ? py + 25 : py + 9,
+    `${more} more connection(s) not drawn — click to expand this signal past the fan-out cap`,
+    () => void startTrace(path, dir, TRACE_FANOUT + more),
   );
-  badge.onclick = (e) => {
-    e.stopPropagation();
-    void startTrace(path, dir, TRACE_FANOUT + (sp.more ?? 0));
-  };
-  g.appendChild(badge);
 }
 
 function setupModeToggle() {
@@ -1292,6 +1403,22 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const labelByText = new Map<string, LabelItem>();
   // The laid-out ELK edges keep their `e<schId>` ids, so map back to the model
   // edge for the net's canonical path (clicking a wire cross-probes that net).
+  // Absolute (root-space) origin of every laid-out node, containers included.
+  // Boxes never need this — they nest as SVG groups and let transform
+  // composition do it — but wires are all drawn into the root group while ELK
+  // reports a contained edge's points relative to its container (#293).
+  const ORIGIN = { x: 0, y: 0 };
+  const originOf = new Map<string, { x: number; y: number }>();
+  const mapOrigins = (kids: any[] | undefined, dx: number, dy: number) => {
+    for (const c of kids ?? []) {
+      const x = dx + (c.x ?? 0);
+      const y = dy + (c.y ?? 0);
+      originOf.set(String(c.id), { x, y });
+      if (c.children) mapOrigins(c.children, x, y);
+    }
+  };
+  mapOrigins(laid.children, 0, 0);
+
   const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
   // Bundle trunks (#117): the member taps of a raw access port were collapsed
   // to one ELK edge (keyed by the first member's id); the trunk cross-probes
@@ -1326,9 +1453,18 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     const handlers = wireHandlers(netPath);
     const wireLeft = handlers?.left ?? null;
     const wireMenu = handlers?.menu ?? null;
+    // ELK reports a routed point relative to the node that *contains* the edge,
+    // which it names in `container` — for an edge between two boxes inside an
+    // instance that is the container, not the root (#293). Wires are drawn into
+    // the root group, so rebase. `elk.json.edgeCoords: ROOT` would say this
+    // declaratively but is silently ignored by elkjs 0.9.3 under either option
+    // id, and a silently-ignored option is not something correctness may rest
+    // on — `container` is reported data, so it cannot go quietly missing.
+    const off = originOf.get(String(e.container)) ?? ORIGIN;
     const segs: [Pt, Pt][] = [];
     for (const sec of e.sections ?? []) {
-      const pts = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
+      const raw = [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint];
+      const pts = raw.map((p: any) => ({ x: p.x + off.x, y: p.y + off.y }));
       const points = pts.map((p: any) => `${p.x},${p.y}`).join(" ");
       const path = document.createElementNS(SVGNS, "polyline");
       path.setAttribute("class", netPath ? "wire clickable" : "wire");
@@ -1397,7 +1533,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     }
   };
   for (const tg of trunkByRep.values()) {
-    const box = (laid.children ?? []).find((c: any) => c.id === nodeId(tg.box));
+    const box = findLaidChild(laid.children, nodeId(tg.box));
     if (!box) continue;
     const dir: 1 | -1 = tg.side === "east" ? 1 : -1;
     const members: { pt: Pt; e: (typeof tg.edges)[number] }[] = [];
@@ -1416,46 +1552,73 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   }
 
   // 2. Boxes.
-  for (const c of laid.children ?? []) {
+  //
+  // (`originOf` is built just above the wire pass; see its note there.)
+  //
+  // A stack rather than a plain loop, because trace mode nests an instance the
+  // walk descended through and draws the boxes behind its wall inside it (#293).
+  // Each entry carries the SVG group to draw into: ELK reports a child's x/y
+  // relative to its parent, and every glyph helper already translates by its own
+  // (c.x, c.y) into whatever group it is handed — so nesting the groups makes
+  // SVG transform composition do the coordinate maths, with no ancestor offsets
+  // to accumulate and get wrong. Wires need no equivalent because
+  // `elk.json.edgeCoords: ROOT` keeps every routed point in root space.
+  const stack: Array<{ c: any; host: SVGElement }> = (laid.children ?? [])
+    .slice()
+    .reverse()
+    .map((c: any) => ({ c, host: root }));
+  while (stack.length) {
+    const { c, host } = stack.pop() as { c: any; host: SVGElement };
     const id = Number(String(c.id).slice(1));
     const node = graph.nodes.find((n) => n.id === id);
 
+    // An instance with boxes behind its wall: draw the container, then queue its
+    // contents into it. Checked before the kind dispatch, because the container
+    // and the opaque `Instance` box are the same object in two states.
+    if (c.children?.length) {
+      const inner = renderContainer(host, c, node, id);
+      for (let i = c.children.length - 1; i >= 0; i--) {
+        stack.push({ c: c.children[i], host: inner });
+      }
+      continue;
+    }
+
     // Boundary I/O pin (the scope's own port): a frame pin + label, not a box.
     if (node?.kind === "Port") {
-      renderBoundaryPin(root, c, node, id);
+      renderBoundaryPin(host, c, node, id);
       continue;
     }
     // Inferred storage (register FF / level latch): an FF-style symbol with
     // labelled west input rows.
     if (node?.kind === "FF" || node?.kind === "Latch") {
-      renderStorage(root, c, node, id);
+      renderStorage(host, c, node, id);
       continue;
     }
     // Continuous assign: a small anonymous square function node (#135).
     if (node?.kind === "Assign") {
-      renderAssign(root, c, id);
+      renderAssign(host, c, id);
       continue;
     }
     // Memory array (#112): an array-stack glyph with addr/din/dout pins.
     if (node?.kind === "Memory") {
-      renderMemory(root, c, node, id);
+      renderMemory(host, c, node, id);
       continue;
     }
     // SystemVerilog interface: a modport-qualified port draws as a square
     // frame pin (#125); an interface *instance* keeps the hexagon bundle box.
     if (node?.kind === "Interface") {
-      if (node.modport) renderBundlePin(root, c, node, id);
-      else renderInterface(root, c, node, id);
+      if (node.modport) renderBundlePin(host, c, node, id);
+      else renderInterface(host, c, node, id);
       continue;
     }
     // Gate-level primitives (#157): a mux trapezoid (select on the south wall)
     // or an IEEE distinctive-shape / datapath gate glyph.
     if (node?.kind === "Mux") {
-      renderMux(root, c, node, id);
+      renderMux(host, c, node, id);
       continue;
     }
     if (node && isGateKind(node.kind)) {
-      renderGate(root, c, node, id);
+      renderGate(host, c, node, id);
       continue;
     }
 
@@ -1554,7 +1717,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       arrow.onclick = () => selectNode(pid);
       arrow.oncontextmenu = probePin;
       g.appendChild(arrow);
-      drawPinAffordances(g, sp, edgeX, py, west);
+      drawPinAffordances(g, sp, edgeX, py, west ? "west" : "east");
 
       // A logic node (comb/latch/assign) is a process, not a module: its pins are
       // bare wire stubs, so skip the per-pin signal-name labels (the wire already
@@ -1588,7 +1751,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         g.appendChild(t);
       }
     }
-    root.appendChild(g);
+    host.appendChild(g);
   }
 
   // 3. Net labels last, so they stay legible over wires and box edges. Their
@@ -1669,6 +1832,104 @@ function scheduleWireLabels() {
 
 // A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
 // the port name on the outboard side (inputs on the left, outputs on the right).
+/**
+ * Find a laid-out child by id anywhere in the container tree, rebased to root
+ * coordinates (#293).
+ *
+ * ELK reports a nested child's position relative to its container. The box
+ * glyphs never need this — they are drawn into nested SVG groups and let
+ * transform composition handle it — but the bundle trunk below computes its
+ * geometry by hand and draws into the root group, so it needs absolute numbers.
+ * A flat scan of the top level would also have *silently* dropped the fan-out of
+ * any bundle consumer that ended up inside a container.
+ */
+function findLaidChild(children: any[] | undefined, id: string, dx = 0, dy = 0): any {
+  for (const c of children ?? []) {
+    const x = dx + (c.x ?? 0);
+    const y = dy + (c.y ?? 0);
+    if (c.id === id) return { ...c, x, y };
+    const hit = findLaidChild(c.children, id, x, y);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * An instance the trace descended through, drawn as a labelled box holding the
+ * logic behind its wall (#293).
+ *
+ * Returns the group its contents must be drawn into. The container and the
+ * opaque `Instance` box are the same model object in two states, so this keeps
+ * the same node id, the same click/cross-probe behaviour and the same pins —
+ * only the body changes, from empty to occupied.
+ */
+function renderContainer(
+  parent: SVGElement,
+  c: any,
+  node: SchNode | undefined,
+  id: number,
+): SVGElement {
+  const g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("transform", `translate(${c.x},${c.y})`);
+
+  const rect = document.createElementNS(SVGNS, "rect");
+  rect.setAttribute("class", "container");
+  rect.setAttribute("width", String(c.width));
+  rect.setAttribute("height", String(c.height));
+  rect.setAttribute("rx", "4");
+  if (node) {
+    rect.dataset.nodeId = String(id);
+    rect.onclick = () => selectNode(id);
+    rect.oncontextmenu = (ev) => crossProbe(id, ev);
+  }
+  g.appendChild(rect);
+
+  // The instance path in the band `toElk` reserved at the top, left-aligned so
+  // it reads as a title on the wall rather than floating over the contents.
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("class", "container-label");
+  t.setAttribute("x", String(CONTAINER_PAD));
+  t.setAttribute("y", String(CONTAINER_LABEL_H - 6));
+  t.textContent = c.labels?.[0]?.text ?? node?.label ?? "";
+  g.appendChild(t);
+
+  // Pins on the wall. Unlike an opaque box these sit where ELK put them
+  // (FIXED_SIDE), because a compound node is sized from its children and the
+  // fixed coordinates the opaque form used no longer describe this box.
+  const portById = new Map<number, SchPort>();
+  node?.ports.forEach((p) => portById.set(p.id, p));
+  for (const p of c.ports ?? []) {
+    const pid = Number(String(p.id).slice(1));
+    const sp = portById.get(pid);
+    if (!sp) continue;
+    const west = sp.side !== "east";
+    const px = west ? 0 : c.width;
+    const py = p.y ?? 0;
+    const tri = document.createElementNS(SVGNS, "path");
+    tri.setAttribute("class", `pin ${west ? "pin-in" : "pin-out"}`);
+    tri.setAttribute(
+      "d",
+      west
+        ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
+        : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
+    );
+    tri.onclick = () => selectNode(pid);
+    tri.oncontextmenu = (ev) => crossProbe(pid, ev);
+    g.appendChild(tri);
+    drawPinAffordances(g, sp, px, py, west ? "west" : "east");
+    const lab = document.createElementNS(SVGNS, "text");
+    lab.setAttribute("class", "pin-label");
+    lab.setAttribute("x", String(west ? px + 6 : px - 6));
+    lab.setAttribute("y", String(py + 3));
+    lab.setAttribute("text-anchor", west ? "start" : "end");
+    lab.textContent = sp.name;
+    g.appendChild(lab);
+  }
+
+  parent.appendChild(g);
+  return g;
+}
+
 function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number) {
   const sp = node.ports[0];
   const p = c.ports?.[0];
@@ -1702,7 +1963,7 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   g.appendChild(arrow);
   // A boundary pin is where a trace leaves the drawn scope, so it is the most
   // likely thing to want expanded. A constant tie-off is inert and gets none.
-  if (!isConst) drawPinAffordances(g, sp, px, py, input);
+  if (!isConst) drawPinAffordances(g, sp, px, py, input ? "west" : "east");
 
   const t = document.createElementNS(SVGNS, "text");
   t.setAttribute("class", isConst ? "const-label" : "pin-label");
@@ -2088,7 +2349,29 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
       t.style.pointerEvents = "none";
       t.textContent = sp.constant;
       g.appendChild(t);
+    } else {
+      // Selectable and expandable, like any other pin (#286). A gate draws leads
+      // rather than triangles, so there was no element here at all — not merely
+      // no inline control, but nothing to click or right-click either. The hit
+      // target is invisible and sits where the wire lands; the ◀ control is the
+      // visible affordance, and it only appears in trace mode.
+      //
+      // Skipped for a constant tie: there is nothing upstream to expand, and its
+      // value label already occupies this margin.
+      g.appendChild(pinHit(0, py, sp.id));
+      drawPinAffordances(g, sp, 0, py, "west");
     }
+  }
+  // The output. Its wire lands on the east wall past any inversion bubble, so
+  // the control clears the bubble by construction rather than by nudging.
+  const eastPort = (c.ports ?? []).find(
+    (p: any) => portById.get(Number(String(p.id).slice(1)))?.side === "east",
+  );
+  const eastSp = eastPort && portById.get(Number(String(eastPort.id).slice(1)));
+  if (eastSp) {
+    const ey = eastPort.y ?? midY;
+    g.appendChild(pinHit(W, ey, eastSp.id));
+    drawPinAffordances(g, eastSp, W, ey, "east");
   }
   // A dangling output (#202): the driven net has no in-scope reader, so no wire
   // labels it. Float the net name just past the east tip, dimmed, and let it
@@ -2155,7 +2438,16 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
       g.appendChild(t);
       continue;
     }
-    if (sp.role !== "sel") continue;
+    // Data branches and the result connect straight to the trapezoid with no pin
+    // glyph, so like a gate they had nothing to click (#286). Give them the same
+    // hit target and inline control every other pin has.
+    if (sp.role !== "sel") {
+      const east = sp.side === "east";
+      const py = p.y ?? 0;
+      g.appendChild(pinHit(east ? W : 0, py, pid));
+      drawPinAffordances(g, sp, east ? W : 0, py, east ? "east" : "west");
+      continue;
+    }
     const px = p.x ?? 0;
     const lab = document.createElementNS(SVGNS, "text");
     lab.setAttribute("class", "pin-label");
@@ -2171,6 +2463,11 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
     };
     lab.textContent = "sel";
     g.appendChild(lab);
+    // The select sits on the south wall, so its control drops below the pin
+    // rather than sitting outboard of a vertical edge — the placement the
+    // west/east rule cannot express (#286). Below the "sel" label, not beside
+    // it, so the two do not overlap on a narrow mux.
+    drawPinAffordances(g, sp, px, H, "south");
   }
   // A dangling output (#202): float the driven net's name past the east wall, dimmed,
   // and cross-probe it, so a mux whose result nothing in scope reads stays searchable.
@@ -2294,7 +2591,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
     arrow.onclick = () => selectNode(pid);
     arrow.oncontextmenu = probePin;
     g.appendChild(arrow);
-    drawPinAffordances(g, sp, edgeX, py, west);
+    drawPinAffordances(g, sp, edgeX, py, west ? "west" : "east");
     if (sp) {
       const t = document.createElementNS(SVGNS, "text");
       t.setAttribute("class", "pin-label");

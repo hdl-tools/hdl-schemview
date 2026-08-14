@@ -27,6 +27,9 @@ import {
   labelGeometry,
   chooseLabelSegment,
   placementsEqual,
+  AFFORD_SOUTH_DROP,
+  CONTAINER_LABEL_H,
+  CONTAINER_PAD,
 } from "./elk";
 import type { LabelPlacement, Pt, VRect } from "./elk";
 import type { SchematicGraph, SchPort } from "./types";
@@ -66,6 +69,288 @@ const graph: SchematicGraph = {
     { id: 0, source: 11, target: 2, net: "bus.out" }, // port -> box
   ],
 };
+
+// #293 — an instance the trace descended through becomes a container, and the
+// boxes behind its wall are drawn inside it rather than as its peers.
+const contained: SchematicGraph = {
+  root: "top",
+  nodes: [
+    {
+      id: 1,
+      kind: "Instance",
+      label: "core",
+      path: "top.core",
+      expandable: true,
+      ports: [{ id: 10, name: "mem_valid", side: "east" }],
+    },
+    // Behind core's wall.
+    {
+      id: 2,
+      kind: "FF",
+      label: "$ff2",
+      path: "top.core.$ff2",
+      expandable: false,
+      parent: 1,
+      ports: [{ id: 20, name: "q", side: "east" }],
+    },
+    // Outside it, at the top level.
+    { id: 3, kind: "Instance", label: "mem", path: "top.mem", expandable: false, ports: [] },
+  ],
+  edges: [{ id: 0, source: 20, target: 10, net: "mem_valid" }],
+};
+
+describe("south-wall affordance room (#286)", () => {
+  const muxGraph = (on: boolean) =>
+    toElk(
+      {
+        root: "s",
+        nodes: [
+          {
+            id: 1,
+            kind: "Mux",
+            label: "mux",
+            path: "s.m",
+            expandable: false,
+            ports: [
+              { id: 10, name: "a", side: "west", path: "s.a" },
+              { id: 11, name: "y", side: "east", path: "s.y" },
+              { id: 12, name: "s", side: "west", role: "sel", path: "s.sel" },
+            ],
+          },
+        ],
+        edges: [],
+      },
+      { affordances: on },
+    ).children[0];
+
+  it("reserves a band below a box with a south pin", () => {
+    // The select's control drops below the box, where the west/east gutters
+    // reserve nothing — without this it lands on whatever ELK puts underneath.
+    const m = muxGraph(true).layoutOptions["elk.margins"];
+    expect(m).toContain(`bottom=${AFFORD_SOUTH_DROP.toFixed(1)}`);
+  });
+
+  it("reserves nothing below when affordances are off", () => {
+    const m = muxGraph(false).layoutOptions["elk.margins"];
+    expect(m === undefined || m.includes("bottom=0")).toBe(true);
+  });
+});
+
+describe("containment (#293)", () => {
+  it("draws a contained box inside its container, not beside it", () => {
+    const e = toElk(contained);
+    expect(e.children.map((c) => c.id)).toEqual([nodeId(1), nodeId(3)]);
+    const core = e.children.find((c) => c.id === nodeId(1))!;
+    expect(core.children?.map((c) => c.id)).toEqual([nodeId(2)]);
+    // The peer must not also appear at the top level, or it is drawn twice.
+    expect(e.children.some((c) => c.id === nodeId(2))).toBe(false);
+  });
+
+  it("turns a container's pins side-only so they stay on the wall when it grows", () => {
+    // FIXED_POS coordinates were measured against the opaque box's size; ELK
+    // resizes a compound from its children, so keeping them would strand every
+    // pin somewhere in the interior.
+    const core = toElk(contained).children.find((c) => c.id === nodeId(1))!;
+    expect(core.layoutOptions["elk.portConstraints"]).toBe("FIXED_SIDE");
+    for (const p of core.ports) {
+      expect(p.x).toBeUndefined();
+      expect(p.y).toBeUndefined();
+    }
+    expect(core.layoutOptions["elk.padding"]).toContain(
+      `top=${CONTAINER_LABEL_H + CONTAINER_PAD}`,
+    );
+  });
+
+  it("asks ELK to route across container walls", () => {
+    const e = toElk(contained);
+    // Without INCLUDE_CHILDREN the default is SEPARATE_CHILDREN, which lays each
+    // compound out alone and will not route the ff -> port wire at all.
+    expect(e.layoutOptions["elk.hierarchyHandling"]).toBe("INCLUDE_CHILDREN");
+    // And deliberately *not* edgeCoords: elkjs 0.9.3 ignores it under either
+    // option id, silently, so the wires drew offset by their container's origin
+    // with nothing to say why. The renderer rebases from each edge's reported
+    // `container` instead. Asserted so nobody re-adds it and trusts it.
+    expect(e.layoutOptions["elk.json.edgeCoords"]).toBeUndefined();
+    expect(e.layoutOptions["org.eclipse.elk.json.edgeCoords"]).toBeUndefined();
+  });
+
+  it("leaves a graph with no containment exactly as it was", () => {
+    // The hierarchy view shows one scope and so never nests. It must reach ELK
+    // with the same option set and the same flat shape as before #293, or its
+    // layout shifts for a feature it does not use.
+    const e = toElk(graph);
+    expect(e.layoutOptions["elk.hierarchyHandling"]).toBeUndefined();
+    expect(e.layoutOptions["elk.json.edgeCoords"]).toBeUndefined();
+    expect(e.children.every((c) => c.children === undefined)).toBe(true);
+    expect(e.children.map((c) => c.id)).toEqual([nodeId(1), nodeId(2)]);
+  });
+
+  it("keeps a box whose container is not on canvas rather than dropping it", () => {
+    // The backend guarantees a parent is always drawn; if that ever breaks,
+    // drawing the box at the top level is a far better failure than losing it.
+    const orphaned: SchematicGraph = {
+      ...contained,
+      nodes: [contained.nodes[1], contained.nodes[2]],
+    };
+    const e = toElk(orphaned);
+    expect(e.children.map((c) => c.id)).toEqual([nodeId(2), nodeId(3)]);
+  });
+
+  it("lands a cross-wall wire on the pins it connects, in root coordinates", async () => {
+    // The renderer draws wires into the root group but draws boxes into nested
+    // groups, so a routed point only meets its pin if ELK reports edge geometry
+    // in root space. If it reports container-relative coordinates instead, every
+    // wire inside a container floats off by that container's origin — visible,
+    // wrong, and silent.
+    const laid: any = await layout(contained);
+    const abs = (id: string, kids: any[] = laid.children, dx = 0, dy = 0): any => {
+      for (const c of kids) {
+        const x = dx + (c.x ?? 0);
+        const y = dy + (c.y ?? 0);
+        if (c.id === id) return { c, x, y };
+        const hit = abs(id, c.children ?? [], x, y);
+        if (hit) return hit;
+      }
+      return undefined;
+    };
+    const portAbs = (nid: string, pid: string) => {
+      const box = abs(nid)!;
+      const p = box.c.ports.find((q: any) => q.id === pid)!;
+      return { x: box.x + (p.x ?? 0), y: box.y + (p.y ?? 0) };
+    };
+    const ff = portAbs(nodeId(2), portId(20)); // inside the container
+    const wall = portAbs(nodeId(1), portId(10)); // on the container's wall
+    const e = (laid.edges ?? []).find((x: any) => x.id === "e0");
+    expect(e?.sections?.length, "the cross-wall edge must survive layout").toBeTruthy();
+    // ELK reports the points relative to the node it names in `container`, so
+    // rebase exactly as the renderer does. This is the contract the renderer
+    // depends on: if ELK ever reported root coordinates instead, `container`
+    // would be absent and the offset would fall back to zero.
+    const org = e.container ? abs(String(e.container)) : undefined;
+    const off = { x: org?.x ?? 0, y: org?.y ?? 0 };
+    const at = (p: any) => ({ x: p.x + off.x, y: p.y + off.y });
+    const sec = e.sections[0];
+    const near = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y);
+    // Generous tolerance: we are catching a whole-container offset, not pixels.
+    expect(near(at(sec.startPoint), ff)).toBeLessThan(12);
+    expect(near(at(sec.endPoint), wall)).toBeLessThan(12);
+  });
+
+  it("routes every wire of a container wired on both walls", async () => {
+    // The shape a real trace produces (#286): a container with pins on both
+    // walls, several children, a wire in from outside, and wires between the
+    // children and the container's own pins in both directions. The narrow
+    // fixture above has one child and one wire, and passed while the real graph
+    // lost a wire.
+    const g: SchematicGraph = {
+      root: "top",
+      nodes: [
+        {
+          id: 1,
+          kind: "Instance",
+          label: "core",
+          path: "top.core",
+          expandable: true,
+          ports: [
+            { id: 10, name: "mem_valid", side: "east", path: "top.core.mem_valid" },
+            { id: 11, name: "mem_ready", side: "west", path: "top.core.mem_ready" },
+          ],
+        },
+        {
+          id: 2,
+          kind: "FF",
+          label: "$ff2",
+          path: "top.core.$ff2",
+          expandable: false,
+          parent: 1,
+          ports: [{ id: 20, name: "q", side: "east", path: "top.core.q" }],
+        },
+        {
+          id: 3,
+          kind: "And",
+          label: "and",
+          path: "top.core.$and3",
+          expandable: false,
+          parent: 1,
+          ports: [
+            { id: 30, name: "a", side: "west", path: "top.core.mem_ready" },
+            { id: 31, name: "y", side: "east", path: "top.core.y" },
+          ],
+        },
+        {
+          id: 4,
+          kind: "Interface",
+          label: "bus",
+          path: "top.bus",
+          expandable: true,
+          ports: [{ id: 40, name: "b", side: "east", path: "top.bus.b" }],
+        },
+      ],
+      edges: [
+        { id: 0, source: 20, target: 10, net: "mem_valid" }, // child -> container east pin
+        { id: 1, source: 40, target: 11, net: "mem_ready" }, // outside -> container west pin
+        { id: 2, source: 11, target: 30, net: "mem_ready" }, // container west pin -> child
+      ],
+    };
+    const laid: any = await layout(g);
+    const collect = (kids: any[]): any[] =>
+      kids.flatMap((c) => [c, ...collect(c.children ?? [])]);
+    const all = collect(laid.children ?? []);
+    const everywhere = [...(laid.edges ?? []), ...all.flatMap((c: any) => c.edges ?? [])];
+    // Absolute origin of every node, and of every port, exactly as the renderer
+    // computes them.
+    const originOf = new Map<string, { x: number; y: number }>();
+    const portAt = new Map<string, { x: number; y: number }>();
+    const walk = (kids: any[], dx: number, dy: number) => {
+      for (const c of kids ?? []) {
+        const x = dx + (c.x ?? 0);
+        const y = dy + (c.y ?? 0);
+        originOf.set(String(c.id), { x, y });
+        for (const p of c.ports ?? []) {
+          portAt.set(String(p.id), { x: x + (p.x ?? 0), y: y + (p.y ?? 0) });
+        }
+        walk(c.children ?? [], x, y);
+      }
+    };
+    walk(laid.children ?? [], 0, 0);
+
+    const near = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y);
+    const ends: Record<string, [string, string]> = {
+      e0: ["p20", "p10"],
+      e1: ["p40", "p11"],
+      e2: ["p11", "p30"],
+    };
+    for (const id of ["e0", "e1", "e2"]) {
+      const e = everywhere.find((x: any) => x.id === id);
+      expect(e, `${id} must survive layout`).toBeTruthy();
+      expect(e.sections?.length, `${id} must be routed`).toBeGreaterThan(0);
+      // And it must be reachable from the root edge list, which is the only
+      // place the renderer looks.
+      expect(
+        (laid.edges ?? []).some((x: any) => x.id === id),
+        `${id} was relocated out of the root edge list, where the renderer cannot see it`,
+      ).toBe(true);
+      // Rebased exactly as the renderer rebases it, both ends must land on the
+      // pins they name. A wire drawn in the wrong coordinate space is not a
+      // missing wire — it is a wire somewhere else, which reads as missing.
+      const off = originOf.get(String(e.container)) ?? { x: 0, y: 0 };
+      const sec = e.sections[0];
+      const at = (p: any) => ({ x: p.x + off.x, y: p.y + off.y });
+      const [src, tgt] = ends[id];
+      expect(near(at(sec.startPoint), portAt.get(src)!), `${id} start off ${src}`).toBeLessThan(12);
+      expect(near(at(sec.endPoint), portAt.get(tgt)!), `${id} end off ${tgt}`).toBeLessThan(12);
+    }
+  });
+
+  it("routes a wire that crosses the container wall", async () => {
+    // The point of the whole option set: a ff inside core wired to core's own
+    // boundary pin must still produce a routed edge.
+    const laid: any = await layout(contained);
+    const e = (laid.edges ?? []).find((x: any) => x.id === "e0");
+    expect(e, "the cross-wall edge must survive layout").toBeTruthy();
+    expect(e.sections?.length).toBeGreaterThan(0);
+  });
+});
 
 describe("toElk", () => {
   it("maps boxes to children with ports on the right sides", () => {

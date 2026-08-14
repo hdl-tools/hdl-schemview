@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use svxprobe_model::{Design, Dir, NodeId, NodeKind};
 use svxprobe_schematic::{
     cone, cone_with, scope_graph, scope_graph_with, trace_graph, ConeLimits, PinRole, Projection,
-    SchematicGraph, Side, TraceStep,
+    SchNode, SchematicGraph, Side, TraceStep,
 };
 
 fn design() -> Design {
@@ -2200,8 +2200,16 @@ fn cone_with_on_an_undriven_input_still_draws_the_seed() {
             ConeLimits::depth(1),
             Projection::ProcessLevel,
         );
+        // Visible as a node of its own, or as a pin on the container the walk
+        // pulled in behind the wall (#293) — the port sits on the instance box.
+        // Either way the user sees the signal they asked about; what must not
+        // happen is an empty graph.
+        let drawn = g.nodes.iter().any(|n| n.path == seed)
+            || g.nodes
+                .iter()
+                .any(|n| n.ports.iter().any(|p| p.path == seed));
         assert!(
-            g.nodes.iter().any(|n| n.path == seed),
+            drawn,
             "{seed}: fan-in must still draw the seed, got {:?}",
             g.nodes.iter().map(|n| &n.path).collect::<Vec<_>>()
         );
@@ -2238,6 +2246,381 @@ fn cone_with_descends_through_an_instance() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// #293 — the hierarchy the walk crosses is drawn, not flattened away.
+//
+// #285 made a boundary transparent; the result was a *flat* canvas, with the
+// logic behind a wall drawn as a peer of the logic outside it. `SchNode.parent`
+// names the instance that contains a box, so the renderer can nest it. The
+// containing instance is the nearest ancestor `Instance` — generate blocks
+// dissolve, exactly as `child_boxes` dissolves them — and a box directly under
+// the design top has no container at all, so the top is never drawn as a box
+// wrapping the whole canvas.
+// ---------------------------------------------------------------------------
+
+const CORE: &str = "picorv32_soc.g_lane[0].core";
+const AND813: &str = "picorv32_soc.g_lane[0].core.$assign200.$and813";
+const FF214: &str = "picorv32_soc.g_lane[0].core.$ff214";
+
+#[test]
+fn cone_with_from_a_gate_follows_only_the_side_asked_for() {
+    // A gate's output pin carries the *gate's* own path, so the frontend's ▶
+    // control seeds the gate itself — and `seed_signals` folded in every signal
+    // the gate touches, operands included. Fan-out therefore walked the inputs
+    // and drew their neighbourhood, which is the opposite of what ▶ means (#286).
+    let d = design();
+    let gate = id(&d, AND813);
+    let paths = |g: &SchematicGraph| {
+        g.nodes
+            .iter()
+            .map(|n| n.path.clone())
+            .collect::<std::collections::HashSet<_>>()
+    };
+    let fan_out = paths(&cone_with(
+        &d,
+        gate,
+        Dir::Out,
+        ConeLimits::depth(1),
+        Projection::GateLevel,
+    ));
+    let fan_in = paths(&cone_with(
+        &d,
+        gate,
+        Dir::In,
+        ConeLimits::depth(1),
+        Projection::GateLevel,
+    ));
+    // A trace seeded on a box must draw that box — its own pins are what anchor
+    // its wires, so without it the join has one side and nothing is drawn at all.
+    assert!(
+        fan_out.contains(AND813) && fan_in.contains(AND813),
+        "a trace must draw the box it was seeded on"
+    );
+    // `$ff214` drives `mem_valid`, one of this gate's *operands*. Reaching it
+    // from a **fan-out** is the bug: ▶ walked the operands and drew their
+    // neighbourhood instead of what the gate drives.
+    assert!(
+        !fan_out.contains(FF214),
+        "fan-out must not walk the gate's operands: {fan_out:?}"
+    );
+    // The two directions must genuinely differ, or the filter is not engaging.
+    let out_only: Vec<_> = fan_out.difference(&fan_in).collect();
+    let in_only: Vec<_> = fan_in.difference(&fan_out).collect();
+    assert!(
+        !out_only.is_empty(),
+        "fan-out reached nothing fan-in did not: {fan_out:?}"
+    );
+    assert!(
+        !in_only.is_empty() || fan_in.len() < fan_out.len(),
+        "fan-in is indistinguishable from fan-out: {fan_in:?}"
+    );
+}
+
+const OR812: &str = "picorv32_soc.g_lane[0].core.$assign200.$or812";
+
+#[test]
+fn trace_graph_expands_a_gate_an_earlier_step_reached() {
+    // The trace bar's ▶ on a gate drawn by an earlier step must expand *that*
+    // gate. Reported: only the first gate expands, later ones do nothing.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let one = trace_graph(&d, &[step(&d, AND813, Dir::Out, 1)], lim, p);
+    let two = trace_graph(
+        &d,
+        &[step(&d, AND813, Dir::Out, 1), step(&d, OR812, Dir::Out, 1)],
+        lim,
+        p,
+    );
+    // Anti-vacuity: step 1 must actually have drawn the gate step 2 expands.
+    assert!(
+        box_paths(&one).contains(OR812),
+        "vacuous: step 1 never drew {OR812}"
+    );
+    assert!(
+        two.nodes.len() > one.nodes.len(),
+        "expanding a gate an earlier step drew added nothing: {:?} -> {:?}",
+        box_paths(&one),
+        box_paths(&two)
+    );
+}
+
+#[test]
+fn trace_graph_expands_fan_in_of_a_gate_operand() {
+    // A gate's *input* pin carries the operand's path — for gate-to-gate wiring
+    // that is the upstream gate itself. ◀ on it must expand that gate's fan-in.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let one = trace_graph(&d, &[step(&d, OR812, Dir::Out, 1)], lim, p);
+    let two = trace_graph(
+        &d,
+        &[step(&d, OR812, Dir::Out, 1), step(&d, AND813, Dir::In, 1)],
+        lim,
+        p,
+    );
+    assert!(
+        two.nodes.len() > one.nodes.len() || two.edges.len() > one.edges.len(),
+        "fan-in on a gate operand added nothing: {:?} -> {:?}",
+        box_paths(&one),
+        box_paths(&two)
+    );
+}
+
+#[test]
+fn trace_graph_fan_in_on_a_gate_input_adds_the_driver() {
+    // The shape a user actually builds: seed a signal, get gates, then click ◀ on
+    // a gate's input pin — whose path *is* an operand signal. Fan-out first, so
+    // the driver is genuinely absent before the second step.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let seed = "picorv32_soc.g_lane[0].core.mem_valid";
+    let one = trace_graph(&d, &[step(&d, seed, Dir::Out, 1)], lim, p);
+    let two = trace_graph(
+        &d,
+        &[step(&d, seed, Dir::Out, 1), step(&d, seed, Dir::In, 1)],
+        lim,
+        p,
+    );
+    assert!(
+        !box_paths(&one).contains(FF214),
+        "vacuous: fan-out already drew the driver"
+    );
+    assert!(
+        box_paths(&two).contains(FF214),
+        "fan-in on a gate input must add the driver: {:?}",
+        box_paths(&two)
+    );
+}
+
+#[test]
+fn trace_graph_fan_in_on_a_sibling_operand_still_wires_its_driver() {
+    // The exact reported shape: trace `mem_ready` both ways, then click ◀ on the
+    // *other* input of the gate that reads it (`mem_valid`). Alone that step
+    // works; accumulated after the first it drew no wire. Seeding from hierarchy
+    // mode replaces the step list, which is why clicking the signal directly
+    // "worked" — it was a one-step trace, a different graph entirely.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::GateLevel);
+    let ready = "picorv32_soc.g_lane[0].core.mem_ready";
+    let valid = "picorv32_soc.g_lane[0].core.mem_valid";
+
+    let alone = trace_graph(&d, &[step(&d, valid, Dir::In, 1)], lim, p);
+    let after = trace_graph(
+        &d,
+        &[step(&d, ready, Dir::Inout, 1), step(&d, valid, Dir::In, 1)],
+        lim,
+        p,
+    );
+    // Anti-vacuity: the single-step form must genuinely reach the driver.
+    assert!(
+        box_paths(&alone).contains(FF214),
+        "vacuous: one-step fan-in never reached {FF214}"
+    );
+    assert!(
+        box_paths(&after).contains(FF214),
+        "accumulated fan-in lost the driver: {:?}",
+        box_paths(&after)
+    );
+    // And it must be *wired*, not merely present — the reported symptom was a
+    // missing wire, which an "is the box there" check would sail straight past.
+    let pins: std::collections::HashSet<NodeId> = after
+        .nodes
+        .iter()
+        .filter(|n| n.path == FF214)
+        .flat_map(|n| n.ports.iter().map(|p| p.id))
+        .collect();
+    assert!(
+        after
+            .edges
+            .iter()
+            .any(|e| pins.contains(&e.source) || pins.contains(&e.target)),
+        "the driver was drawn but nothing wires it"
+    );
+}
+
+#[test]
+fn trace_graph_wires_a_fan_in_seed_to_the_readers_already_drawn() {
+    // The reported sequence: "Trace from here > Both" on `mem_valid`, then expand
+    // fan-in of `mem_ready` from a pin on a box inside `core` that reads it.
+    //
+    // Fan-in means "what drives this", so the walk correctly adds only the driver
+    // — and the new wire then stopped dead at the module boundary, disconnected
+    // from the very pin that was clicked. Direction governs what a step
+    // *discovers*; it must not govern what the seed is *connected* to.
+    let d = design();
+    let (lim, p) = (ConeLimits::default(), Projection::ProcessLevel);
+    let valid = "picorv32_soc.g_lane[1].core.mem_valid";
+    let ready = "picorv32_soc.g_lane[1].core.mem_ready";
+    let g = trace_graph(
+        &d,
+        &[step(&d, valid, Dir::Inout, 1), step(&d, ready, Dir::In, 1)],
+        lim,
+        p,
+    );
+    let inside: std::collections::HashSet<NodeId> = g
+        .nodes
+        .iter()
+        .filter(|n| n.path.starts_with("picorv32_soc.g_lane[1].core.$"))
+        .flat_map(|n| n.ports.iter().map(|p| p.id))
+        .collect();
+    // Anti-vacuity: step 1 must have drawn boxes inside the module for step 2 to
+    // connect to, or "it wired up" would hold because there was nothing there.
+    assert!(!inside.is_empty(), "vacuous: no logic inside the module");
+    let ready_wires: Vec<(NodeId, NodeId)> = g
+        .edges
+        .iter()
+        .filter(|e| e.net.as_deref() == Some("mem_ready"))
+        .map(|e| (e.source, e.target))
+        .collect();
+    assert!(
+        ready_wires
+            .iter()
+            .any(|(s, t)| inside.contains(s) || inside.contains(t)),
+        "the fan-in wire stops at the boundary instead of reaching the logic that \
+         reads it: {ready_wires:?}"
+    );
+}
+
+#[test]
+fn cone_with_on_a_gate_wires_the_box_it_was_seeded_on() {
+    // The anchor half of the same defect. A gate is never stubbed (#268), and the
+    // model wires gate-to-gate with no net node between, so a gate seed had
+    // nothing to anchor on: the join saw a load and no driver, drew no wire, and
+    // the orphan pass then removed the box on the far side — an empty graph.
+    let d = design();
+    for dir in [Dir::In, Dir::Out] {
+        let g = cone_with(
+            &d,
+            id(&d, AND813),
+            dir,
+            ConeLimits::depth(1),
+            Projection::GateLevel,
+        );
+        assert!(
+            !g.edges.is_empty(),
+            "{dir:?}: a gate seed must anchor its own wires, got {} boxes and no wires",
+            g.nodes.len()
+        );
+        let pins: std::collections::HashSet<NodeId> = g
+            .nodes
+            .iter()
+            .flat_map(|n| n.ports.iter().map(|p| p.id))
+            .collect();
+        for e in &g.edges {
+            assert!(
+                pins.contains(&e.source) && pins.contains(&e.target),
+                "{dir:?}: edge {} does not land on emitted pins",
+                e.id
+            );
+        }
+    }
+}
+
+#[test]
+fn cone_with_names_the_instance_that_contains_a_box() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, TOP_CLK),
+        Dir::Out,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let core = id(&d, CORE);
+    let inside: Vec<&SchNode> = g
+        .nodes
+        .iter()
+        .filter(|n| n.path.starts_with("picorv32_soc.g_lane[0].core."))
+        .collect();
+    // Anti-vacuity: containment is trivially satisfied if the walk never
+    // descended. #285's own test guards the descent; this one needs it too.
+    assert!(!inside.is_empty(), "vacuous: nothing behind the wall");
+    for n in &inside {
+        assert_eq!(
+            n.parent,
+            Some(core),
+            "{} is behind the core wall and must name it as its container",
+            n.path
+        );
+    }
+}
+
+#[test]
+fn cone_with_draws_a_containing_instance_once_and_uncontained() {
+    let d = design();
+    let g = cone_with(
+        &d,
+        id(&d, TOP_CLK),
+        Dir::Out,
+        ConeLimits::depth(2),
+        Projection::ProcessLevel,
+    );
+    let core = id(&d, CORE);
+    // The opaque box and the container are the same object in two states, so
+    // reaching an instance from outside *and* descending into it must promote
+    // the one node rather than add a second.
+    let drawn: Vec<&SchNode> = g.nodes.iter().filter(|n| n.id == core).collect();
+    assert_eq!(
+        drawn.len(),
+        1,
+        "the instance must be drawn once, got {:?}",
+        drawn.iter().map(|n| &n.path).collect::<Vec<_>>()
+    );
+    // Its own nearest ancestor instance is the design top, which is not a
+    // container — otherwise every trace would sit inside one useless outer box.
+    assert_eq!(drawn[0].parent, None, "a box under the top is uncontained");
+}
+
+#[test]
+fn cone_with_containers_are_emitted_and_acyclic() {
+    // A `parent` naming a node that is not on canvas cannot be nested, and a
+    // cycle would hang a recursive renderer rather than draw wrongly.
+    every_cone(|g, seed, proj, depth| {
+        let ids: std::collections::HashSet<NodeId> = g.nodes.iter().map(|n| n.id).collect();
+        for n in &g.nodes {
+            if let Some(p) = n.parent {
+                assert!(
+                    ids.contains(&p),
+                    "{seed} {proj:?} depth {depth}: {} names container {p}, which is not drawn",
+                    n.path
+                );
+                assert_ne!(
+                    p, n.id,
+                    "{seed} {proj:?} depth {depth}: {} contains itself",
+                    n.path
+                );
+            }
+        }
+        let parent_of: std::collections::HashMap<NodeId, Option<NodeId>> =
+            g.nodes.iter().map(|n| (n.id, n.parent)).collect();
+        for n in &g.nodes {
+            let (mut cur, mut hops) = (n.parent, 0usize);
+            while let Some(c) = cur {
+                hops += 1;
+                assert!(
+                    hops <= g.nodes.len(),
+                    "{seed} {proj:?} depth {depth}: container cycle above {}",
+                    n.path
+                );
+                cur = *parent_of.get(&c).unwrap_or(&None);
+            }
+        }
+    });
+}
+
+#[test]
+fn scope_graph_draws_no_containers() {
+    // Hierarchy mode shows exactly one scope, so nothing in it is nested — and
+    // `parent` skips serialization when absent, keeping that output byte-identical.
+    let d = design();
+    for scope in ["picorv32_soc", "picorv32_soc.g_lane[0]", CORE] {
+        let g = scope_graph(&d, scope).expect("scope graph");
+        assert!(
+            g.nodes.iter().all(|n| n.parent.is_none()),
+            "{scope}: the scope view must not nest"
+        );
+    }
+}
+
 /// Every seed x projection x depth a cone invariant is checked against — one
 /// place to widen the sweep, since the assertions below are all "for every cone".
 fn every_cone(mut f: impl FnMut(&SchematicGraph, &str, Projection, usize)) {
@@ -2265,15 +2648,22 @@ fn cone_with_wires_every_box_it_emits() {
     every_cone(|g, seed, proj, depth| {
         let wired: std::collections::HashSet<NodeId> =
             g.edges.iter().flat_map(|e| [e.source, e.target]).collect();
+        // A container earns its place from what it holds, not from its own pins:
+        // an instance the walk descended through is often wired entirely by the
+        // boxes inside it (#293). It is not an orphan — it is the wall.
+        let holds: std::collections::HashSet<NodeId> =
+            g.nodes.iter().filter_map(|n| n.parent).collect();
         let orphans: Vec<&str> = g
             .nodes
             .iter()
             // A pin carrying a `more` count is the reported remainder of a
             // capped fan-out — connectivity stated, not missing.
             .filter(|n| {
-                !n.ports
-                    .iter()
-                    .any(|p| wired.contains(&p.id) || p.more.is_some())
+                !holds.contains(&n.id)
+                    && !n
+                        .ports
+                        .iter()
+                        .any(|p| wired.contains(&p.id) || p.more.is_some())
             })
             .map(|n| n.path.as_str())
             .collect();
@@ -2593,14 +2983,24 @@ fn trace_graph_joins_both_directions_of_one_net_at_a_single_node() {
         proj,
     );
     let only_in = trace_graph(&d, &[step(&d, MEM_VALID, Dir::In, 1)], limits, proj);
+    // A crossing may be drawn as a node of its own, or — once containment pulls
+    // in the instance behind the wall (#293) — as a pin on that container. Both
+    // are one junction; what must never happen is two of them.
+    //
+    // Keyed on the signal's own **model** ids, not on `path`: every consumer's
+    // pin carries the net path too, but only an anchor is keyed on the model
+    // node itself (a logic box's pins are `PinAlloc`-synthesized).
+    let anchors: std::collections::HashSet<NodeId> =
+        d.nodes_at_path(MEM_VALID).iter().copied().collect();
     let junction = |g: &SchematicGraph| -> Vec<NodeId> {
         let mut v: Vec<NodeId> = g
             .nodes
             .iter()
-            .filter(|n| n.path == MEM_VALID)
-            .map(|n| n.id)
+            .flat_map(|n| n.ports.iter().map(|p| p.id).chain(std::iter::once(n.id)))
+            .filter(|id| anchors.contains(id))
             .collect();
         v.sort_unstable();
+        v.dedup();
         v
     };
     // Exactly one node, since #285: a port and its backing net are two model

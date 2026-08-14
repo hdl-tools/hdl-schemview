@@ -1,9 +1,9 @@
 # ADR 0010 — Trace mode: a seeded, boundary-crossing projection over the model spine
 
-- **Status:** Accepted; implemented (#244 PR1–PR5, with #268/#269 folded in; amended by #285)
+- **Status:** Accepted; implemented (#244 PR1–PR5, with #268/#269 folded in; amended by #285 and #293)
 - **Date:** 2026-08-09
 - **Deciders:** project maintainers
-- **Relates to:** ROADMAP Phase 3c/3d and Phase 4; issue #244 (this change); issue #285 (§5); consumes
+- **Relates to:** ROADMAP Phase 3c/3d and Phase 4; issue #244 (this change); issue #285 (§5); issue #293 (containment); consumes
   [ADR 0003](0003-storage-backend-for-parse-scalability.md)'s third outcome; follows the
   additional-projection pattern [ADR 0005](0005-optional-gate-level-projection.md) established
   over [ADR 0004](0004-internal-logic-schematic-granularity.md)
@@ -170,6 +170,16 @@ snapshot already carry. So Append-to-waveform and Show-in-source work in trace m
 
 ## Consequences
 
+- **The hierarchy the walk crosses is drawn, not flattened away (#293).** A boundary being
+  transparent left a *flat* canvas — the logic behind a wall drawn as a peer of the logic
+  outside it, with nothing saying which module it belonged to. `SchNode.parent` names the
+  containing instance, `toElk` folds that into ELK compound nodes, and the renderer nests the
+  SVG groups so transform composition does the coordinate maths. Two things had to be true for
+  it to work: `elk.hierarchyHandling: INCLUDE_CHILDREN`, without which ELK refuses to route
+  between levels at all; and rebasing each edge by the `container` ELK reports, because
+  `elk.json.edgeCoords: ROOT` is *silently ignored* by elkjs 0.9.3 and correctness may not rest
+  on an option that can go quietly missing.
+
 - **The hierarchical view is unchanged.** `scope_graph`/`expand` output stays byte-identical,
   verified by dumping `svxprobe graph --json` across scopes and cones before and after each
   step and comparing. The layout gutter trace controls need is reserved only when the view asks
@@ -190,12 +200,8 @@ snapshot already carry. So Append-to-waveform and Show-in-source work in trace m
 - **Bulk / whole-design flattening.** The ROADMAP non-goal stands. A trace is always seeded and
   always incremental.
 - **Post-synthesis / netlist-level tracing** — [ADR 0001](0001-scope-rtl-vs-netlist.md).
-- **Drawing the hierarchy the walk crosses.** §5 makes a boundary transparent, but the result is
-  a *flat* canvas: the logic behind a wall is drawn as a peer of the logic outside it, with
-  nothing saying which module it belongs to. Nesting each descended instance as a labelled
-  container needs a containment link on `SchNode` and compound-node layout in `elk.ts`, neither
-  of which exists — the renderer has never needed nesting, because every other view shows
-  exactly one scope (#293).
-- **Inline expand controls on every glyph.** FF/latch, memory, gate and mux pins reach trace
-  expansion through the right-click menu but not yet through an inline control, because their
-  south-wall pins need a placement the west/east rule cannot express (#286).
+- **Inline expand controls on every glyph.** `Assign` (#295), FF/latch and memory pins still
+  have no pin element at all, so they can be reached only through the right-click menu on the
+  *box*. Gate and mux pins were closed by #286; the FF is the awkward remainder, because its
+  east gutter is not reserved — a dangling Q is labelled *inside* the box, so an outboard
+  control means deciding whether that label moves out too.

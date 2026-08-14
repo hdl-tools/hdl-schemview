@@ -359,9 +359,19 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 
 /* schematic primitives */
 .box { fill:var(--box); stroke:var(--box-stroke); cursor:pointer; }
+/* An instance the trace descended through (#293): a wall around the logic behind
+   it, not another block. Unfilled and dashed so the boxes inside read as the
+   content and this reads as the boundary they sit behind — a solid fill would
+   make a module look like one more gate on the canvas. */
+.container { fill:none; stroke:var(--box-stroke); stroke-dasharray:4 3; cursor:pointer; }
+.container-label { fill:var(--sublabel); font-size:10px; font-weight:600; }
 .box-label { fill:var(--label); font-size:12px; font-weight:600; }
 .box-sublabel { fill:var(--sublabel); font-size:10px; }
 .pin { cursor:pointer; }
+/* Invisible click target where a wire meets a glyph that draws no pin of its own
+   — gates and muxes use leads and bubbles rather than triangles (#286). `fill`
+   rather than `fill:none` because a none-filled shape takes no pointer events. */
+.pin-hit { fill:transparent; cursor:pointer; }
 .pin-in { fill:var(--pin); }
 .pin-out { fill:var(--pin-out); }
 /* Storage enable input (latch gate / FF clock-enable): its own tint so the
@@ -386,8 +396,15 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 /* Trace-mode pin controls (#244 PR4), drawn in the outboard gutter elk.ts reserves.
    Muted until hovered: on a busy trace there is one per pin, and a canvas of live
    accent-coloured glyphs would compete with the wires that carry the meaning. */
-.pin-afford { fill:var(--muted); font-size:9px; cursor:pointer; }
-.pin-afford:hover { fill:var(--accent); }
+.pin-afford { fill:var(--muted); font-size:9px; }
+/* The control is a transparent hit rect with the glyph drawn over it: an SVG
+   <text> only takes a click on its painted glyph, so a bare 9px arrow is a target
+   the size of the arrow (#286). The rect takes the pointer events; the glyph is
+   inert and only draws, so hover has to be driven from the group. */
+.afford { cursor:pointer; }
+.afford-hit { fill:transparent; }
+.afford .pin-afford, .afford .more-badge { pointer-events:none; }
+.afford:hover .pin-afford { fill:var(--accent); }
 /* The remainder a fan-out cap dropped. Uses the same colour pair as #trace-banner,
    so "something was truncated" reads the same at pin level and pane level. */
 .more-badge { fill:var(--trunc-fg); font-size:9px; font-weight:600; cursor:pointer; }
