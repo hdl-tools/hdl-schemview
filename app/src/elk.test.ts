@@ -297,6 +297,29 @@ describe("containment (#293)", () => {
       kids.flatMap((c) => [c, ...collect(c.children ?? [])]);
     const all = collect(laid.children ?? []);
     const everywhere = [...(laid.edges ?? []), ...all.flatMap((c: any) => c.edges ?? [])];
+    // Absolute origin of every node, and of every port, exactly as the renderer
+    // computes them.
+    const originOf = new Map<string, { x: number; y: number }>();
+    const portAt = new Map<string, { x: number; y: number }>();
+    const walk = (kids: any[], dx: number, dy: number) => {
+      for (const c of kids ?? []) {
+        const x = dx + (c.x ?? 0);
+        const y = dy + (c.y ?? 0);
+        originOf.set(String(c.id), { x, y });
+        for (const p of c.ports ?? []) {
+          portAt.set(String(p.id), { x: x + (p.x ?? 0), y: y + (p.y ?? 0) });
+        }
+        walk(c.children ?? [], x, y);
+      }
+    };
+    walk(laid.children ?? [], 0, 0);
+
+    const near = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y);
+    const ends: Record<string, [string, string]> = {
+      e0: ["p20", "p10"],
+      e1: ["p40", "p11"],
+      e2: ["p11", "p30"],
+    };
     for (const id of ["e0", "e1", "e2"]) {
       const e = everywhere.find((x: any) => x.id === id);
       expect(e, `${id} must survive layout`).toBeTruthy();
@@ -307,6 +330,15 @@ describe("containment (#293)", () => {
         (laid.edges ?? []).some((x: any) => x.id === id),
         `${id} was relocated out of the root edge list, where the renderer cannot see it`,
       ).toBe(true);
+      // Rebased exactly as the renderer rebases it, both ends must land on the
+      // pins they name. A wire drawn in the wrong coordinate space is not a
+      // missing wire — it is a wire somewhere else, which reads as missing.
+      const off = originOf.get(String(e.container)) ?? { x: 0, y: 0 };
+      const sec = e.sections[0];
+      const at = (p: any) => ({ x: p.x + off.x, y: p.y + off.y });
+      const [src, tgt] = ends[id];
+      expect(near(at(sec.startPoint), portAt.get(src)!), `${id} start off ${src}`).toBeLessThan(12);
+      expect(near(at(sec.endPoint), portAt.get(tgt)!), `${id} end off ${tgt}`).toBeLessThan(12);
     }
   });
 
