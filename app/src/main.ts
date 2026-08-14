@@ -1101,7 +1101,13 @@ const traceSize = (g: SchematicGraph | null) =>
 // Fetch and draw the current step list. Keeps the zoom level rather than
 // zoom-to-fit, because a trace grows in place: refitting on every expansion would
 // yank the canvas out from under the user.
-async function renderTrace() {
+/**
+ * Draw the current step list. Returns whether it actually drew: a caller that
+ * reports "nothing changed" must not say so when the render never happened
+ * (#286) — a superseded or failed fetch leaves `state.graph` untouched, which is
+ * indistinguishable from an expansion that found nothing.
+ */
+async function renderTrace(): Promise<boolean> {
   const gen = ++traceGen;
   if (!traceSteps.length) {
     state.graph = null;
@@ -1110,7 +1116,7 @@ async function renderTrace() {
     showTruncation(false);
     $("schematic").textContent =
       "Trace mode — right-click a signal, box or wire and pick “Trace from here”, or press `a` to search this scope.";
-    return;
+    return true;
   }
   let graph: SchematicGraph;
   try {
@@ -1119,24 +1125,25 @@ async function renderTrace() {
     });
   } catch (e) {
     log("error", `trace failed: ${e}`);
-    return;
+    return false;
   }
-  if (gen !== traceGen) return; // superseded by a newer expansion
+  if (gen !== traceGen) return false; // superseded by a newer expansion
   state.graph = graph;
   state.selected = null;
   renderBreadcrumb();
   await renderSchematic(graph, { k: zoom.k, scrollLeft: 0, scrollTop: 0 });
   showTruncation(graph.truncated === true);
   refreshSchemPalette();
+  return true;
 }
 
 // Switch to trace mode and draw. Separate from `startTrace` so an already-tracing
 // pane re-renders instead of no-opping on "the mode is already trace".
-async function enterTrace() {
+async function enterTrace(): Promise<boolean> {
   schemMode = "trace";
   applyModeButtons();
   activateTab("schematic-pane");
-  await renderTrace();
+  return await renderTrace();
 }
 
 // Back to the hierarchy view, on whatever scope the nav stack last held (or the
@@ -1166,12 +1173,12 @@ async function startTrace(path: string, dir: Dir, fanout?: number) {
   const extending = schemMode === "trace";
   const before = extending ? traceSize(state.graph) : "";
   traceSteps = extending ? pushTraceStep(traceSteps, step) : [step];
-  await enterTrace();
+  const drew = await enterTrace();
   // Nothing new: either the identical step was already in the list, or the walk
   // re-derived a graph that already held everything it found. Both leave the
   // canvas untouched, which is indistinguishable from a control that does not
   // work — so say which it is (#286).
-  if (extending && before && traceSize(state.graph) === before) {
+  if (drew && extending && before && traceSize(state.graph) === before) {
     const verb = dir === "in" ? "Fan-in" : dir === "out" ? "Fan-out" : "Fan-in and fan-out";
     noteTrace(`${verb} of ${path} is already on the canvas — nothing further to add.`);
   }
