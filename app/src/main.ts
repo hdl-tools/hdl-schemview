@@ -1625,7 +1625,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     }
     // Continuous assign: a small anonymous square function node (#135).
     if (node?.kind === "Assign") {
-      renderAssign(host, c, id);
+      renderAssign(host, c, node, id);
       continue;
     }
     // Memory array (#112): an array-stack glyph with addr/din/dout pins.
@@ -2635,7 +2635,12 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
 // A continuous assign: a small anonymous square (#135) — no text label, no pin
 // glyphs (at 16 px they would outsize the box). The wire net labels carry the
 // meaning; the shape keeps selection and click/right-click cross-probe.
-function renderAssign(parent: SVGElement, c: any, id: number) {
+//
+// Its pins draw no glyph either, so like a gate they had nothing to click and
+// nothing for the context menu to hit (#295) — which mattered more here than
+// anywhere, an assign being the commonest box in the process-level view. Each pin
+// now gets the invisible hit target and, in trace mode, the ◀/▶ control.
+function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
   const g = document.createElementNS(SVGNS, "g");
   g.setAttribute("transform", `translate(${c.x},${c.y})`);
 
@@ -2655,6 +2660,33 @@ function renderAssign(parent: SVGElement, c: any, id: number) {
   tip.textContent = "assign";
   rect.appendChild(tip);
   g.appendChild(rect);
+
+  const portById = new Map<number, SchPort>();
+  node.ports.forEach((p) => portById.set(p.id, p));
+  const laid = (c.ports ?? [])
+    .map((p: any) => ({ p, sp: portById.get(Number(String(p.id).slice(1))) }))
+    .filter((e: any) => e.sp);
+  // The hit radius comes from the geometry ELK actually laid, not from the view:
+  // one rule then covers both, and the renderer needs to know nothing about trace
+  // mode. Two bounds matter — half the pin gap, so neighbours cannot swallow each
+  // other's clicks on a 6px-pitch hierarchy assign; and a quarter of the width,
+  // because on a 16px-wide glyph a 6px circle at the wall covers three-eighths of
+  // the box and, drawn after the rect, would steal clicks meant for the node.
+  const ys = laid
+    .filter((e: any) => e.sp.side !== "east")
+    .map((e: any) => e.p.y ?? 0)
+    .sort((a: number, b: number) => a - b);
+  const gaps = ys.slice(1).map((y: number, i: number) => y - ys[i]);
+  const gap = gaps.length ? Math.min(...gaps) : Infinity;
+  const r = Math.max(2.5, Math.min(5, c.width / 4, gap / 2));
+
+  for (const { p, sp } of laid) {
+    const east = sp.side === "east";
+    const px = east ? c.width : 0;
+    const py = p.y ?? 0;
+    g.appendChild(pinHit(px, py, sp, id, r));
+    drawPinAffordances(g, sp, px, py, east ? "east" : "west");
+  }
   parent.appendChild(g);
 }
 
