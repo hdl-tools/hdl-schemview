@@ -1417,6 +1417,12 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const gen = ++schemGen;
   const host = $("schematic");
   host.innerHTML = "";
+  // The index describes the DOM just discarded, so it dies with it — otherwise
+  // the empty-scope return below would leave it pointing at detached elements
+  // (#267). `indexSelectable` refills it once the new content exists.
+  nodeEls = new Map();
+  wireEls = [];
+  lit = [];
   if (!graph.nodes.length) {
     host.textContent = "(empty scope)";
     return;
@@ -1799,6 +1805,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // A view change (drill-in / breadcrumb-jump): zoom-to-fit so the whole scope
   // is visible, scrolled top-left — unless we're navigating back, in which case
   // restore the viewport we left. (Manual zoom via setZoom is unaffected after.)
+  indexSelectable(root);
   zoom.k = restore ? restore.k : fitZoom(baseW, baseH, host.clientWidth, host.clientHeight);
   host.appendChild(svg);
   applyZoom(svg);
@@ -3166,19 +3173,41 @@ function selectNode(id: number) {
 // they highlight together. Exactly one object is highlighted at a time: applying
 // a node selection also drops any highlighted wire (and `selectWire` drops the
 // node selection in return).
-function applySelection() {
-  const host = $("schematic");
-  host
-    .querySelectorAll(
-      ".box.sel, .pin.sel, .pin-hit.sel, .pin-label.sel, .box-label.sel, " +
-        ".box-sublabel.sel, .wire.sel, .wire-label.sel",
-    )
-    .forEach((el) => el.classList.remove("sel"));
-  if (state.selected != null) {
-    host
-      .querySelectorAll(`[data-node-id="${state.selected}"]`)
-      .forEach((el) => el.classList.add("sel"));
+/**
+ * Selection index, rebuilt once per render (#267).
+ *
+ * Selecting used to re-query the whole pane on every click — including an
+ * unindexed `[data-node-id="…"]` attribute selector, which walks every
+ * descendant. One pass at render time answers the same question, and `lit`
+ * tracks what currently carries `.sel` so clearing touches only those elements
+ * rather than sweeping for them.
+ */
+let nodeEls = new Map<number, Element[]>();
+let wireEls: SVGElement[] = [];
+let lit: Element[] = [];
+
+function indexSelectable(root: SVGElement) {
+  nodeEls = new Map();
+  for (const el of root.querySelectorAll<SVGElement>("[data-node-id]")) {
+    const id = Number(el.dataset.nodeId);
+    if (!Number.isFinite(id)) continue;
+    const bucket = nodeEls.get(id);
+    if (bucket) bucket.push(el);
+    else nodeEls.set(id, [el]);
   }
+  wireEls = [...root.querySelectorAll<SVGElement>(".wire, .wire-label")];
+  // Glyphs are drawn with `.sel` already applied when they are the selection
+  // (a trace expansion re-renders, and the highlight has to survive it), so
+  // seed `lit` from the DOM rather than assuming a fresh render starts clean.
+  lit = [...root.querySelectorAll(".sel")];
+}
+
+function applySelection() {
+  for (const el of lit) el.classList.remove("sel");
+  // Copied, not aliased: `selectWire` appends to `lit`, and that must not
+  // mutate the index's own bucket.
+  lit = state.selected != null ? [...(nodeEls.get(state.selected) ?? [])] : [];
+  for (const el of lit) el.classList.add("sel");
 }
 
 // Right-click a box/pin to cross-probe it to source + waveform. A polished
@@ -3295,10 +3324,13 @@ async function schematicMenu(ev: MouseEvent, path: string) {
 function selectWire(netPath: string, trunk?: string) {
   state.selected = null;
   applySelection();
-  const host = $("schematic");
-  host.querySelectorAll<SVGElement>(".wire, .wire-label").forEach((el) => {
-    el.classList.toggle("sel", isWireLit(el.dataset, netPath, trunk));
-  });
+  // `applySelection` above cleared whatever was lit; light only the matches and
+  // record them, so the next selection clears exactly these (#267).
+  for (const el of wireEls) {
+    if (!isWireLit(el.dataset, netPath, trunk)) continue;
+    el.classList.add("sel");
+    lit.push(el);
+  }
 }
 
 // -- apply a cross-probe result to source + waveform -----------------------
