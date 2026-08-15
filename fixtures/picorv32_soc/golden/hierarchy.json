@@ -5369,7 +5369,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5398,7 +5398,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "32'dx",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5427,7 +5427,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5456,7 +5456,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5519,7 +5519,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5548,7 +5548,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "32'dx",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5577,7 +5577,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -5606,7 +5606,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18646,7 +18646,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18675,7 +18675,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "32'dx",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18704,7 +18704,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18733,7 +18733,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18796,7 +18796,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18825,7 +18825,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "32'dx",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18854,7 +18854,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []
@@ -18883,7 +18883,7 @@
       "inst_range": null,
       "type": null,
       "dir": null,
-      "const": null,
+      "const": "1'b0",
       "modport": null,
       "drivers": [],
       "loads": []

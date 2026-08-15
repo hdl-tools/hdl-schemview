@@ -181,6 +181,34 @@ def test_constant_tied_inputs(model: dict) -> None:
     assert by["picorv32_soc.g_lane[0].core.clk"]["const"] is None
 
 
+def test_constant_driven_blocks_carry_their_value(model: dict) -> None:
+    """A logic block whose whole expression is a literal records that literal, so
+    the schematic can label the net it drives `pcpi_mul_wr = 1'b0` (#298). The
+    value lives on the driving block, where the literal actually is — never on
+    the net, which the model says nothing about on its own."""
+    by = {n["id"]: n for n in model["nodes"]}
+
+    def driver(path: str) -> dict:
+        """The sole block driving `path` — a tie is only a claim about a net with
+        one driver, so the lookup asserts that rather than picking one."""
+        outs = [
+            e
+            for e in model["edges"]
+            if e["dir"] == "out" and by[e["endpoint"]]["path"] == path
+        ]
+        assert len(outs) == 1, f"{path}: {len(outs)} drivers"
+        return by[outs[0]["port"]]
+
+    lane = "picorv32_soc.g_lane[0].core."
+    # `assign pcpi_mul_wr = 0;` — the RHS conversion carries the constant.
+    assert driver(lane + "pcpi_mul_wr")["const"] == "1'b0"
+    # `assign pcpi_mul_rd = 32'bx;` — slang leaves `.constant` unset for a literal
+    # in a non-constant context, so the `_literal_value` fallback carries it.
+    assert driver(lane + "pcpi_mul_rd")["const"] == "32'dx"
+    # A block that reads a signal computes rather than states a value.
+    assert driver(lane + "dbg_mem_valid")["const"] is None
+
+
 def test_inferred_ff(model: dict) -> None:
     """An always_ff becomes an FF node wired to its clock and assigned output."""
     by = {n["id"]: n for n in model["nodes"]}

@@ -979,22 +979,29 @@ class Elaborator:
         if role == "ff":
             clock = self._value_refs(getattr(getattr(sym, "body", None), "timing", None))
         assigned: set[str] = set()
+        # The right-hand side of each assignment — what the block *states*, kept
+        # alongside what it assigns so a block stating only a literal can record
+        # it (#298).
+        stated: list[Any] = []
 
         def cb(n: Any) -> None:
             if "Assignment" in _kind_name(n):
                 left = getattr(n, "left", None)
                 if left is not None:
                     assigned.update(self._lvalue_bases(left))
+                stated.append(getattr(n, "right", None))
 
         try:
             root.visit(cb)
         except Exception:
             pass
         # A net declaration initializer's target is not in the expression tree
-        # (there is no Assignment node) — the adapter names it directly.
+        # (there is no Assignment node) — the adapter names it directly, and its
+        # whole expression is the assigned value.
         target = getattr(sym, "target_path", None)
         if target is not None:
             assigned.add(target)
+            stated.append(root)
         data = self._value_refs(root) - assigned - clock
         # Resolved bit-selects (e.g. `core_trap[gi]` -> `[0]`) for the signals
         # this block touches, so each wire is labelled with the bit it carries.
@@ -1019,6 +1026,19 @@ class Elaborator:
         clk_ids = wire(clock, "in")
         wire(data, "in")
         wire(assigned, "out")
+        # A block that states a literal rather than computing one records that
+        # literal, so the schematic can label the net it drives `pcpi_mul_wr =
+        # 1'b0` (#298) instead of leaving a tied net indistinguishable from a
+        # live one. Both guards are the claim itself: exactly one assignment
+        # (several would be several values, and the net-level statement no
+        # longer has a single subject) and no data reads (a block that reads a
+        # signal computes a value rather than stating one). Sequential roles are
+        # excluded — an FF's output is its *state*, not its RHS.
+        if role in ("assign", "comb") and not data and len(stated) == 1:
+            rhs = stated[0]
+            tie = self._const_input(rhs) if rhs is not None else None
+            if tie is not None:
+                self.nodes[logic_id]["const"] = tie[1]
         # Wire any memory this block accesses to its real addr/din/dout signals
         # (word_idx / wdata / rdata), with typed pins — replaces the plain
         # process↔memory edge (#112). Read/write *enable* pins stay deferred (#157).
