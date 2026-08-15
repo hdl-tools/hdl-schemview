@@ -32,9 +32,59 @@ import {
   AFFORD_BADGE_DROP,
   CONTAINER_LABEL_H,
   CONTAINER_PAD,
+  tieSuffix,
 } from "./elk";
 import type { LabelPlacement, Pt, VRect } from "./elk";
 import type { SchematicGraph, SchPort } from "./types";
+
+describe("wire tie values (#298)", () => {
+  // `assign n = 1'b0;` feeding one reader: the wire is the only place the value
+  // can be read back, since the literal is on the driving block, not the net.
+  const tied = (constant?: string): SchematicGraph => ({
+    root: "s",
+    nodes: [
+      {
+        id: 1,
+        kind: "Assign",
+        label: "assign",
+        path: "s.$assign1",
+        expandable: false,
+        ports: [{ id: 10, name: "n", side: "east", path: "s.n" }],
+      },
+      {
+        id: 2,
+        kind: "Comb",
+        label: "comb",
+        path: "s.$comb2",
+        expandable: false,
+        ports: [{ id: 20, name: "n", side: "west", path: "s.n" }],
+      },
+    ],
+    edges: [{ id: 0, source: 10, target: 20, net: "n", net_path: "s.n", constant }],
+  });
+
+  it("joins the tie value onto the net label", () => {
+    expect(toElk(tied("1'b0")).edges[0].labels?.[0]?.text).toBe("n = 1'b0");
+  });
+
+  it("leaves a computed net's label bare", () => {
+    expect(toElk(tied(undefined)).edges[0].labels?.[0]?.text).toBe("n");
+  });
+
+  it("reserves layout width for the whole joined label", () => {
+    // ELK routes around the label it is given, so the estimate has to cover the
+    // value too or wires cross the text they belong to.
+    const label = toElk(tied("32'dx")).edges[0].labels![0];
+    expect(label.width).toBe("n = 32'dx".length * 5.5);
+  });
+
+  it("keeps name and value joined in exactly one place", () => {
+    // The renderer splits the label back apart on this suffix to style the value,
+    // so the join must not be spelled out twice.
+    expect(tieSuffix("1'b0")).toBe(" = 1'b0");
+    expect(tieSuffix(undefined)).toBe("");
+  });
+});
 
 // Build an FF child from a bare port list (FF dispatches to ffChild in toElk).
 const ffChildOf = (ports: SchPort[]) =>

@@ -795,12 +795,16 @@ export function toElk(graph: SchematicGraph, opts: LayoutOpts = {}): ElkGraph {
           // The trunk is the whole bundle, so it carries the bundle's name.
           labels: [{ text: g.name, width: g.name.length * 5.5, height: 11 }],
         };
+      // A tied net says so on its own wire (#298), and ELK must reserve space for
+      // the value too — an estimate covering only the name lets wires cross the
+      // text they belong to.
+      const text = e.net === undefined ? undefined : e.net + tieSuffix(e.constant);
       return {
         id: `e${e.id}`,
         sources: [endpoint(e.source)],
         targets: [endpoint(e.target)],
         // Give ELK the net label so it reserves space and returns a placement.
-        labels: e.net ? [{ text: e.net, width: e.net.length * 5.5, height: 11 }] : undefined,
+        labels: text ? [{ text, width: text.length * 5.5, height: 11 }] : undefined,
       };
     });
 
@@ -978,6 +982,19 @@ export function fitZoom(
 }
 
 // --- wire-label placement --------------------------------------------------
+
+/**
+ * What a tie value adds to a wire's label (#298): `" = 1'b0"`, or `""` when the
+ * net is computed.
+ *
+ * The single place a net name and its value are joined. `toElk` appends it so ELK
+ * reserves the full width, and the renderer splits it back off the same way to
+ * style the value — so the two can never disagree about where the name ends.
+ */
+export function tieSuffix(constant?: string): string {
+  return constant ? ` = ${constant}` : "";
+}
+
 export interface Pt {
   x: number;
   y: number;

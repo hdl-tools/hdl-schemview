@@ -104,6 +104,17 @@ actual back or arch. A folded inverter is an inversion bubble on the consumer's 
 than a separate box; a constant or parameter tie is a `const-label` just left of the pin's
 west wall.
 
+**Wire tie values (#298).** A net the backend marks tied labels itself `pcpi_mul_wr = 1'b0`
+rather than leaving a hard-tied net reading like a live one. `tieSuffix` is the single place
+name and value are joined: `toElk` appends it so ELK reserves width for the whole string
+(routing around a name-only estimate would run wires through the value), and the renderer
+splits it back off the same way to put the value in a dimmed monospace `.tie` tspan. Both
+halves stay one `<text>`, so the existing label pipeline — dedupe by text, `labelGeometry`,
+`chooseLabelSegment`, click-to-cross-probe — is untouched, and the tie shows in hierarchy and
+trace views alike because it is a model fact, not a mode. A trunk's label is a bundle name,
+not a net, so it never takes one. Wire labels still have no collision avoidance; longer text
+does not change that.
+
 **Interface trunk wires.** The backend emits one `SchEdge` per member tap — that is the
 cross-probe truth — and the frontend collapses each (raw port, consumer box, wall) group
 into a single ELK edge anchored at a representative member pin (`trunkGroups`/`gatherBar`),
