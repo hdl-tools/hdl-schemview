@@ -139,9 +139,33 @@ which reads the scroll offsets directly, and desync the persisted `ViewState`.
 Two consequences worth knowing before touching it: the gesture's scroll range is captured
 at `mousedown` (reading `scrollWidth` per move would flush layout every frame), and a
 left-drag swallows its trailing `click` **and `dblclick`** via a capture-phase listener on
-the host — the only central interception point while the pane's handlers are still
-per-element `on*` properties, and one that survives their delegation (#267) unchanged.
-Pure parts (`shouldStartPan`, `panTarget`, `blocksSpaceHotkey`) live in `pan.ts`.
+the host. That survived the delegation of the pane's handlers (#267) unchanged, and for a
+sharper reason than before: the delegated listeners sit on the *same* host in bubble
+phase, so stopping propagation during capture means the event never reaches the target and
+never bubbles back to them. Pure parts (`shouldStartPan`, `panTarget`, `blocksSpaceHotkey`)
+live in `pan.ts`.
+
+### Clicks are delegated (#267)
+
+Three listeners on the host — `click`, `dblclick`, `contextmenu` — serve the whole pane,
+replacing two `on*` assignments per glyph (a 20-pin instance was ~83 of them, reallocated
+on every scope change). A glyph carries *data* instead of behaviour: `data-node-id` for
+what it answers for, `data-net-path`/`data-trunk-path` for a wire, and
+`data-probe-path`/`data-fallback-id` for what the context menu should probe.
+
+`resolveHit` in `schemhit.ts` turns the event target into that answer with `closest()`,
+which is also why a pin no longer needs `stopPropagation` to beat the box it sits inside —
+the nearer element wins by construction. A glyph left unstamped is inert, which is how a
+constant tie-off and a node-less container stay unclickable.
+
+Three handlers remain per-element on purpose: the two dangling-output labels (probe-only,
+with no selection and no fallback, so not a node hit) and the trace expand control (a
+control closing over a direction, a handful per trace rather than one per glyph).
+
+Selection is indexed at render time — `nodeEls` by id, `wireEls` cached, and `lit`
+tracking what currently carries `.sel` — so a click stops re-querying the pane. `lit` is
+seeded from the rendered DOM because glyphs are drawn with `.sel` already applied when
+they are the selection, and it copies the index's bucket rather than aliasing it.
 
 ### Trace mode
 
@@ -355,6 +379,7 @@ DOM environment:
 | `log.ts` | `formatTime` (`HH:MM:SS`) + `formatLogEntry` for the status pane |
 | `prefs.ts` | `parseExcluded`/`formatExcluded`/`coerceExcluded` + thin localStorage wrappers (`excludedScopes`, `theme`, `semanticNames`, gate-level, picker-open) |
 | `schempick.ts` | `filterSignals`, `isTextEntryTag` (so the bare `a` hotkey doesn't fire while typing), `moveIndex` (clamped, no-wrap, floors at 0), and the trace step list |
+| `schemhit.ts` | `resolveHit` (which model object a schematic click meant) and `isWireLit` (the #117 bundle rule: a member lights its trunk, never its siblings) |
 | `csrc.ts` | `isCLanguage`, `cSourceFiles`, and the RTL-vs-C pane decision |
 
 ## Status and logging

@@ -1,6 +1,7 @@
 // hdl-schemview frontend: three panes (schematic / source / waveform) linked by
 // one selection, resolved through the cross-probe commands.
 import { api } from "./api";
+import { resolveHit, isWireLit } from "./schemhit";
 import {
   chooseLabelSegment,
   CONTAINER_LABEL_H,
@@ -1251,12 +1252,16 @@ function storedTraceSteps(label: string): TraceStep[] {
  * resolves `pathOf` against `graph.nodes`, finds nothing and silently does
  * nothing. Only a module-instance or boundary pin carries a real node id.
  */
-function probeHandler(sp: SchPort | undefined, fallbackId: number) {
-  return (e: MouseEvent) => {
-    e.preventDefault();
-    if (sp?.path) crossProbePath(sp.path, e);
-    else crossProbe(fallbackId, e);
-  };
+/**
+ * Stamp what the delegated context menu needs to probe this glyph (#267).
+ *
+ * Every per-element handler this replaced computed the same thing: probe the
+ * glyph's own signal path if it has one, else fall back to the box that owns
+ * it. Writing both onto the element lets one listener serve every node glyph.
+ */
+function stampProbe(el: SVGElement, sp: SchPort | undefined, fallbackId: number) {
+  if (sp?.path) el.dataset.probePath = sp.path;
+  el.dataset.fallbackId = String(fallbackId);
 }
 
 /**
@@ -1285,11 +1290,9 @@ function pinHit(cx: number, cy: number, sp: SchPort, fallbackId: number, r = 6):
   // disjoint by construction (pins start at 1 << 30), so a selected pin can
   // never light up an unrelated box.
   hit.dataset.nodeId = String(sp.id);
-  hit.onclick = (e) => {
-    e.stopPropagation();
-    selectNode(sp.id);
-  };
-  hit.oncontextmenu = probeHandler(sp, fallbackId);
+  // No `stopPropagation` needed any more: the delegated listener resolves with
+  // `closest()`, so this pin wins over the box it sits inside by being nearer.
+  stampProbe(hit, sp, fallbackId);
   return hit;
 }
 
@@ -1355,6 +1358,12 @@ function drawPinAffordances(
     txt.setAttribute("text-anchor", anchor);
     txt.textContent = glyph;
     grp.appendChild(txt);
+    // Kept per-element (#267): this is a control, not a hit on a model object —
+    // it closes over the direction to expand, which no dataset attribute
+    // describes. There are a handful per trace, not one per glyph, so the cost
+    // delegation was after is not here. `stopPropagation` still does its job:
+    // this is bubble-phase on a descendant, so it runs before the delegated
+    // listener on the host and keeps the click from also selecting the pin.
     grp.onclick = (e) => {
       e.stopPropagation();
       go();
@@ -1408,6 +1417,12 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   const gen = ++schemGen;
   const host = $("schematic");
   host.innerHTML = "";
+  // The index describes the DOM just discarded, so it dies with it — otherwise
+  // the empty-scope return below would leave it pointing at detached elements
+  // (#267). `indexSelectable` refills it once the new content exists.
+  nodeEls = new Map();
+  wireEls = [];
+  lit = [];
   if (!graph.nodes.length) {
     host.textContent = "(empty scope)";
     return;
@@ -1468,30 +1483,12 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // but never navigates away (#147). Jumping to source is the explicit right-click
   // "Show in source" action. Right-click: highlight + open the action menu (append
   // to waveform / show in source).
-  // Shared by the routed edges and the trunk fan-out geometry below. A member
-  // stub passes its trunk's bundle path so selecting the member also lights
-  // the trunk it hangs off (but never its sibling stubs).
-  const wireHandlers = (netPath: string | undefined, trunkPath?: string) =>
-    netPath
-      ? {
-          left: (ev: Event) => {
-            ev.preventDefault();
-            selectWire(netPath, trunkPath);
-          },
-          menu: (ev: MouseEvent) => {
-            ev.preventDefault();
-            selectWire(netPath, trunkPath);
-            crossProbePath(netPath, ev);
-          },
-        }
-      : null;
+  // Both behaviours now live in the delegated listener `setupSchemEvents`
+  // installs once per pane; a wire element only has to carry its net (#267).
   for (const e of laid.edges ?? []) {
     const sch = edgeById.get(Number(String(e.id).slice(1)));
     const trunk = sch ? trunkByRep.get(sch.id) : undefined;
     const netPath = trunk ? trunk.path || undefined : sch?.net_path;
-    const handlers = wireHandlers(netPath);
-    const wireLeft = handlers?.left ?? null;
-    const wireMenu = handlers?.menu ?? null;
     // ELK reports a routed point relative to the node that *contains* the edge,
     // which it names in `container` — for an edge between two boxes inside an
     // instance that is the container, not the root (#293). Wires are drawn into
@@ -1513,12 +1510,15 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // A wire is a 1.5px line; lay a transparent fat hit-line over it so the net
       // is comfortably clickable. Boxes are drawn after wires, so a box still wins
       // where a wire passes under it.
-      if (wireLeft) {
+      if (netPath) {
         const hit = document.createElementNS(SVGNS, "polyline");
         hit.setAttribute("class", "wire-hit");
         hit.setAttribute("points", points);
-        hit.onclick = wireLeft;
-        hit.oncontextmenu = wireMenu;
+        // The hit line is the element a click actually lands on, so it needs the
+        // net of its own — the visible wire underneath is never the event target
+        // (#267). Only the identity moves here; the overlay itself stays, since
+        // it is what makes a 1.5px wire comfortably clickable.
+        hit.dataset.netPath = netPath;
         root.appendChild(hit);
       }
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
@@ -1543,11 +1543,9 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
           t.appendChild(value);
         }
         // The label cross-probes the same net as its wire.
-        if (wireLeft && netPath) {
+        if (netPath) {
           t.classList.add("clickable");
           t.dataset.netPath = netPath;
-          t.onclick = wireLeft;
-          t.oncontextmenu = wireMenu;
         }
         item = { el: t, segs: [], geom: { aabb: null, fallback: null }, last: null };
         labelByText.set(text, item);
@@ -1572,13 +1570,14 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     if (netPath) path.dataset.netPath = netPath;
     if (trunkPath) path.dataset.trunkPath = trunkPath;
     root.appendChild(path);
-    const handlers = wireHandlers(netPath, trunkPath);
-    if (handlers) {
+    if (netPath) {
       const hit = document.createElementNS(SVGNS, "polyline");
       hit.setAttribute("class", "wire-hit");
       hit.setAttribute("points", points);
-      hit.onclick = handlers.left;
-      hit.oncontextmenu = handlers.menu;
+      // A stub carries its bundle too, so selecting a member lights the trunk it
+      // hangs off but not its siblings (#117).
+      hit.dataset.netPath = netPath;
+      if (trunkPath) hit.dataset.trunkPath = trunkPath;
       root.appendChild(hit);
     }
   };
@@ -1698,17 +1697,6 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     rect.setAttribute("height", String(c.height));
     rect.setAttribute("rx", "4");
     rect.dataset.nodeId = String(id);
-    rect.onclick = () => selectNode(id);
-    rect.ondblclick = () => {
-      if (node?.expandable) {
-        rememberCurrentView();
-        setScope(node.path ?? "", node.label);
-      }
-    };
-    rect.oncontextmenu = (e) => {
-      e.preventDefault();
-      crossProbe(id, e);
-    };
     g.appendChild(rect);
 
     // Title: instance name, with the module type on a second line (like a
@@ -1768,10 +1756,8 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
       // A pin selects + highlights (left) and cross-probes to source + waveform
       // (right) by its own model path; if the pin has no path, fall back to the
       // containing box so right-click is never a dead gesture.
-      const probePin = probeHandler(sp, id);
       arrow.dataset.nodeId = String(pid);
-      arrow.onclick = () => selectNode(pid);
-      arrow.oncontextmenu = probePin;
+      stampProbe(arrow, sp, id);
       g.appendChild(arrow);
       drawPinAffordances(g, sp, edgeX, py, west ? "west" : "east");
 
@@ -1786,8 +1772,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         t.setAttribute("text-anchor", west ? "start" : "end");
         t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
         t.dataset.nodeId = String(pid);
-        t.onclick = () => selectNode(pid);
-        t.oncontextmenu = probePin;
+        stampProbe(t, sp, id);
         g.appendChild(t);
       } else if (sp?.dangling && sp.name) {
         // A logic box's pins are bare stubs (the wire carries the name), so the
@@ -1802,8 +1787,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         t.setAttribute("text-anchor", west ? "end" : "start");
         t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
         t.dataset.nodeId = String(pid);
-        t.onclick = () => selectNode(pid);
-        t.oncontextmenu = probePin;
+        stampProbe(t, sp, id);
         g.appendChild(t);
       }
     }
@@ -1821,6 +1805,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // A view change (drill-in / breadcrumb-jump): zoom-to-fit so the whole scope
   // is visible, scrolled top-left — unless we're navigating back, in which case
   // restore the viewport we left. (Manual zoom via setZoom is unaffected after.)
+  indexSelectable(root);
   zoom.k = restore ? restore.k : fitZoom(baseW, baseH, host.clientWidth, host.clientHeight);
   host.appendChild(svg);
   applyZoom(svg);
@@ -1911,11 +1896,9 @@ function renderContainer(
   rect.setAttribute("width", String(c.width));
   rect.setAttribute("height", String(c.height));
   rect.setAttribute("rx", "4");
-  if (node) {
-    rect.dataset.nodeId = String(id);
-    rect.onclick = () => selectNode(id);
-    rect.oncontextmenu = (ev) => crossProbe(id, ev);
-  }
+  // Only a container backed by a model node answers to clicks; the guard is what
+  // keeps a synthetic one inert, so the id is stamped inside it (#267).
+  if (node) rect.dataset.nodeId = String(id);
   g.appendChild(rect);
 
   // The instance path in the band `toElk` reserved at the top, left-aligned so
@@ -1947,8 +1930,10 @@ function renderContainer(
         ? `M${px - 8},${py - 4} L${px - 8},${py + 4} L${px},${py} Z`
         : `M${px + 8},${py - 4} L${px + 8},${py + 4} L${px},${py} Z`,
     );
-    tri.onclick = () => selectNode(pid);
-    tri.oncontextmenu = probeHandler(sp, pid);
+    // The id was previously implicit in the handler closure; delegation needs it
+    // on the element. `pid` is also the probe fallback here, not the box's id.
+    tri.dataset.nodeId = String(pid);
+    stampProbe(tri, sp, pid);
     g.appendChild(tri);
     drawPinAffordances(g, sp, px, py, west ? "west" : "east");
     const lab = document.createElementNS(SVGNS, "text");
@@ -1988,10 +1973,11 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   // (right), like a box; a constant tie-off is inert. Deliberately probes the
   // Port *node* rather than `sp.path`: a port is two half-edges (#285), and this
   // glyph is the boundary one.
-  const probePin = probeHandler(undefined, id);
+  // Stamped only when it is a real pin: a constant tie-off carries no id, which
+  // is what keeps it inert now that the listener is delegated (#267).
   if (!isConst) {
-    arrow.onclick = () => selectNode(id);
-    arrow.oncontextmenu = probePin;
+    arrow.dataset.nodeId = String(id);
+    stampProbe(arrow, undefined, id);
   }
   g.appendChild(arrow);
   // A boundary pin is where a trace leaves the drawn scope, so it is the most
@@ -2005,8 +1991,8 @@ function renderBoundaryPin(parent: SVGElement, c: any, node: SchNode, id: number
   t.setAttribute("text-anchor", input ? "end" : "start");
   t.textContent = sp?.width ? `${sp.name}${sp.width}` : (sp?.name ?? node.label);
   if (!isConst) {
-    t.onclick = () => selectNode(id);
-    t.oncontextmenu = probePin;
+    t.dataset.nodeId = String(id);
+    stampProbe(t, undefined, id);
   }
   g.appendChild(t);
 
@@ -2038,12 +2024,7 @@ function renderBundlePin(parent: SVGElement, c: any, node: SchNode, id: number) 
   square.setAttribute("class", "pin bundle-pin" + (state.selected === id ? " sel" : ""));
   square.setAttribute("d", `M${edgeX - SQ},${cy - SQ} h${2 * SQ} v${2 * SQ} h${-2 * SQ} Z`);
   square.dataset.nodeId = String(id);
-  const probePin = (ev: MouseEvent) => {
-    ev.preventDefault();
-    crossProbe(id, ev);
-  };
-  square.onclick = () => selectNode(id);
-  square.oncontextmenu = probePin;
+  stampProbe(square, undefined, id);
   g.appendChild(square);
 
   // Instance name first, `(type.view)` on the grey sublabel line — the same
@@ -2057,8 +2038,7 @@ function renderBundlePin(parent: SVGElement, c: any, node: SchNode, id: number) 
   name.setAttribute("text-anchor", anchor);
   name.textContent = node.label;
   name.dataset.nodeId = String(id);
-  name.onclick = () => selectNode(id);
-  name.oncontextmenu = probePin;
+  stampProbe(name, undefined, id);
   g.appendChild(name);
   if (node.module) {
     const mod = document.createElementNS(SVGNS, "text");
@@ -2068,8 +2048,7 @@ function renderBundlePin(parent: SVGElement, c: any, node: SchNode, id: number) 
     mod.setAttribute("text-anchor", anchor);
     mod.textContent = `(${node.module}.${node.modport})`;
     mod.dataset.nodeId = String(id);
-    mod.onclick = () => selectNode(id);
-    mod.oncontextmenu = probePin;
+    stampProbe(mod, undefined, id);
     g.appendChild(mod);
   }
 
@@ -2095,11 +2074,7 @@ function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.setAttribute("height", String(H));
   rect.setAttribute("rx", "3");
   rect.dataset.nodeId = String(id);
-  rect.onclick = () => selectNode(id);
-  rect.oncontextmenu = (e) => {
-    e.preventDefault();
-    crossProbe(id, e);
-  };
+  stampProbe(rect, undefined, id);
   g.appendChild(rect);
 
   const t = document.createElementNS(SVGNS, "text");
@@ -2122,15 +2097,9 @@ function renderStorage(parent: SVGElement, c: any, node: SchNode, id: number) {
     const py = p.y ?? 0;
     // A pin selects + highlights (left) and cross-probes (right) by its own
     // model path, falling back to the box so right-click is never dead.
-    const probePin = (e: MouseEvent) => {
-      e.preventDefault();
-      if (sp.path) crossProbePath(sp.path, e);
-      else crossProbe(id, e);
-    };
     const wirePin = (el: SVGElement) => {
       el.dataset.nodeId = String(pid);
-      el.onclick = () => selectNode(pid);
-      el.oncontextmenu = probePin;
+      stampProbe(el, sp, id);
       g.appendChild(el);
     };
     const role = ffRole(sp, node.kind);
@@ -2238,11 +2207,7 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
   const sel = state.selected === id ? " sel" : "";
   const wireBody = (el: SVGElement) => {
     el.dataset.nodeId = String(id);
-    el.onclick = () => selectNode(id);
-    el.oncontextmenu = (e) => {
-      e.preventDefault();
-      crossProbe(id, e);
-    };
+    stampProbe(el, undefined, id);
     g.appendChild(el);
   };
 
@@ -2417,6 +2382,9 @@ function renderGate(parent: SVGElement, c: any, node: SchNode, id: number) {
     lab.setAttribute("y", String(midY + 3));
     lab.setAttribute("text-anchor", "start");
     lab.textContent = out.width ? `${out.name}${out.width}` : out.name;
+    // Deliberately still a per-element handler (#267): this label is probe-only
+    // — no selection, and no `crossProbe` fallback when the net has no path —
+    // so it is not the node hit the delegated listener knows how to serve.
     lab.oncontextmenu = (e) => {
       e.preventDefault();
       if (out.path) crossProbePath(out.path, e);
@@ -2441,11 +2409,7 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
   body.setAttribute("class", "box mux" + sel);
   body.setAttribute("d", `M0,0 L${W},${inset} L${W},${H - inset} L0,${H} Z`);
   body.dataset.nodeId = String(id);
-  body.onclick = () => selectNode(id);
-  body.oncontextmenu = (e) => {
-    e.preventDefault();
-    crossProbe(id, e);
-  };
+  stampProbe(body, undefined, id);
   g.appendChild(body);
 
   // Data branches (west wall) and the result (east wall) connect straight to the
@@ -2488,12 +2452,7 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
     lab.setAttribute("y", String(H - 4));
     lab.setAttribute("text-anchor", "middle");
     lab.dataset.nodeId = String(pid);
-    lab.onclick = () => selectNode(pid);
-    lab.oncontextmenu = (e) => {
-      e.preventDefault();
-      if (sp.path) crossProbePath(sp.path, e);
-      else crossProbe(id, e);
-    };
+    stampProbe(lab, sp, id);
     lab.textContent = "sel";
     g.appendChild(lab);
     // The select sits on the south wall, so its control drops below the pin
@@ -2512,6 +2471,7 @@ function renderMux(parent: SVGElement, c: any, node: SchNode, id: number) {
     lab.setAttribute("y", String(H / 2 + 3));
     lab.setAttribute("text-anchor", "start");
     lab.textContent = out.width ? `${out.name}${out.width}` : out.name;
+    // Probe-only, like the gate's dangling label — kept per-element (#267).
     lab.oncontextmenu = (e) => {
       e.preventDefault();
       if (out.path) crossProbePath(out.path, e);
@@ -2547,17 +2507,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
       `L0,${H - IFACE_CAP} L0,${IFACE_CAP} Z`,
   );
   body.dataset.nodeId = String(id);
-  body.onclick = () => selectNode(id);
-  body.ondblclick = () => {
-    if (node.expandable) {
-      rememberCurrentView();
-      setScope(node.path ?? "", node.label);
-    }
-  };
-  body.oncontextmenu = (e) => {
-    e.preventDefault();
-    crossProbe(id, e);
-  };
+  stampProbe(body, undefined, id);
   g.appendChild(body);
 
   // Instance name reads first — same convention as module boxes and the
@@ -2615,14 +2565,8 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
           ? `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX + PIN},${py} Z`
           : `M${edgeX},${py - 4} L${edgeX},${py + 4} L${edgeX - PIN},${py} Z`,
     );
-    const probePin = (e: MouseEvent) => {
-      e.preventDefault();
-      if (sp?.path) crossProbePath(sp.path, e);
-      else crossProbe(id, e);
-    };
     arrow.dataset.nodeId = String(pid);
-    arrow.onclick = () => selectNode(pid);
-    arrow.oncontextmenu = probePin;
+    stampProbe(arrow, sp, id);
     g.appendChild(arrow);
     drawPinAffordances(g, sp, edgeX, py, west ? "west" : "east");
     if (sp) {
@@ -2633,8 +2577,7 @@ function renderInterface(parent: SVGElement, c: any, node: SchNode, id: number) 
       t.setAttribute("text-anchor", west ? "start" : "end");
       t.textContent = sp.width ? `${sp.name}${sp.width}` : sp.name;
       t.dataset.nodeId = String(pid);
-      t.onclick = () => selectNode(pid);
-      t.oncontextmenu = probePin;
+      stampProbe(t, sp, id);
       g.appendChild(t);
     }
   }
@@ -2660,11 +2603,7 @@ function renderAssign(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.setAttribute("rx", "2");
   rect.setAttribute("ry", "2");
   rect.dataset.nodeId = String(id);
-  rect.onclick = () => selectNode(id);
-  rect.oncontextmenu = (e) => {
-    e.preventDefault();
-    crossProbe(id, e);
-  };
+  stampProbe(rect, undefined, id);
   const tip = document.createElementNS(SVGNS, "title");
   tip.textContent = "assign";
   rect.appendChild(tip);
@@ -2741,11 +2680,7 @@ function renderMemory(parent: SVGElement, c: any, node: SchNode, id: number) {
   rect.setAttribute("height", String(H));
   rect.setAttribute("rx", "3");
   rect.dataset.nodeId = String(id);
-  rect.onclick = () => selectNode(id);
-  rect.oncontextmenu = (e) => {
-    e.preventDefault();
-    crossProbe(id, e);
-  };
+  stampProbe(rect, undefined, id);
   g.appendChild(rect);
 
   // Word-row dividers in the lower band, reinforcing the array look.
@@ -2816,15 +2751,9 @@ function renderMemory(parent: SVGElement, c: any, node: SchNode, id: number) {
     if (!sp) continue;
     const py = p.y ?? 0;
     const east = sp.side === "east";
-    const probePin = (e: MouseEvent) => {
-      e.preventDefault();
-      if (sp.path) crossProbePath(sp.path, e);
-      else crossProbe(id, e);
-    };
     const wirePin = (el: SVGElement) => {
       el.dataset.nodeId = String(pid);
-      el.onclick = () => selectNode(pid);
-      el.oncontextmenu = probePin;
+      stampProbe(el, sp, id);
       g.appendChild(el);
     };
     const tri = document.createElementNS(SVGNS, "path");
@@ -3004,6 +2933,60 @@ function setupZoom() {
   // because it also fires for wheel scroll and for `setZoom`'s own scroll writes.
   host.addEventListener("scroll", scheduleWireLabels, { passive: true });
   setupPan(host); // #265 — inside setupZoom so pop-outs inherit it (see below)
+  setupSchemEvents(host); // #267 — likewise, so a pop-out is clickable too
+}
+
+/**
+ * The schematic's click/right-click/drill handling, delegated (#267).
+ *
+ * Three listeners for the whole pane, replacing two property assignments on
+ * every glyph the renderer emitted — thousands of closures per scope change,
+ * all discarded by the next `innerHTML = ""`. They live on the host rather than
+ * the root `<g>` so they survive re-renders, and they are bubble-phase so
+ * `setupPan`'s capture-phase swallow still beats them mid-drag.
+ *
+ * `resolveHit` decides *what* was hit (and is unit-tested); everything here is
+ * the side effect.
+ */
+function setupSchemEvents(host: HTMLElement) {
+  host.addEventListener("click", (ev) => {
+    const hit = resolveHit(ev.target as Element | null);
+    if (!hit) return;
+    // A plain click selects and highlights but never navigates away (#147).
+    if (hit.kind === "wire") {
+      ev.preventDefault();
+      selectWire(hit.netPath, hit.trunkPath);
+    } else {
+      selectNode(hit.id);
+    }
+  });
+
+  // Drill into an expandable box. A pin resolves to its own id, which is not a
+  // node, so `nodeOf` misses and a double-click on a pin drills nothing — the
+  // same as when only the box rect carried this handler.
+  host.addEventListener("dblclick", (ev) => {
+    const hit = resolveHit(ev.target as Element | null);
+    if (hit?.kind !== "node") return;
+    const node = nodeOf(hit.id);
+    if (!node?.expandable) return;
+    rememberCurrentView();
+    setScope(node.path ?? "", node.label);
+  });
+
+  host.addEventListener("contextmenu", (ev) => {
+    const hit = resolveHit(ev.target as Element | null);
+    if (!hit) return;
+    ev.preventDefault();
+    if (hit.kind === "wire") {
+      selectWire(hit.netPath, hit.trunkPath);
+      crossProbePath(hit.netPath, ev);
+      return;
+    }
+    // A glyph with a signal path of its own probes that; anything else falls
+    // back to the box that owns it, so right-click is never a dead gesture.
+    if (hit.probePath) crossProbePath(hit.probePath, ev);
+    else crossProbe(hit.fallbackId ?? hit.id, ev);
+  });
 }
 
 // Drag-to-pan (#265): middle-drag, or Space + left-drag. Both write
@@ -3089,11 +3072,15 @@ function setupPan(host: HTMLElement) {
     window.addEventListener("mouseup", onUp);
   });
 
-  // Capture on the host, so this beats the per-element `onclick`/`ondblclick` the
-  // renderer assigns (those are bubble-phase, on descendants). `dblclick` is
-  // suppressed too: swallowing a click does not stop the dblclick that follows a
-  // second one, and on a module box that dblclick drills the design. No
-  // preventDefault — a click over SVG glyphs has no default worth cancelling.
+  // Capture on the host, so this beats the delegated `click`/`dblclick`
+  // listeners `setupSchemEvents` puts on this same element — those are
+  // bubble-phase, so stopping propagation here means the event never reaches
+  // the target and never bubbles back up to them. (It used to beat per-element
+  // handlers on descendants the same way; #267 moved them, not the contract.)
+  // `dblclick` is suppressed too: swallowing a click does not stop the dblclick
+  // that follows a second one, and on a module box that dblclick drills the
+  // design. No preventDefault — a click over SVG glyphs has no default worth
+  // cancelling.
   const swallow = (ev: Event) => {
     if (swallowClick) ev.stopPropagation();
   };
@@ -3150,17 +3137,22 @@ function setupPan(host: HTMLElement) {
 // object from the backend (scope, trace and restore paths alike), so identity
 // changing is exactly the signal the index is stale (#266). Was a linear scan
 // on every click.
-let pathIndex: { graph: SchematicGraph | null; byId: Map<number, string> } = {
+let nodeIndex: { graph: SchematicGraph | null; byId: Map<number, SchNode> } = {
   graph: null,
   byId: new Map(),
 };
-function pathOf(id: number): string | null {
+/** The on-screen graph's node for an id, or null — indexed, not scanned. */
+function nodeOf(id: number): SchNode | null {
   const graph = state.graph;
   if (!graph) return null;
-  if (pathIndex.graph !== graph) {
-    pathIndex = { graph, byId: new Map(graph.nodes.map((n) => [n.id, n.path])) };
+  if (nodeIndex.graph !== graph) {
+    nodeIndex = { graph, byId: new Map(graph.nodes.map((n) => [n.id, n])) };
   }
-  return pathIndex.byId.get(id) ?? null;
+  return nodeIndex.byId.get(id) ?? null;
+}
+
+function pathOf(id: number): string | null {
+  return nodeOf(id)?.path ?? null;
 }
 
 // Single-click selection: highlight the node in the schematic only. This is
@@ -3181,19 +3173,41 @@ function selectNode(id: number) {
 // they highlight together. Exactly one object is highlighted at a time: applying
 // a node selection also drops any highlighted wire (and `selectWire` drops the
 // node selection in return).
-function applySelection() {
-  const host = $("schematic");
-  host
-    .querySelectorAll(
-      ".box.sel, .pin.sel, .pin-hit.sel, .pin-label.sel, .box-label.sel, " +
-        ".box-sublabel.sel, .wire.sel, .wire-label.sel",
-    )
-    .forEach((el) => el.classList.remove("sel"));
-  if (state.selected != null) {
-    host
-      .querySelectorAll(`[data-node-id="${state.selected}"]`)
-      .forEach((el) => el.classList.add("sel"));
+/**
+ * Selection index, rebuilt once per render (#267).
+ *
+ * Selecting used to re-query the whole pane on every click — including an
+ * unindexed `[data-node-id="…"]` attribute selector, which walks every
+ * descendant. One pass at render time answers the same question, and `lit`
+ * tracks what currently carries `.sel` so clearing touches only those elements
+ * rather than sweeping for them.
+ */
+let nodeEls = new Map<number, Element[]>();
+let wireEls: SVGElement[] = [];
+let lit: Element[] = [];
+
+function indexSelectable(root: SVGElement) {
+  nodeEls = new Map();
+  for (const el of root.querySelectorAll<SVGElement>("[data-node-id]")) {
+    const id = Number(el.dataset.nodeId);
+    if (!Number.isFinite(id)) continue;
+    const bucket = nodeEls.get(id);
+    if (bucket) bucket.push(el);
+    else nodeEls.set(id, [el]);
   }
+  wireEls = [...root.querySelectorAll<SVGElement>(".wire, .wire-label")];
+  // Glyphs are drawn with `.sel` already applied when they are the selection
+  // (a trace expansion re-renders, and the highlight has to survive it), so
+  // seed `lit` from the DOM rather than assuming a fresh render starts clean.
+  lit = [...root.querySelectorAll(".sel")];
+}
+
+function applySelection() {
+  for (const el of lit) el.classList.remove("sel");
+  // Copied, not aliased: `selectWire` appends to `lit`, and that must not
+  // mutate the index's own bucket.
+  lit = state.selected != null ? [...(nodeEls.get(state.selected) ?? [])] : [];
+  for (const el of lit) el.classList.add("sel");
 }
 
 // Right-click a box/pin to cross-probe it to source + waveform. A polished
@@ -3310,15 +3324,13 @@ async function schematicMenu(ev: MouseEvent, path: string) {
 function selectWire(netPath: string, trunk?: string) {
   state.selected = null;
   applySelection();
-  const host = $("schematic");
-  host.querySelectorAll<SVGElement>(".wire, .wire-label").forEach((el) => {
-    el.classList.toggle(
-      "sel",
-      el.dataset.netPath === netPath ||
-        el.dataset.trunkPath === netPath ||
-        (trunk !== undefined && el.dataset.netPath === trunk),
-    );
-  });
+  // `applySelection` above cleared whatever was lit; light only the matches and
+  // record them, so the next selection clears exactly these (#267).
+  for (const el of wireEls) {
+    if (!isWireLit(el.dataset, netPath, trunk)) continue;
+    el.classList.add("sel");
+    lit.push(el);
+  }
 }
 
 // -- apply a cross-probe result to source + waveform -----------------------
