@@ -177,7 +177,7 @@
         },
         "const": {
           "type": ["string", "null"],
-          "description": "Literal or resolved parameter value tied to an input (a Port input, or a gate operand via a Const/Param node, e.g. \"32'd0\"); null if driven by a net."
+          "description": "A literal or resolved parameter value the model states, e.g. \"32'd0\": on a Port input tied to a literal, on a gate operand via a Const/Param node, or on an Assign/Comb block whose whole expression is a literal (the net it drives is tied to that value). Null when the value is computed or net-driven."
         },
         "modport": {
           "type": ["string", "null"],

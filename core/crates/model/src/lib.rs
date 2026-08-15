@@ -332,9 +332,11 @@ pub struct Node {
     /// otherwise.
     #[serde(default)]
     pub dir: Option<Dir>,
-    /// Literal or resolved parameter value tied to an input (e.g. `32'd0`): a `Port`
-    /// input, a synthetic `Const` gate operand, or a `Param` referenced by a gate
-    /// (#199). `None` if net-driven.
+    /// A literal or resolved parameter value the model states (e.g. `32'd0`): a
+    /// `Port` input tied to a literal, a synthetic `Const` gate operand, a `Param`
+    /// referenced by a gate (#199), or an `Assign`/`Comb` block whose whole
+    /// expression is a literal — which ties the net it drives to that value
+    /// (#298). `None` when the value is computed or net-driven.
     #[serde(rename = "const", default)]
     pub const_value: Option<String>,
     /// View name on a modport-specialized interface port (e.g. `mem` for

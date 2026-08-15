@@ -168,6 +168,14 @@ export interface SchEdge {
    * click cross-probe via `probe_node`. Absent for synthetic constant tie-offs.
    */
   net_path?: string;
+  /**
+   * Literal the net is unconditionally tied to (e.g. "1'b0" for `assign
+   * pcpi_mul_wr = 0;`), so the wire label can read `pcpi_mul_wr = 1'b0` (#298).
+   * Set by the backend only when the net's sole driver is a logic block the
+   * model marks constant; absent for a computed net, a bit-selected wire, and
+   * every synthetic wire. Never re-derived here — the frontend does no folding.
+   */
+  constant?: string;
 }
 export interface SchematicGraph {
   root: string;

@@ -76,6 +76,7 @@ Node {
 | `mem_depth` / `init_source` | A `Memory`'s word count and its `$readmemh`/`$readmemb` INIT text |
 | `modport` | The view name on a modport-specialized interface port (e.g. `mem`). Such a port carries directional `Port` children, one per modport member; each pin's `path` is the *underlying member's* canonical path |
 | `members` | `Option<Vec<ModportMember { name, dir }>>` — per-modport membership on `Modport` nodes (descriptive; the modport stays a view). A member's own node resolves via `Design::modport_member_nodes` |
+| `const_value` | A literal or resolved parameter value the model **states** (`32'd0`), on the node the value belongs to: a `Port` input tied to a literal, a `Const`/`Param` gate operand (#199), or an `Assign`/`Comb` block whose whole expression is a literal — one assignment, no data reads — which ties the net that block drives (#298). Absent when the value is computed or net-driven; a net never carries one itself |
 | `reset` / `enable` | Canonical paths of an inferred FF's async-reset signal and an inferred latch's gating signal. **Structural facts, never name guesses:** the reset is the timing-control edge whose signal the process body *also* reads (and `type_` then names the true clock); the enable is the sole signal read by the body's top-level conditional. Ambiguity ⇒ absent, so a sync reset stays untagged |
 
 ### A module port is two nodes
@@ -188,11 +189,20 @@ SchPort { id, name, side: Side, path, width, role, bundle, dangling, constant, m
 ### `SchEdge`
 
 ```rust
-SchEdge { id, source, target, net, net_path }
+SchEdge { id, source, target, net, net_path, constant }
 ```
 
 `net_path` is the connecting net's canonical model path (absolute, no bit-select), so a
 wire click cross-probes via `probe_node`. It is `None` for synthetic constant tie-offs.
+
+`constant` is the literal the net is unconditionally tied to (#298), so the wire can read
+`pcpi_mul_wr = 1'b0` rather than leaving a tied net indistinguishable from a live one. It is
+present only when the net's **sole** driver is a logic block the model marks constant — an
+`Assign`/`Comb` with one assignment and no data reads (`net_tie`). A net a live process also
+writes is not tied; neither is one driven through a bit-select, nor a bit-selected wire off a
+tied net. Synthetic tie-off wires stay `None`: their literal is already on the source node,
+and stating it twice on one connection says nothing new. Resolved once per signal, so the two
+halves of a routed port crossing cannot disagree.
 
 ### Trace-view inputs
 

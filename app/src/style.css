@@ -456,6 +456,10 @@ body.detached-waveform #wave-pick-btn { display:inline-block; }
 /* A wire label sharing its net's click-to-probe needs to receive pointer events. */
 .wire-label.clickable { pointer-events:auto; cursor:pointer; }
 .wire-label.sel { fill:var(--sel); }
+/* A tied net's value (#298), monospace and dimmed like the pin-side tie values it
+   states the same fact as, so it reads as a value rather than part of the name.
+   Inherits the label's --canvas halo, which is what keeps it legible over wires. */
+.wire-label .tie { fill:var(--sublabel); font-family:ui-monospace, monospace; }
 
 #picker { position:fixed; right:10px; bottom:10px; background:var(--panel); border:1px solid var(--border); padding:6px; display:none; max-width:340px; }
 #picker .alt { color:var(--crumb-fg); cursor:pointer; padding:2px; }

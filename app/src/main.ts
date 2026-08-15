@@ -18,6 +18,7 @@ import {
   nodeId,
   placementsEqual,
   portId,
+  tieSuffix,
   trunkGroups,
 } from "./elk";
 import type { LabelGeom, LabelPlacement, Pt, TrunkGroup } from "./elk";
@@ -1520,7 +1521,18 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
         const t = document.createElementNS(SVGNS, "text");
         t.setAttribute("class", "wire-label");
         t.setAttribute("text-anchor", "middle");
-        t.textContent = text;
+        // A tied net's label is `name = value` (#298). Split it back apart on the
+        // same suffix `toElk` appended, so the value can read as a value without
+        // the join being spelled out twice. A trunk's label is a bundle name, not
+        // a net, so it never carries one.
+        const suffix = tieSuffix(trunk ? undefined : sch?.constant);
+        t.textContent = suffix ? text.slice(0, text.length - suffix.length) : text;
+        if (suffix) {
+          const value = document.createElementNS(SVGNS, "tspan");
+          value.setAttribute("class", "tie");
+          value.textContent = suffix;
+          t.appendChild(value);
+        }
         // The label cross-probes the same net as its wire.
         if (wireLeft && netPath) {
           t.classList.add("clickable");
