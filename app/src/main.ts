@@ -1439,17 +1439,26 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   // reports a contained edge's points relative to its container (#293).
   const ORIGIN = { x: 0, y: 0 };
   const originOf = new Map<string, { x: number; y: number }>();
+  // The same walk also indexes the laid-out nodes themselves, so the trunk pass
+  // below can reach one by id without re-descending the tree per group (#266).
+  const laidById = new Map<string, any>();
   const mapOrigins = (kids: any[] | undefined, dx: number, dy: number) => {
     for (const c of kids ?? []) {
       const x = dx + (c.x ?? 0);
       const y = dy + (c.y ?? 0);
-      originOf.set(String(c.id), { x, y });
+      const key = String(c.id);
+      originOf.set(key, { x, y });
+      laidById.set(key, c);
       if (c.children) mapOrigins(c.children, x, y);
     }
   };
   mapOrigins(laid.children, 0, 0);
 
   const edgeById = new Map(graph.edges.map((se) => [se.id, se]));
+  // Model nodes by id, built once instead of scanned per laid-out box (#266).
+  // At gate level a scope is ~1,100 boxes, so the per-box `.find` it replaces
+  // was ~660K comparisons on every scope change.
+  const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   // Bundle trunks (#117): the member taps of a raw access port were collapsed
   // to one ELK edge (keyed by the first member's id); the trunk cross-probes
   // the bundle itself, and the members re-fan at the consumer wall below.
@@ -1574,14 +1583,24 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
     }
   };
   for (const tg of trunkByRep.values()) {
-    const box = findLaidChild(laid.children, nodeId(tg.box));
-    if (!box) continue;
+    const key = nodeId(tg.box);
+    // Both maps cover the *whole* container tree, not just the top level, and
+    // that matters twice over (#293): this pass computes its geometry by hand
+    // into the root group, so it needs the root-space origin ELK does not give
+    // a nested child — and a flat top-level scan would *silently* drop the
+    // fan-out of any bundle consumer that ended up inside a container. The
+    // recursive re-descent per group this replaces is #266.
+    const box = laidById.get(key);
+    const org = originOf.get(key);
+    if (!box || !org) continue;
     const dir: 1 | -1 = tg.side === "east" ? 1 : -1;
+    // One port index per group, not one scan per member.
+    const portsById = new Map<string, any>((box.ports ?? []).map((q: any) => [q.id, q]));
     const members: { pt: Pt; e: (typeof tg.edges)[number] }[] = [];
     for (const m of tg.edges) {
       const pid = m.source === tg.port ? m.target : m.source;
-      const p = (box.ports ?? []).find((q: any) => q.id === portId(pid));
-      if (p) members.push({ pt: { x: (box.x ?? 0) + (p.x ?? 0), y: (box.y ?? 0) + (p.y ?? 0) }, e: m });
+      const p = portsById.get(portId(pid));
+      if (p) members.push({ pt: { x: org.x + (p.x ?? 0), y: org.y + (p.y ?? 0) }, e: m });
     }
     if (!members.length) continue;
     const geo = gatherBar(
@@ -1611,7 +1630,7 @@ async function renderSchematic(graph: SchematicGraph, restore?: ViewState) {
   while (stack.length) {
     const { c, host } = stack.pop() as { c: any; host: SVGElement };
     const id = Number(String(c.id).slice(1));
-    const node = graph.nodes.find((n) => n.id === id);
+    const node = nodeById.get(id);
 
     // An instance with boxes behind its wall: draw the container, then queue its
     // contents into it. Checked before the kind dispatch, because the container
@@ -1869,28 +1888,6 @@ function scheduleWireLabels() {
 
 // A scope's own port, drawn as a frame pin: an arrow along the signal flow plus
 // the port name on the outboard side (inputs on the left, outputs on the right).
-/**
- * Find a laid-out child by id anywhere in the container tree, rebased to root
- * coordinates (#293).
- *
- * ELK reports a nested child's position relative to its container. The box
- * glyphs never need this — they are drawn into nested SVG groups and let
- * transform composition handle it — but the bundle trunk below computes its
- * geometry by hand and draws into the root group, so it needs absolute numbers.
- * A flat scan of the top level would also have *silently* dropped the fan-out of
- * any bundle consumer that ended up inside a container.
- */
-function findLaidChild(children: any[] | undefined, id: string, dx = 0, dy = 0): any {
-  for (const c of children ?? []) {
-    const x = dx + (c.x ?? 0);
-    const y = dy + (c.y ?? 0);
-    if (c.id === id) return { ...c, x, y };
-    const hit = findLaidChild(c.children, id, x, y);
-    if (hit) return hit;
-  }
-  return undefined;
-}
-
 /**
  * An instance the trace descended through, drawn as a labelled box holding the
  * logic behind its wall (#293).
@@ -3148,8 +3145,22 @@ function setupPan(host: HTMLElement) {
 }
 
 // `node.path` isn't in the layout; look it up from the graph by id.
+// Node id → path for the graph on screen. Keyed on the graph *object* rather
+// than rebuilt eagerly: every assignment to `state.graph` installs a fresh
+// object from the backend (scope, trace and restore paths alike), so identity
+// changing is exactly the signal the index is stale (#266). Was a linear scan
+// on every click.
+let pathIndex: { graph: SchematicGraph | null; byId: Map<number, string> } = {
+  graph: null,
+  byId: new Map(),
+};
 function pathOf(id: number): string | null {
-  return state.graph?.nodes.find((n) => n.id === id)?.path ?? null;
+  const graph = state.graph;
+  if (!graph) return null;
+  if (pathIndex.graph !== graph) {
+    pathIndex = { graph, byId: new Map(graph.nodes.map((n) => [n.id, n.path])) };
+  }
+  return pathIndex.byId.get(id) ?? null;
 }
 
 // Single-click selection: highlight the node in the schematic only. This is

@@ -150,9 +150,12 @@ fn unload_design(state: State<AppState>, session_id: Option<String>) -> CmdResul
     Ok(())
 }
 
+/// `async` for the reason stated on `elaborate_and_load` above: Tauri runs a
+/// non-async command on the UI thread, and this one builds a whole scope's
+/// graph — ~1,100 boxes under the gate-level projection (#266).
 #[tauri::command]
-fn scope_graph(
-    state: State<AppState>,
+async fn scope_graph(
+    state: State<'_, AppState>,
     session_id: Option<String>,
     scope: String,
     projection: Option<Projection>,
@@ -164,9 +167,10 @@ fn scope_graph(
     })
 }
 
+/// `async` for the same reason as `scope_graph` (#266).
 #[tauri::command]
-fn expand_node(
-    state: State<AppState>,
+async fn expand_node(
+    state: State<'_, AppState>,
     session_id: Option<String>,
     node: u32,
     projection: Option<Projection>,
