@@ -234,6 +234,17 @@ pub struct SchEdge {
     /// `nodes_at_path` lookup. `None` for synthetic wires (constant tie-offs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub net_path: Option<String>,
+    /// Literal the connecting net is unconditionally tied to (#298) — e.g. `1'b0`
+    /// for `assign pcpi_mul_wr = 0;`, so the wire can read `pcpi_mul_wr = 1'b0`
+    /// instead of leaving a tied net indistinguishable from a live one.
+    ///
+    /// Set only when the net's **sole** driver is a logic block the model marks
+    /// constant ([`net_tie`]). `None` for a computed or net-driven wire, for a
+    /// bit-selected wire (the whole-net literal is not that bit's value), and for
+    /// every synthetic wire — an instance-port tie-off already draws its literal
+    /// on its own source node, and restating it would show the value twice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<String>,
 }
 
 /// A renderable, layout-agnostic schematic graph for one scope or cone.
@@ -1063,8 +1074,13 @@ fn make_gate_box(design: &Design, gate: NodeId, pins: &mut PinAlloc) -> Option<S
                 role,
                 bundle: false,
                 dangling: false,
-                // A constant/parameter operand carries its value inline (#199).
-                constant: sig.and_then(|s| s.const_value.clone()),
+                // A constant/parameter operand carries its value inline (#199) —
+                // and only those two kinds do. A logic block's `const_value`
+                // describes the net it drives (#298), not this operand, so the two
+                // features stay independent by construction rather than by luck.
+                constant: sig
+                    .filter(|s| matches!(s.kind, NodeKind::Const | NodeKind::Param))
+                    .and_then(|s| s.const_value.clone()),
             }
         })
         .collect();
@@ -1276,6 +1292,9 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
         let signode = design.node(sig);
         let net = signode.map(|n| relative_to(&n.path, scope_path));
         let net_path = signode.map(|n| n.path.clone());
+        // Whatever node supplies `net`/`net_path` supplies the tie (#298), so the
+        // interface interior is not the one view that hides it.
+        let tie = net_tie(design, sig);
         for &d in ds {
             for &l in ls {
                 if d == l || !seen.insert((d.min(l), d.max(l))) {
@@ -1287,6 +1306,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
                     target: l,
                     net: net.clone(),
                     net_path: net_path.clone(),
+                    constant: tie.clone(),
                 });
                 next_edge += 1;
             }
@@ -1346,6 +1366,7 @@ fn interface_interior(design: &Design, iface: NodeId, scope_path: &str) -> Schem
                 target: pin,
                 net: signode.map(|n| relative_to(&n.path, scope_path)),
                 net_path: signode.map(|n| n.path.clone()),
+                constant: net_tie(design, sig),
             });
             next_edge += 1;
         }
@@ -1686,6 +1707,10 @@ pub fn scope_graph_with(
                     target: tgt,
                     net,
                     net_path,
+                    // Same rule as the signal join: the node that names the wire
+                    // states its tie, and a bit-selected wire carries only part of
+                    // the net, so the whole-net literal is not its value (#298).
+                    constant: net_tie(design, e.endpoint).filter(|_| e.select.is_none()),
                 });
             }
         }
@@ -1855,8 +1880,12 @@ pub fn scope_graph_with(
             let (Some(ds), Some(ls)) = (drivers.get(&sig), loads.get(&sig)) else {
                 continue;
             };
+            let tie = net_tie(design, sig);
             join_signal(
-                design.node(sig),
+                JoinNet {
+                    node: design.node(sig),
+                    tie: tie.as_deref(),
+                },
                 scope_path,
                 ds,
                 ls,
@@ -1884,6 +1913,10 @@ pub fn scope_graph_with(
                     target: pid,
                     net: None,
                     net_path: None,
+                    // The source node already carries the literal as its label, and
+                    // this wire has no net for "that net equals V" to be about —
+                    // stamping it would draw one value twice (#298).
+                    constant: None,
                 });
                 next_edge += 1;
             }
@@ -1956,6 +1989,18 @@ pub fn expand_with(
     scope_graph_with(design, &path, projection)
 }
 
+/// The net a [`join_signal`] call is about: the model node that names it, and the
+/// literal it is unconditionally tied to ([`net_tie`], #298).
+///
+/// Bundled because they describe the same signal and are resolved together, once
+/// per signal — which is what stops the two halves of a routed crossing from
+/// disagreeing about the value.
+#[derive(Clone, Copy)]
+struct JoinNet<'a> {
+    node: Option<&'a Node>,
+    tie: Option<&'a str>,
+}
+
 /// Cross one signal's drivers with its loads into wires.
 ///
 /// The shared join used by the scope graph's signal pass and, from #244, by the
@@ -1963,11 +2008,10 @@ pub fn expand_with(
 /// pin pair is deduped against `seen` on `(min, max)`, which is what collapses a
 /// high-fan-out net instead of emitting one wire per load.
 ///
-/// `sig` is the signal node itself (`None` when it is not in the model), used
-/// only for the wire's label and `net_path`; `scope_path` is what the label is
-/// made relative to.
+/// `net` is what the wires are about — the signal node and its tie value;
+/// `scope_path` is what the label is made relative to.
 fn join_signal(
-    sig: Option<&Node>,
+    net: JoinNet<'_>,
     scope_path: &str,
     drivers: &[(NodeId, Option<String>)],
     loads: &[(NodeId, Option<String>)],
@@ -1975,8 +2019,8 @@ fn join_signal(
     next_edge: &mut u32,
     out: &mut Vec<SchEdge>,
 ) {
-    let label = sig.map(|n| relative_to(&n.path, scope_path));
-    let net_path = sig.map(|n| n.path.clone());
+    let label = net.node.map(|n| relative_to(&n.path, scope_path));
+    let net_path = net.node.map(|n| n.path.clone());
     for &(dpin, ref dsel) in drivers {
         for &(lpin, ref lsel) in loads {
             // No self-loop (a box reading and writing the same signal); a
@@ -1991,13 +2035,16 @@ fn join_signal(
                 continue;
             }
             let select = dsel.clone().or_else(|| lsel.clone());
-            let net = label.clone().map(|b| with_select(b, &select));
+            let wire_net = label.clone().map(|b| with_select(b, &select));
             out.push(SchEdge {
                 id: *next_edge,
                 source: dpin,
                 target: lpin,
-                net,
+                net: wire_net,
                 net_path: net_path.clone(),
+                // A bit-selected wire carries part of the net, so the whole-net
+                // literal is not its value: `y[3] = 32'h0` would read as a lie.
+                constant: net.tie.filter(|_| select.is_none()).map(str::to_string),
             });
             *next_edge += 1;
         }
@@ -2285,6 +2332,56 @@ fn group_of(
         cache.insert(m, g.clone());
     }
     g
+}
+
+/// The literal a net is unconditionally tied to (#298), or `None`.
+///
+/// `assign pcpi_mul_wr = 0;` elaborates to an `Assign` block with one `out` edge
+/// and no children — the literal is nowhere on the net, only on the block, where
+/// the harness stamps it on [`Node::const_value`]. This is the one place the
+/// schematic reads that fact back onto the wire.
+///
+/// Deliberately conservative; each guard is a claim the model has to actually
+/// make:
+///
+/// * The same-path group folds ([`signal_group`]). A module port is two nodes and
+///   the backing `Net`/`Var` carries every *internal* edge, so a tie is invisible
+///   from the `Port` node the scope graph keys its boundary wires on.
+/// * **Exactly one** driver. A net a live process also writes is not tied — the
+///   constant assign is one of two things happening to it — and two constant
+///   assigns in different branches do not agree by construction.
+/// * A bit-selected driver is not a tie: `assign y[3:0] = 0` states four bits,
+///   not `y`.
+/// * Only `Assign`/`Comb` count. A `Port`'s `const_value` is the instance-port
+///   tie-off `scope_graph_with` already draws as its own source node, and a
+///   `Const`/`Param` operand renders inline on [`SchPort::constant`] (#199). This
+///   is the third, net-level case, and it must not restate either of the others.
+fn net_tie(design: &Design, sig: NodeId) -> Option<String> {
+    let group = signal_group(design, sig);
+    let mut driver: Option<(&Edge, NodeId)> = None;
+    for &m in &group {
+        for &i in design.edge_indices_of(m) {
+            let e = &design.edges()[i as usize];
+            let other = if e.port == m { e.endpoint } else { e.port };
+            // An edge *inside* the group is the port/net crossing, not a driver —
+            // and skipping it also makes each remaining edge visited once across
+            // the whole group.
+            if group.contains(&other) || !edge_drives(e, m) {
+                continue;
+            }
+            if driver.replace((e, other)).is_some() {
+                return None; // two drivers: not tied, whatever either states
+            }
+        }
+    }
+    let (e, other) = driver?;
+    if e.select.is_some() {
+        return None;
+    }
+    let n = design.node(other)?;
+    matches!(n.kind, NodeKind::Assign | NodeKind::Comb)
+        .then(|| n.const_value.clone())
+        .flatten()
 }
 
 /// The box a reached node belongs to, plus the scope that box lives in.
@@ -2751,6 +2848,10 @@ pub fn trace_graph(
                 // A group is one or two nodes, so a linear scan beats hashing —
                 // and this is asked per candidate edge on a high-fan-out net.
                 let in_group = |id: NodeId| members.contains(&id);
+                // Resolved once for the group (#298), so every wire this hop emits
+                // for the signal — including the two halves of a routed crossing —
+                // states the same value.
+                let tie = net_tie(design, rep);
                 let crossing = members.len() > 1;
                 let is_seed = seed_anchors.contains(&rep);
                 // The scope of a box seed, when this frontier entry is one: its
@@ -2965,7 +3066,10 @@ pub fn trace_graph(
                                 (np, pin)
                             };
                             join_signal(
-                                design.node(rep),
+                                JoinNet {
+                                    node: design.node(rep),
+                                    tie: tie.as_deref(),
+                                },
                                 &root,
                                 &[(dp, e.select.clone())],
                                 &[(lp, e.select.clone())],
@@ -3114,8 +3218,12 @@ pub fn trace_graph(
                     // wires — |d| + |l| rather than |d| x |l|.
                     Some(anchor) => {
                         let mid = [(anchor, None)];
+                        let jn = JoinNet {
+                            node: design.node(rep),
+                            tie: tie.as_deref(),
+                        };
                         join_signal(
-                            design.node(rep),
+                            jn,
                             &root,
                             &drivers,
                             &mid,
@@ -3124,7 +3232,7 @@ pub fn trace_graph(
                             &mut edges,
                         );
                         join_signal(
-                            design.node(rep),
+                            jn,
                             &root,
                             &mid,
                             &loads,
@@ -3134,7 +3242,10 @@ pub fn trace_graph(
                         );
                     }
                     None => join_signal(
-                        design.node(rep),
+                        JoinNet {
+                            node: design.node(rep),
+                            tie: tie.as_deref(),
+                        },
                         &root,
                         &drivers,
                         &loads,
@@ -3360,6 +3471,9 @@ pub fn cone(design: &Design, start: NodeId, dir: Dir, depth: usize) -> Schematic
                     target: e.endpoint,
                     net,
                     net_path,
+                    // Frozen output contract (see this function's doc): no tie, so
+                    // `--cone`'s JSON stays byte-identical (#298).
+                    constant: None,
                 });
                 let other = if e.port == node { e.endpoint } else { e.port };
                 if let Some(parent_inst) = nearest_instance(design, other) {

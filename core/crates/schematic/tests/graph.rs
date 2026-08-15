@@ -1532,6 +1532,186 @@ fn gate_const_operand_becomes_inline_tie_value() {
     );
 }
 
+/// `assign n = 1'b0; always_comb y = n;` — a net whose sole driver is a block the
+/// model marks constant (#298). The literal is on the `Assign`, never on the net,
+/// so the wire is the only place the value can be read back.
+const TIED_NET_DOC: &str = r#"{
+    "schema_version": 1,
+    "design": "u",
+    "files": [{"id": 0, "path": "u.sv"}],
+    "nodes": [
+        {"id":0,"kind":"Instance","name":"u","path":"u","parent":null,
+         "children":[1,2,3,4,5],"symbol_key":"u"},
+        {"id":1,"kind":"Port","name":"a","path":"u.a","parent":0,"children":[],
+         "symbol_key":"u.a","dir":"in"},
+        {"id":2,"kind":"Port","name":"y","path":"u.y","parent":0,"children":[],
+         "symbol_key":"u.y","dir":"out"},
+        {"id":3,"kind":"Assign","name":"$assign3","path":"u.$assign3","parent":0,
+         "children":[],"symbol_key":"u.$assign3","const":"1'b0"},
+        {"id":4,"kind":"Comb","name":"$comb4","path":"u.$comb4","parent":0,
+         "children":[],"symbol_key":"u.$comb4"},
+        {"id":5,"kind":"Net","name":"n","path":"u.n","parent":0,"children":[],
+         "symbol_key":"u.n"}
+    ],
+    "edges": [
+        {"id":0,"port":3,"endpoint":5,"dir":"out"},
+        {"id":1,"port":4,"endpoint":5,"dir":"in"},
+        {"id":2,"port":4,"endpoint":2,"dir":"out"}
+    ]
+}"#;
+
+/// The tie value on the wire carrying `net_path`.
+fn tie_of(g: &SchematicGraph, net_path: &str) -> Option<String> {
+    let e = g
+        .edges
+        .iter()
+        .find(|e| e.net_path.as_deref() == Some(net_path))
+        .unwrap_or_else(|| panic!("no wire for {net_path} among {} wires", g.edges.len()));
+    e.constant.clone()
+}
+
+#[test]
+fn tied_net_labels_its_wire() {
+    let d = svxprobe_ingest::from_slice(TIED_NET_DOC.as_bytes()).expect("tied-net model ingests");
+    let g = scope_graph(&d, "u").expect("scope graph");
+
+    assert_eq!(tie_of(&g, "u.n"), Some("1'b0".into()));
+    // The wire still names the net; joining name and value is the frontend's job.
+    let n = g
+        .edges
+        .iter()
+        .find(|e| e.net_path.as_deref() == Some("u.n"))
+        .expect("u.n wire");
+    assert_eq!(n.net.as_deref(), Some("n"));
+    // The tie decorates the wire; it does not replace the block that states it.
+    assert!(
+        g.nodes.iter().any(|b| b.path == "u.$assign3"),
+        "assign still drawn as a box: {:?}",
+        g.nodes.iter().map(|b| &b.path).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn computed_nets_carry_no_tie() {
+    let d = svxprobe_ingest::from_slice(TIED_NET_DOC.as_bytes()).expect("tied-net model ingests");
+    let g = scope_graph(&d, "u").expect("scope graph");
+
+    // `y` is driven by a block that reads `n` — it computes a value, so no tie.
+    assert_eq!(tie_of(&g, "u.y"), None);
+}
+
+#[test]
+fn a_net_with_a_second_driver_is_not_tied() {
+    // The same design plus a second block driving `n`. Only the model can say a
+    // net is tied, and with two drivers it does not say it — whatever either one
+    // states, `n = 1'b0` is no longer a claim about the net.
+    let doc = TIED_NET_DOC
+        .replace(r#""children":[1,2,3,4,5]"#, r#""children":[1,2,3,4,5,6]"#)
+        .replace(
+            r#"{"id":5,"kind":"Net""#,
+            r#"{"id":6,"kind":"Comb","name":"$comb6","path":"u.$comb6","parent":0,
+         "children":[],"symbol_key":"u.$comb6"},
+        {"id":5,"kind":"Net""#,
+        )
+        .replace(
+            r#"{"id":2,"port":4,"endpoint":2,"dir":"out"}"#,
+            r#"{"id":2,"port":4,"endpoint":2,"dir":"out"},
+        {"id":3,"port":6,"endpoint":5,"dir":"out"}"#,
+        );
+    let d = svxprobe_ingest::from_slice(doc.as_bytes()).expect("two-driver model ingests");
+    let g = scope_graph(&d, "u").expect("scope graph");
+
+    for e in g
+        .edges
+        .iter()
+        .filter(|e| e.net_path.as_deref() == Some("u.n"))
+    {
+        assert_eq!(e.constant, None, "wire {} claims a tie", e.id);
+    }
+}
+
+#[test]
+fn bit_selected_constant_driver_is_not_a_tie() {
+    // `assign n[3:0] = 1'b0;` states four bits, not `n`.
+    let doc = TIED_NET_DOC.replace(
+        r#"{"id":0,"port":3,"endpoint":5,"dir":"out"}"#,
+        r#"{"id":0,"port":3,"endpoint":5,"dir":"out","select":"[3:0]"}"#,
+    );
+    let d = svxprobe_ingest::from_slice(doc.as_bytes()).expect("bit-select model ingests");
+    let g = scope_graph(&d, "u").expect("scope graph");
+
+    for e in g
+        .edges
+        .iter()
+        .filter(|e| e.net_path.as_deref() == Some("u.n"))
+    {
+        assert_eq!(e.constant, None, "wire {} claims a tie", e.id);
+    }
+}
+
+#[test]
+fn tied_net_carries_the_same_value_in_every_view() {
+    // The tie is a model fact, so it cannot depend on which view drew the wire.
+    let d = svxprobe_ingest::from_slice(TIED_NET_DOC.as_bytes()).expect("tied-net model ingests");
+    let scope = scope_graph(&d, "u").expect("scope graph");
+    let net = id(&d, "u.n");
+    let cone = cone_with(
+        &d,
+        net,
+        Dir::Inout,
+        ConeLimits::default(),
+        Projection::ProcessLevel,
+    );
+
+    assert_eq!(tie_of(&scope, "u.n"), Some("1'b0".into()));
+    assert_eq!(tie_of(&cone, "u.n"), tie_of(&scope, "u.n"));
+}
+
+#[test]
+fn constant_tie_off_wires_carry_no_net_tie() {
+    // An instance port tied to a literal already draws its value on its own source
+    // node (#199); restating it on the wire would show the same value twice, and
+    // the wire has no net for "this net equals V" to even be about.
+    let d = design();
+    let g = scope_graph(&d, "picorv32_soc.g_lane[0]").expect("scope graph");
+    let synthetic: Vec<_> = g.edges.iter().filter(|e| e.net_path.is_none()).collect();
+    assert!(!synthetic.is_empty(), "fixture has constant tie-offs");
+    for e in synthetic {
+        assert_eq!(e.constant, None, "synthetic wire {} claims a tie", e.id);
+    }
+}
+
+#[test]
+fn legacy_cone_emits_no_tie() {
+    // `svxprobe graph --cone` is a frozen output contract; `skip_serializing_if`
+    // keeps its JSON byte-identical.
+    let d = design();
+    let g = cone(
+        &d,
+        id(&d, "picorv32_soc.g_lane[0].core.mem_valid"),
+        Dir::Inout,
+        2,
+    );
+    assert!(g.edges.iter().all(|e| e.constant.is_none()));
+}
+
+#[test]
+fn constant_driven_nets_label_their_wire_in_the_fixture() {
+    // `assign pcpi_mul_wr = 0;` (picorv32.v:299) — the end-to-end case, through the
+    // regenerated golden rather than a hand-written model.
+    let d = design();
+    let core = "picorv32_soc.g_lane[0].core";
+    let g = scope_graph(&d, core).expect("scope graph");
+
+    assert_eq!(
+        tie_of(&g, &format!("{core}.pcpi_mul_wr")),
+        Some("1'b0".into())
+    );
+    // `assign mem_la_write = resetn && mem_do_wdata;` — a net the design computes
+    // carries none, in the same scope.
+    assert_eq!(tie_of(&g, &format!("{core}.mem_la_write")), None);
+}
+
 /// `assign y = (a & b) | c;` — an `Or` root whose first input is an `And` node
 /// (gate-to-gate), the second a raw signal. Exercises the self-driver path: the
 /// inner `And` has no `out` edge, yet its result pin must reach the `Or`'s input.
