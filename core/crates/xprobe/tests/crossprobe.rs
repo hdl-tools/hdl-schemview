@@ -63,7 +63,9 @@ fn build_cached_uses_persisted_wave_index() {
 /// waveform → source → waveform, for a known interface signal.
 fn round_trip(ext: &str) {
     let cp = build(ext);
-    let signal = "TOP.tb.dut.g_lane[0].bus.valid";
+    // No `TOP.` prefix: Verilator 5.040 stopped emitting the synthetic top wrapper
+    // scope that 5.034 wrapped the design in (#280).
+    let signal = "tb.dut.g_lane[0].bus.valid";
 
     // waveform → selection
     let res = cp.from_signal(signal).expect("signal resolves");
