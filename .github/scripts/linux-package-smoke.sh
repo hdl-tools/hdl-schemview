@@ -27,9 +27,12 @@
 #      never opens a window.
 #   4. The desktop entry and icons install where a launcher will find them.
 #
-# The launcher is read back out of the payload rather than assumed: Tauri
-# installs the *crate* binary (hdl-schemview-app), not one named after
-# productName (#275). Hardcoding productName here tested nothing that existed.
+# The launcher is read back out of the payload rather than assumed. It is now
+# `hdl-schemview` — `mainBinaryName` renames the crate binary at bundle time, so
+# the installed command finally matches what every doc says (#275). Reading it
+# back is kept anyway: this script's job is to check what the package actually
+# ships, and asserting the name we hoped for is how the mismatch went unseen
+# through two releases.
 set -euo pipefail
 
 fmt=${1:?usage: linux-package-smoke.sh <deb|rpm>}
