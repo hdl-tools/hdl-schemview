@@ -447,6 +447,36 @@ is a first-launch cost only.
 - **#155** — worth doing, worth scoping honestly: budget against `deserialize` alone, with
   validation and index build staying put.
 
+### Index build, attributed (2026-08-16, #238)
+
+Measured on a different machine from the rig above, so read the **proportions**. Attributed
+by ablation on `Design::from_document` — strip one input, rebuild, diff — then confirmed by
+building each structure directly on identical data.
+
+At 1M (`from_document` ≈ 1222 ms, i.e. **higher** than the ~770 ms this doc's table
+extrapolated linearly from the 100K row):
+
+| index | attributed | share |
+| --- | --: | --: |
+| `path_index` | 727.3 ms | 59.5% |
+| `conn_index` | 449.4 ms | 36.8% |
+| `src_index` | 58.5 ms | 4.8% |
+
+**What #238 concluded, against its own premise.** The issue set out to *archive* these into
+the rkyv cache. Prototyping `conn_index` first showed the win is the **layout, not the
+persistence**: flattening `HashMap<NodeId, Vec<u32>>` to CSR took its build from
+**251.1 ms → 14.1 ms** at 1M, while archiving the result would have saved only a further
+~11 ms (build 14.1 − materialize 3.2), i.e. **0.8% of index build** — in exchange for a
+`RKYV_FORMAT_VERSION` bump invalidating every cache, a bigger archive, and a staleness
+guard. So the CSR shipped and the archiving did not.
+
+The same logic is what makes `path_index` hard: at 59.5% it is the biggest term, but it is
+`HashMap<String, …>`, and deserializing an archived one still allocates every key and
+rehashes it. Its share also *grows* with scale (44% at 100K → 60% at 1M) as paths lengthen
+with depth. Recovering it is a data-structure question (sorted key array + binary search
+over one string blob), not a serialization one — and its payoff is coupled to whether #237
+lands a zero-copy read model. `src_index` is not worth pursuing at 4.8%.
+
 ## Handing the results over
 
 Paste the whole generated markdown file. It is self-contained: environment (CPU, RAM,
