@@ -239,7 +239,7 @@ fn trace_graph_accumulates_across_steps() {
 fn probe_signal_links_all_views() {
     let mut s = session();
     let r = s
-        .probe_signal("TOP.tb.dut.g_lane[0].bus.valid", None)
+        .probe_signal("tb.dut.g_lane[0].bus.valid", None)
         .expect("resolves");
     assert_eq!(r.anchor.path, "picorv32_soc.g_lane[0].bus.valid");
     // Source view target present.
@@ -307,7 +307,7 @@ fn load_trace_reuses_the_design_and_queries_the_new_trace() {
     assert!(s.scope_graph("picorv32_soc.g_lane[0]").is_some());
     // The signal re-resolves against the VCD and carries that trace's values.
     let r = s
-        .probe_signal("TOP.tb.dut.g_lane[0].bus.valid", None)
+        .probe_signal("tb.dut.g_lane[0].bus.valid", None)
         .expect("resolves in the VCD");
     assert!(r.wave.in_trace);
     assert!(
@@ -345,7 +345,7 @@ fn load_trace_failure_leaves_the_session_intact() {
 
     assert_eq!(s.design_top(), "picorv32_soc");
     let r = s
-        .probe_signal("TOP.tb.dut.g_lane[0].bus.valid", None)
+        .probe_signal("tb.dut.g_lane[0].bus.valid", None)
         .expect("still resolves against the original trace");
     assert!(r.wave.in_trace);
     assert!(

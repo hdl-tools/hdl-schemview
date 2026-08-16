@@ -15,7 +15,9 @@ fn fixture(rel: &str) -> String {
 
 fn opts() -> MatchOptions {
     // The fixture's excluded_scopes.txt names: TOP (sim top), tb (testbench),
-    // soc_pkg (package). Kept inline so the test is self-contained.
+    // soc_pkg (package). Kept inline so the test is self-contained. TOP is still
+    // listed although Verilator 5.040 no longer emits it (#280) — the file keeps
+    // the entry for older Verilators, and an exclusion matching nothing is inert.
     MatchOptions {
         excluded_scopes: vec!["TOP".into(), "tb".into(), "soc_pkg".into()],
         anchor: None, // exercise auto-detection
@@ -43,8 +45,10 @@ fn assert_gate(ext: &str) {
     );
     assert_eq!(r.mystery, 0, "[{ext}] mystery misses must be zero");
 
-    // Anchor auto-detected to the DUT instance.
-    assert_eq!(r.anchor, vec!["TOP", "tb", "dut"], "[{ext}] anchor");
+    // Anchor auto-detected to the DUT instance. No leading "TOP": Verilator 5.040
+    // stopped emitting the synthetic top wrapper scope that 5.034 wrapped the
+    // design in, so the trace hierarchy now starts at `tb` (#280).
+    assert_eq!(r.anchor, vec!["tb", "dut"], "[{ext}] anchor");
 
     // Deterministic counts on the frozen fixture (format-independent).
     assert_eq!(r.denominator, 1577, "[{ext}] denominator");

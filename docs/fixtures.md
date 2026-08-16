@@ -141,18 +141,37 @@ vendored; experimental until hardened.
 | Rust deps | `Cargo.lock` | `core/Cargo.lock` |
 | pyslang | `==11.0.0` | `elaborate/pyproject.toml` + `uv.lock` |
 | Python | `>=3.11` | `elaborate/pyproject.toml` |
-| Verilator | 5.x (apt `5.020` verified; `flake.lock` pins **`5.034`**) | nightly / local |
-| nixpkgs | `flake.lock` | repo root |
+| Verilator | 5.x (apt `5.020` verified; `flake.lock` pins **`5.040`**) | nightly / local |
+| nixpkgs | `flake.lock` (`nixos-25.11`) | repo root |
 
 Byte-for-byte trace reproducibility requires a pinned Verilator — use
 `nix develop .#verilator`. The apt package is the verified fallback and is
 checked structurally (scope/var counts), not byte-for-byte.
 
+> **The FST leg needs zlib (#280).** Verilator compiles its FST writer
+> (`fstapi.c`) in *your* environment rather than inside its own derivation, and
+> nixpkgs carries no zlib in `verilator`'s `buildInputs`. Both dev shells
+> therefore ship `pkgs.zlib`; without it `regen.sh` dies on `fatal error:
+> zlib.h: No such file or directory` and only the VCD leg builds. This went
+> unnoticed because `nightly.yml` uses **apt** Verilator on a runner that already
+> has `zlib1g-dev` — so CI was exercising a different environment than the one
+> this page recommends.
+
 That pin only holds because **`flake.lock` is committed** (#243). Before it,
-`nixpkgs` floated to whatever `nixos-25.05` currently pointed at, so two machines
+`nixpkgs` floated to whatever the channel currently pointed at, so two machines
 could resolve two different Verilator builds — the exact failure this table exists
-to prevent. Naming `5.034` in the table above is only possible *because* of the
+to prevent. Naming `5.040` in the table above is only possible *because* of the
 lock: without one the question "which Verilator does `nix develop` give me?" had no
 answer. Relocking (`nix flake update`) is therefore a deliberate act that can
 change a pinned tool version; re-verify the tier-1 traces after one, and update
 this row.
+
+**That clause was first exercised on 2026-08-16 (#280).** Moving to `nixos-25.11`
+— required for `fmt >= 12.1` and `pybind11 >= 3.0`, which pyslang needs in order to
+build hermetically — carried Verilator `5.034` -> `5.040`, and the tier-1 traces
+were regenerated under it. The FST scope count moved **18 -> 17** while `vars`
+stayed at 1682, and the regenerated FST now agrees with its VCD sibling, which has
+always reported 17: 5.040 stopped emitting one variable-less scope that 5.034 wrote
+into the FST only. Both formats were re-checked before the new bytes were
+committed — 477 signals linked with identical rule counts (`AnchorRebase` 1577,
+`ArrayElement` 1088, `InterfaceAlias` 16) on FST and VCD alike, matcher gate PASS.

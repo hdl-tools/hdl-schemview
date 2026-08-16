@@ -108,7 +108,7 @@ C="--bin svxprobe --manifest-path core/Cargo.toml"
 P="probe fixtures/picorv32_soc/golden/hierarchy.json fixtures/picorv32_soc/traces/picorv32_soc.fst --excluded fixtures/picorv32_soc/excluded_scopes.txt"
 
 # waveform signal → source location
-cargo run $C -- $P --signal TOP.tb.dut.g_lane[0].bus.valid
+cargo run $C -- $P --signal tb.dut.g_lane[0].bus.valid
 
 # source position inside a generate loop → picker; --context steers the anchor
 cargo run $C -- $P --source picorv32_soc.sv:27:29

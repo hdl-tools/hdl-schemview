@@ -9,7 +9,10 @@
 # testbench wrapper and the simulator's synthetic top are outside the design and
 # must not count as misses.
 
-# Verilator's synthetic top wrapper.
+# Verilator's synthetic top wrapper. Verilator 5.040 stopped emitting this scope
+# (5.034 did, #280), so it no longer matches anything in the committed traces.
+# Kept anyway: an entry that matches nothing is harmless, and this file must also
+# serve traces from older Verilators and other simulators.
 TOP
 
 # Testbench wrapper (clock/reset/dump driver; top = tb in the trace).

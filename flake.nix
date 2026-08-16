@@ -2,12 +2,18 @@
   description = "hdl-schemview — RTL-level SystemVerilog cross-probe tool (svxprobe CLI + reproducible dev shells)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
 
-    # nixpkgs 25.05 ships rustc 1.86; core/rust-toolchain.toml pins 1.94. Without
-    # this input the dev shell silently hands out a toolchain that cannot build
-    # core/ — the flake would claim reproducibility while providing the wrong
+    # The channel is 25.11 because slang needs fmt >= 12.1 and pybind11 >= 3.0 to
+    # build hermetically: it declares every FetchContent_Declare with CMake 3.24
+    # FIND_PACKAGE_ARGS, so find_package runs first and the sandbox-forbidden git
+    # clone is only a fallback. 25.05 capped at fmt 11.0.2 / pybind11 2.13.6. See #280.
+    #
+    # nixpkgs 25.11 ships rustc 1.97.1; core/rust-toolchain.toml pins 1.94. The drift
+    # is now upward (25.05 was behind at 1.86), but the hazard is unchanged: without
+    # this input the dev shell silently hands out a toolchain that is not the pinned
+    # one, and the flake would claim reproducibility while providing the wrong
     # compiler. See #243.
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -151,6 +157,13 @@
             # Carries rustc/cargo/rustfmt/clippy at the rust-toolchain.toml pin.
             toolchain
             pkgs.verilator # pinned by nixpkgs; reproducible across machines
+            # Verilator compiles its FST writer (fstapi.c) in *our* environment, not
+            # inside its own derivation, and nixpkgs does not carry zlib in
+            # verilator's buildInputs. Without this, `fixtures/regen.sh` dies on
+            # "fatal error: zlib.h: No such file or directory" and only the VCD leg
+            # works — so `nix develop .#verilator`, which docs/fixtures.md names as
+            # the pinned-Verilator path, could never actually rebuild the FST. #280.
+            pkgs.zlib
             # The Python side is deliberately impure: `uv sync` fetches pyslang
             # from PyPI at run time. Packaging the harness as a derivation is
             # blocked on pyslang building offline under Nix — tracked separately
@@ -163,7 +176,7 @@
 
         # Minimal shell for just regenerating traces: `nix develop .#verilator`
         devShells.verilator = pkgs.mkShell {
-          packages = [ pkgs.verilator ];
+          packages = [ pkgs.verilator pkgs.zlib ]; # zlib: see the note above
         };
       });
 }
