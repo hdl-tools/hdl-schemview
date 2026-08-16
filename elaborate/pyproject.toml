@@ -27,6 +27,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["svxprobe_elaborate"]
+# hatchling sweeps the schema in anyway as a non-Python file under `packages`, but
+# state it: `validate.py` resolves it through importlib.resources, so a wheel built
+# without it fails at call time rather than at build time.
+artifacts = ["svxprobe_elaborate/schema/*.json"]
 
 [tool.ruff]
 line-length = 100
