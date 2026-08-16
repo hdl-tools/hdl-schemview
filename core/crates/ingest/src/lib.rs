@@ -1,7 +1,8 @@
 //! Ingest the pyslang harness JSON into a [`svxprobe_model::Design`].
 //!
 //! Thin layer: deserialize the Node-model document and hand it to the model
-//! crate to build indices. The JSON contract is `elaborate/schema/model.schema.json`.
+//! crate to build indices. The JSON contract is
+//! `elaborate/svxprobe_elaborate/schema/model.schema.json`.
 
 use std::collections::HashMap;
 use std::fs::{self, File};

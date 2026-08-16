@@ -13,7 +13,7 @@ See [architecture.md](architecture.md) for how these flow through the crates.
 > | --- | --- |
 > | Rust serde types (`gui`, `schematic` crates) | `core/crates/{gui,schematic}/src/lib.rs` |
 > | TypeScript DTO interfaces | [`app/src/types.ts`](../app/src/types.ts) |
-> | JSON Schema for the harness output | [`elaborate/schema/model.schema.json`](../elaborate/schema/model.schema.json) |
+> | JSON Schema for the harness output | [`elaborate/svxprobe_elaborate/schema/model.schema.json`](../elaborate/svxprobe_elaborate/schema/model.schema.json) |
 >
 > Change a serde field without mirroring it in `types.ts` and the TS layer **silently**
 > desyncs — there is no compile-time link between them. A model-level change usually

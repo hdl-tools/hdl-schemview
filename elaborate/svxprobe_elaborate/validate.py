@@ -7,17 +7,20 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
+from importlib.resources import files
 from typing import Any
 
 import jsonschema
 
-_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "model.schema.json"
+# The schema lives *inside* the package so it travels with the wheel. Resolving it
+# as a sibling of the package directory (as this once did) only ever worked from a
+# source checkout: `[tool.hatch.build.targets.wheel] packages` ships
+# svxprobe_elaborate/ alone, so an installed copy had no schema/ beside it at all.
+_SCHEMA_PATH = files(__package__) / "schema" / "model.schema.json"
 
 
 def load_schema() -> dict[str, Any]:
-    with open(_SCHEMA_PATH) as f:
-        return json.load(f)
+    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
 def validate_model(model: dict[str, Any]) -> None:

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/chuanseng-ng/hdl-schemview/elaborate/schema/model.schema.json",
+  "$id": "https://github.com/chuanseng-ng/hdl-schemview/elaborate/svxprobe_elaborate/schema/model.schema.json",
   "title": "hdl-schemview elaborated Node model",
   "description": "Serialized projection of the slang-elaborated hierarchy. This is the integration contract between the pyslang harness (producer) and the Rust core (consumer). Phase 0 emits the structural spine; drivers/loads stay empty until Phase 1.",
   "type": "object",

@@ -137,7 +137,7 @@ is the one that just failed.
 
 - **No heuristics.** Resolve through model indices; the elaborated hierarchy is the single
   source of truth. See [architecture.md](architecture.md).
-- **DTO sync.** Rust serde ↔ `app/src/types.ts` ↔ `elaborate/schema/model.schema.json` —
+- **DTO sync.** Rust serde ↔ `app/src/types.ts` ↔ `elaborate/svxprobe_elaborate/schema/model.schema.json` —
   the TS layer desyncs *silently*. See [data-model.md](data-model.md).
 - **Docs are part of the change.** A PR that alters architecture, commands, DTOs, gates or
   workflow updates the relevant docs in the same PR, not as a follow-up. A decision with

@@ -3,7 +3,7 @@
 The elaboration harness: walks a [slang](https://github.com/MikePopoloski/slang)-elaborated
 SystemVerilog design via **pyslang** and serializes the structural spine of the
 hierarchy to the Node-model JSON consumed by the Rust core
-(`core/`). The JSON contract is `schema/model.schema.json`.
+(`core/`). The JSON contract is `svxprobe_elaborate/schema/model.schema.json`.
 
 This is the out-of-process elaboration boundary from the
 [roadmap](../docs/ROADMAP.md) §8: no FFI, just a serialized model.

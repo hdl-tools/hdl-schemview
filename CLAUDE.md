@@ -117,7 +117,7 @@ a bare `cargo run` there cannot pick one.
 - **No heuristics.** Resolve via model indices; the elaborated hierarchy is the single
   source of truth.
 - **DTO sync.** Rust serde DTOs (`gui`, `schematic`) ↔ [`app/src/types.ts`](app/src/types.ts)
-  ↔ `elaborate/schema/model.schema.json` must stay aligned. There is no compile-time link
+  ↔ `elaborate/svxprobe_elaborate/schema/model.schema.json` must stay aligned. There is no compile-time link
   between them, so the TS layer desyncs **silently**. Details:
   [`docs/data-model.md`](docs/data-model.md).
 - **Harness flags are additive.** Every opt-in flag leaves the default output

@@ -100,7 +100,7 @@ diff <(jq -S . fixtures/picorv32_soc/golden/hierarchy.json) \
 wire format for the frontend. If you change any of them, mirror the change in
 [`app/src/types.ts`](app/src/types.ts) or the TS layer silently desyncs. A model-level
 change usually needs a third edit, in
-[`elaborate/schema/model.schema.json`](elaborate/schema/model.schema.json). The shapes and
+[`elaborate/svxprobe_elaborate/schema/model.schema.json`](elaborate/svxprobe_elaborate/schema/model.schema.json). The shapes and
 the full sync rule are in [`docs/data-model.md`](docs/data-model.md).
 
 **What runs where:** `ci.yml` (every push/PR) covers the Rust gates, the matcher on both
