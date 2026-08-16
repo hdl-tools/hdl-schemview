@@ -89,8 +89,12 @@ launcher finds them.
    the build deps, so a local install would pass whatever `depends` declares — and unset,
    Tauri emits an RPM with *no* dependencies at all, which installs and then cannot launch.
 2. **The launcher is read back out of the payload, not assumed.** Tauri installs the
-   **crate** binary (`hdl-schemview-app`), not one named after `productName` — so any doc
-   saying `hdl-schemview` names a command that does not exist on a package install.
+   **crate** binary, not one named after `productName` — so until #275 set
+   `mainBinaryName`, the installed command was `hdl-schemview-app` while every doc said
+   `hdl-schemview`, and a package user typing the documented command got
+   `command not found`. The config key fixes the name; reading it back out of the payload
+   is what would catch the next such drift, so the smoke test still does that rather than
+   asserting the name we expect.
 3. **Extracting the Windows WebView2 `.cab` must call `expand.exe` by full path.** The step
    runs under Git Bash, where a bare `expand` resolves to GNU coreutils' tabs-to-spaces
    filter and dies on `-F:`. This broke every Windows bundle until it was pinned.
