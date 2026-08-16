@@ -15,6 +15,7 @@ add an ADR, add its row here rather than starting a second list elsewhere.
 | [0008](0008-lexical-source-highlighting.md) | Lexical source highlighting | Keywords/comments/strings are lexed; the lexer never guesses at identifiers |
 | [0009](0009-packaging-for-isolated-environments.md) | Packaging for isolated environments | The bundle carries its own runtime; tiers by network availability |
 | [0010](0010-schematic-trace-mode.md) | Schematic trace mode | Tracing is a **seeded, boundary-crossing projection** with visible level-of-detail caps |
+| [0011](0011-rkyv-cache-validation-policy.md) | rkyv cache validation policy | **Proposed:** gate unchecked access behind a cheap checksum, with the JSON as fallback — bytecheck costs 294 ms at 1M |
 
 ## Writing a new one
 
