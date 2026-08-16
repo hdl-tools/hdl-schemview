@@ -613,6 +613,80 @@ impl WaveIndex {
     }
 }
 
+/// Node id → incident edge indices, in CSR (compressed sparse row) form (#238).
+///
+/// Was a `HashMap<NodeId, Vec<u32>>`, which cost ~37% of index build at 1M — one
+/// allocation per node with edges, plus a hash per lookup. Two flat `Vec<u32>`s
+/// instead: `starts[n]..starts[n + 1]` bounds node `n`'s slice of `values`.
+///
+/// Direct indexing rather than a key search is sound because ingest's
+/// referential-integrity pass already enforces `e.port < nodes.len()` and
+/// `e.endpoint < nodes.len()`, so the row count is exactly the node count — no
+/// sparse ids, and no fallback shape to get wrong.
+///
+/// Deliberately *not* archived in the rkyv cache, though #238 set out to do
+/// exactly that. Measured at 1M: the flat build costs 14.1 ms against the
+/// HashMap's 251.1 ms, and materializing a cached copy still costs 3.2 ms — so
+/// persisting it would save ~11 ms (0.8% of index build) in exchange for a
+/// format-version bump, a larger archive and a staleness guard. The win was the
+/// layout, not the persistence.
+#[derive(Clone, Debug, Default)]
+pub struct ConnIndex {
+    /// Row offsets, length `nodes.len() + 1`; empty when built for no nodes.
+    starts: Vec<u32>,
+    /// Edge indices, grouped by node, ascending within each row.
+    values: Vec<u32>,
+}
+
+impl ConnIndex {
+    /// Build from the edge list. Counts first, then fills — two passes, so the
+    /// exact allocation is known up front and no per-node `Vec` is grown.
+    pub fn build(node_count: usize, edges: &[Edge]) -> Self {
+        // Both endpoints of an edge are incident on it, except a self-loop,
+        // which is recorded once (as the HashMap form did, by not pushing twice).
+        let incident = |e: &Edge| {
+            let second = (e.endpoint != e.port).then_some(e.endpoint);
+            std::iter::once(e.port).chain(second)
+        };
+
+        let mut starts = vec![0u32; node_count + 1];
+        for e in edges {
+            for n in incident(e) {
+                starts[n as usize + 1] += 1;
+            }
+        }
+        // Prefix sum turns the counts into row starts.
+        for i in 1..starts.len() {
+            starts[i] += starts[i - 1];
+        }
+
+        let mut values = vec![0u32; *starts.last().unwrap_or(&0) as usize];
+        // `cursor` walks each row as it fills. Edges are visited in ascending
+        // index order, so each row ends up ascending too — the order callers
+        // already get from `enumerate()`.
+        let mut cursor = starts.clone();
+        for (i, e) in edges.iter().enumerate() {
+            for n in incident(e) {
+                let slot = &mut cursor[n as usize];
+                values[*slot as usize] = i as u32;
+                *slot += 1;
+            }
+        }
+
+        Self { starts, values }
+    }
+
+    /// Edge indices incident on `node`, ascending. Empty for a node with no
+    /// edges *and* for an id past the end, so a caller cannot panic on either.
+    pub fn indices_of(&self, node: NodeId) -> &[u32] {
+        let i = node as usize;
+        match (self.starts.get(i), self.starts.get(i + 1)) {
+            (Some(&lo), Some(&hi)) => &self.values[lo as usize..hi as usize],
+            _ => &[],
+        }
+    }
+}
+
 /// The elaborated design plus its lookup indices.
 pub struct Design {
     pub doc: Document,
@@ -622,7 +696,7 @@ pub struct Design {
     /// Per-file interval tree over source offsets → node ids.
     src_index: HashMap<u32, Lapper<usize, NodeId>>,
     /// Node id → indices into `doc.edges` incident on that node (port or endpoint).
-    conn_index: HashMap<NodeId, Vec<u32>>,
+    conn_index: ConnIndex,
     /// Per-(generated RTL file) interval tree over `source_map[*].generated` offsets →
     /// `source_map` index. Answers "which C span does this RTL offset map to?" (#159).
     gen_map_index: HashMap<u32, Lapper<usize, usize>>,
@@ -640,6 +714,7 @@ pub struct Design {
 impl Design {
     /// Build a `Design` (and its indices) from a deserialized document.
     pub fn from_document(doc: Document) -> Self {
+        let conn_index = ConnIndex::build(doc.nodes.len(), &doc.edges);
         let mut path_index: HashMap<String, Vec<NodeId>> = HashMap::new();
         let mut per_file: HashMap<u32, Vec<Interval<usize, NodeId>>> = HashMap::new();
 
@@ -664,14 +739,6 @@ impl Design {
             .into_iter()
             .map(|(f, ivs)| (f, Lapper::new(ivs)))
             .collect();
-
-        let mut conn_index: HashMap<NodeId, Vec<u32>> = HashMap::new();
-        for (i, e) in doc.edges.iter().enumerate() {
-            conn_index.entry(e.port).or_default().push(i as u32);
-            if e.endpoint != e.port {
-                conn_index.entry(e.endpoint).or_default().push(i as u32);
-            }
-        }
 
         // HLS provenance indices (#159): one interval tree per file over each side of
         // the source_map, mapping an offset → the source_map entry index. Symmetric to
@@ -849,10 +916,11 @@ impl Design {
 
     /// Edges incident on `node` (as either a port or an endpoint).
     pub fn edges_of(&self, node: NodeId) -> Vec<&Edge> {
-        match self.conn_index.get(&node) {
-            Some(ids) => ids.iter().map(|&i| &self.doc.edges[i as usize]).collect(),
-            None => Vec::new(),
-        }
+        self.conn_index
+            .indices_of(node)
+            .iter()
+            .map(|&i| &self.doc.edges[i as usize])
+            .collect()
     }
 
     /// Positions into [`edges`](Self::edges) incident on `node` (as port or
@@ -860,7 +928,7 @@ impl Design {
     /// scan would yield for `node`, so callers can gather a scope-local edge set
     /// without scanning every edge. Empty when `node` has no incident edges.
     pub fn edge_indices_of(&self, node: NodeId) -> &[u32] {
-        self.conn_index.get(&node).map(Vec::as_slice).unwrap_or(&[])
+        self.conn_index.indices_of(node)
     }
 }
 
@@ -1067,6 +1135,75 @@ mod tests {
         assert_eq!(d.edges_of(1).len(), 1);
         assert_eq!(d.edges_of(2)[0].dir, Dir::Out);
         assert!(d.edges_of(0).is_empty());
+    }
+
+    /// A doc with a deliberately uneven edge distribution: node 3 has none,
+    /// node 1 has several, and one edge is a self-loop (port == endpoint), which
+    /// must be recorded once rather than twice.
+    fn conn_doc() -> Document {
+        let edge = |id: u32, port: NodeId, endpoint: NodeId| Edge {
+            id,
+            port,
+            endpoint,
+            dir: Dir::Out,
+            select: None,
+            mem_port: None,
+            mux_port: None,
+        };
+        Document {
+            schema_version: 1,
+            design: "t".into(),
+            generator: Generator::default(),
+            files: vec![FileEntry {
+                id: 0,
+                path: "t.sv".into(),
+                language: None,
+            }],
+            nodes: (0..4)
+                .map(|i| node(i, &format!("t.n{i}"), NodeKind::Net, None))
+                .collect(),
+            edges: vec![edge(0, 1, 2), edge(1, 1, 0), edge(2, 2, 2), edge(3, 0, 1)],
+            enums: HashMap::new(),
+            source_map: Vec::new(),
+            name_refs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn conn_index_csr_agrees_with_a_full_edge_scan() {
+        // The CSR layout (#238) replaces a HashMap<NodeId, Vec<u32>>; it must
+        // answer identically, including the ascending edge order callers get
+        // from a plain `enumerate()` scan.
+        let doc = conn_doc();
+        let expected: Vec<Vec<u32>> = (0..4u32)
+            .map(|n| {
+                doc.edges
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.port == n || e.endpoint == n)
+                    .map(|(i, _)| i as u32)
+                    .collect()
+            })
+            .collect();
+
+        let idx = ConnIndex::build(doc.nodes.len(), &doc.edges);
+
+        for n in 0..4u32 {
+            assert_eq!(idx.indices_of(n), expected[n as usize], "node {n}");
+        }
+        assert!(idx.indices_of(3).is_empty(), "node 3 has no edges");
+        // The self-loop on node 2 is one entry, not two.
+        assert_eq!(idx.indices_of(2), &[0, 2]);
+    }
+
+    #[test]
+    fn conn_index_answers_for_an_out_of_range_node() {
+        // `edges_of` is public API; a caller asking about an id past the end
+        // must get an empty answer rather than an index panic.
+        let doc = conn_doc();
+        let idx = ConnIndex::build(doc.nodes.len(), &doc.edges);
+        assert!(idx.indices_of(4).is_empty());
+        assert!(idx.indices_of(u32::MAX).is_empty());
     }
 
     #[test]

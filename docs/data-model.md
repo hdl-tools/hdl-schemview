@@ -102,6 +102,15 @@ reached (#269). So a group must not assume its members are unconnected.
 `Design { doc, path_index, src_index, conn_index, wave_index, gen_map_index,
 src_map_index, name_ref_index }`.
 
+- **`conn_index: ConnIndex`** — node id → incident `doc.edges` positions, in CSR form:
+  `starts[n]..starts[n + 1]` bounds node `n`'s slice of a flat `values`. Direct indexing
+  is sound because ingest's referential-integrity pass enforces
+  `e.port < nodes.len()` and `e.endpoint < nodes.len()`, so the row count is exactly the
+  node count. Replaced a `HashMap<NodeId, Vec<u32>>` in #238: **251.1 ms → 14.1 ms** at
+  1M nodes, by trading one allocation per node plus a hash per lookup for two linear
+  passes. Reads are `edges_of` / `edge_indices_of`, unchanged in signature and still
+  ascending by edge index.
+
 - **`Document.enums: HashMap<String, EnumDef>`** — a normalized enum table keyed by
   canonical type string (matching `Node.type_`), where
   `EnumDef { width, members: Vec<EnumMember { name, value }> }`. Looked up via
