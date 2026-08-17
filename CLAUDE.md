@@ -32,7 +32,8 @@ app/         Tauri 2 desktop app — vanilla TS + Vite frontend + thin Rust shel
 elaborate/   Python (pyslang) elaboration harness — produces the golden model JSON
 fixtures/    Committed golden hierarchy + VCD/FST traces (picorv32_soc)
 docs/        Roadmap, runbooks, ADRs
-flake.nix    Nix flake: packages/apps.svxprobe, checks.{fmt,clippy,test}, overlays, dev shells
+flake.nix    Nix flake: packages/apps.{svxprobe,svxprobe-elaborate}, checks, overlays, dev shells
+nix/         Package derivations the flake imports (pyslang, the harness)
 ```
 
 Data flow, end to end:

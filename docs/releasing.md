@@ -180,9 +180,15 @@ Downstream flakes consume the package through `overlays.default`.
 **Nothing Nix-built is attached to the GitHub release, on purpose.** A Nix store
 path is not a usable asset without `nix copy` and a binary cache, and a tarball of
 one is worse than the tag it came from — the tag is content-addressed, the tarball
-is not. What the flake covers is `packages.svxprobe` only; the desktop app is a
-non-goal there (it already ships as the AppImage/`.deb`/`.rpm` above) and the
-elaboration harness is blocked on `pyslang` building offline under Nix.
+is not. The flake covers `packages.svxprobe` (the CLI) and, since #280,
+`packages.svxprobe-elaborate` (the elaboration harness, `pyslang` and all) plus
+`packages.pyslang` on its own. The desktop app remains a non-goal there — it
+already ships as the AppImage/`.deb`/`.rpm` above; whether to add it is #279.
+
+Note the harness is **not** in `checks`, so `nix flake check` does not build it:
+it compiles slang from source and there is no binary cache. `nightly.yml`'s
+`nix-harness` job covers it instead, non-blocking, and asserts the packaged
+harness reproduces the committed golden byte-for-byte.
 
 Two consequences worth knowing before cutting a tag:
 
