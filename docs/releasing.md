@@ -181,14 +181,29 @@ Downstream flakes consume the package through `overlays.default`.
 path is not a usable asset without `nix copy` and a binary cache, and a tarball of
 one is worse than the tag it came from — the tag is content-addressed, the tarball
 is not. The flake covers `packages.svxprobe` (the CLI) and, since #280,
-`packages.svxprobe-elaborate` (the elaboration harness, `pyslang` and all) plus
-`packages.pyslang` on its own. The desktop app remains a non-goal there — it
-already ships as the AppImage/`.deb`/`.rpm` above; whether to add it is #279.
+`packages.svxprobe-elaborate` (the elaboration harness, `pyslang` and all),
+`packages.pyslang` on its own, and — on Linux only, since #279 —
+`packages.hdl-schemview-app`.
 
-Note the harness is **not** in `checks`, so `nix flake check` does not build it:
-it compiles slang from source and there is no binary cache. `nightly.yml`'s
-`nix-harness` job covers it instead, non-blocking, and asserts the packaged
-harness reproduces the committed golden byte-for-byte.
+Neither the harness nor the app is in `checks`, so `nix flake check` does not
+build them: the harness compiles slang from source, the app links webkitgtk, and
+there is no binary cache. `nightly.yml`'s `nix-harness` and `nix-app` jobs cover
+them instead, non-blocking. See [ADR 0012](decisions/0012-nix-outputs-are-a-build-channel.md),
+which records that `checks` is the supported surface and everything else in
+`packages` is best-effort.
+
+**The Nix app output is not a release artifact and may be broken at any given
+commit.** The tagged Linux artifacts remain the AppImage/`.deb`/`.rpm` above. It
+is also outside the tag-vs-manifest version guard — it reads its version from
+`tauri.conf.json`, the manifest that guard already treats as authoritative, so it
+cannot report a version the release does not have. Before pushing a `v*` tag,
+optionally confirm it still builds:
+
+```bash
+nix build .#hdl-schemview-app -L && ./result/bin/hdl-schemview --bench --help
+```
+
+A failure there files a follow-up; it does not block the release.
 
 Two consequences worth knowing before cutting a tag:
 

@@ -188,6 +188,37 @@ need a DOM — `tree.test.ts` and `srcoffset.test.ts` — opt into happy-dom wit
   `tauri-build` embeds as a resource. To regenerate from a source image:
   `npm run tauri icon path/to/icon.png`.
 
+## Running from Nix (Linux)
+
+```bash
+nix run   github:hdl-tools/hdl-schemview#hdl-schemview-app
+nix build github:hdl-tools/hdl-schemview#hdl-schemview-app   # -> result/bin/hdl-schemview
+```
+
+Unlike the bundles below, this output **can elaborate RTL out of the box**: the
+harness is baked into the wrapper via `SVXPROBE_ELABORATE`, so a designlist (`.f`)
+loads with nothing else installed. The trade is closure size — it pulls CPython and
+pyslang — and it is Linux-only, because Tauri's macOS/Windows bundling has no
+meaningful Nix story.
+
+It is **best-effort and not a release artifact**: not built by `nix flake check`,
+watched by a nightly job, and possibly broken at any given commit. See
+[ADR 0012](../docs/decisions/0012-nix-outputs-are-a-build-channel.md). For a
+supported install, use the bundles below.
+
+> **On a non-NixOS host, expect a GPU-driver mismatch.** A Nix-built WebKitGTK binds
+> the store's GL stack, which will not match your distro's driver — you get
+> `Could not create default EGL display: EGL_BAD_PARAMETER` and no window. Run it
+> under [nixGL](https://github.com/nix-community/nixGL):
+>
+> ```bash
+> nix run --impure github:nix-community/nixGL -- hdl-schemview
+> ```
+>
+> These variables are deliberately **not** baked into the wrapper — hard-setting them
+> would degrade rendering on hosts that do not need them. Note WSL/WSLg is not a
+> supported target here: its driver defeats both nixGL and software rendering.
+
 ## Distribution / offline install
 
 The deployment target is an **isolated machine: no network, no toolchain, no
