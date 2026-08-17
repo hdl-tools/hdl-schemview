@@ -134,12 +134,14 @@ so the PR-running jobs keep the workflow's default read token.
 
 ### `nightly.yml` — scheduled
 
-Four jobs, none of which gate a PR: `repro-tier1` (Verilator trace regeneration),
+Five jobs, none of which gate a PR: `repro-tier1` (Verilator trace regeneration),
 `stress-tier2` (Ibex, `continue-on-error`), `scale-bench` (the scalability collector,
 `continue-on-error`, uploading a `scale-bench-metrics` artifact), and `nix-harness`
 (`continue-on-error`, #280 — builds `packages.svxprobe-elaborate` and asserts it still
 reproduces the committed golden byte-for-byte; it lives here rather than in `checks`
-because it compiles slang from source with no binary cache). The benchmark job runs
+because it compiles slang from source with no binary cache), and `nix-app`
+(`continue-on-error`, #279 — builds the Linux desktop output and asserts its
+wrapper carries the GTK runtime environment). The benchmark job runs
 `--online`, since CI's cold registry cache makes the default `--offline` fail.
 
 ### `nix.yml` — on `flake.*` / `core/**` changes (Ubuntu)

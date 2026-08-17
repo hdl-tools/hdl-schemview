@@ -33,7 +33,7 @@ elaborate/   Python (pyslang) elaboration harness — produces the golden model 
 fixtures/    Committed golden hierarchy + VCD/FST traces (picorv32_soc)
 docs/        Roadmap, runbooks, ADRs
 flake.nix    Nix flake: packages/apps.{svxprobe,svxprobe-elaborate}, checks, overlays, dev shells
-nix/         Package derivations the flake imports (pyslang, the harness)
+nix/         Package derivations the flake imports (pyslang, harness, frontend, app)
 ```
 
 Data flow, end to end:
