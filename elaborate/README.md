@@ -21,12 +21,27 @@ uv sync            # create .venv and install pinned deps (incl. dev tools)
 uv run pytest -q   # run the harness tests
 ```
 
+### With Nix
+
+`nix develop` from the repo root already carries the harness — `pyslang` included,
+built from source, no PyPI fetch (#280). `svxprobe-elaborate` is on `PATH`, and
+`PYTHONPATH` points at this directory, so `python -m svxprobe_elaborate.<mod>` runs
+your **working tree** while the `svxprobe-elaborate` binary is the fixed store build.
+
+```bash
+nix develop                        # from the repo root
+nix build .#svxprobe-elaborate     # the package on its own (runs the test suite)
+nix run   .#svxprobe-elaborate -- --help
+```
+
 ### With pip (fallback)
 
 ```bash
 cd elaborate
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[dev]'   # or: pip install -e .
+pip install -e .
+pip install pytest ruff   # dev tools live in PEP 735 [dependency-groups], which is
+                          # not an extra — `.[dev]` does not exist
 pytest -q
 ```
 

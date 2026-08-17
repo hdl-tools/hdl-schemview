@@ -85,3 +85,38 @@ jobs:
           path: scale-bench-metrics.md
           if-no-files-found: warn
 
+  nix-harness:
+    name: Nix harness build (non-blocking)
+    runs-on: ubuntu-latest
+    # Deliberately NOT a `checks` entry, so `nix flake check` stays ~2.5 min on
+    # every PR. The derivation builds slang from source — 21m22s measured on 8
+    # cores, worse on a 4-core runner — and there is no binary cache, so gating
+    # it per-PR would dominate the Rust gate it sits beside. The harness's own
+    # correctness is already gated on every PR by ci.yml's `uv run pytest -q`;
+    # what rots here is the *packaging* (a pyslang release, an fmt/pybind11 move
+    # in nixpkgs), which a nightly catches soon enough. See #280.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      # The build runs the 97-test suite in its checkPhase.
+      - name: Build the harness
+        run: nix build .#svxprobe-elaborate -L
+      # The acceptance criterion from ADR 0009: a packaged harness that does not
+      # reproduce the committed golden byte-for-byte is a second dialect, not a
+      # package. Guards against a pyslang upgrade silently changing the model.
+      - name: Golden reproduces byte-for-byte
+        run: |
+          set -euo pipefail
+          nix run .#svxprobe-elaborate -- --top picorv32_soc \
+            fixtures/picorv32_soc/rtl/picorv32.v \
+            fixtures/picorv32_soc/rtl/soc_pkg.sv \
+            fixtures/picorv32_soc/rtl/mem_if.sv \
+            fixtures/picorv32_soc/rtl/soc_mem.sv \
+            fixtures/picorv32_soc/rtl/picorv32_soc.sv \
+            --gate-level --name-refs -o /tmp/hierarchy.json
+          cmp /tmp/hierarchy.json fixtures/picorv32_soc/golden/hierarchy.json
+

@@ -39,10 +39,29 @@ npm run tauri dev   # Tauri window + Vite HMR
 | nixpkgs | committed `flake.lock` | Without it the "pinned Verilator" claim would be false |
 | pyslang / Python / Verilator | see [fixtures.md](fixtures.md) | |
 
-The Python harness is **not** packaged by Nix: `uv sync` fetches `pyslang` from PyPI,
-which is deliberately impure. `pyslang` is absent from nixpkgs (the `slang` there is
-jedsoft's S-Lang, unrelated) and builds its vendored slang through CMake `FetchContent`,
-which the Nix sandbox forbids.
+The Python harness **is** packaged by Nix (#280): `packages.svxprobe-elaborate`, built
+from source including `pyslang`, with `nix/pyslang.nix` carrying the derivation because
+`pyslang` is absent from nixpkgs (the `slang` there is jedsoft's S-Lang, unrelated). So
+`nix develop` is self-contained — no `uv sync`, no PyPI fetch at run time — and
+`svxprobe-elaborate` is on `PATH`, which is what `Session::elaborate_and_load` resolves.
+
+The build is hermetic without patching. slang declares each dependency as
+`FetchContent_Declare(... FIND_PACKAGE_ARGS <version>)`, and `FIND_PACKAGE_ARGS`
+(CMake >= 3.24) runs `find_package` **first**, so the git clone the sandbox forbids is
+only a fallback. Supplying `fmt >= 12.1` and `pybind11 >= 3.0` is the entire mechanism —
+which is why the flake tracks `nixos-25.11`, the first channel carrying both.
+
+It is **not** in `checks`, on purpose: the derivation builds slang from source (21m22s
+measured on 8 cores) and there is no binary cache, so gating it per-PR would dominate
+`nix flake check`. `nightly.yml`'s `nix-harness` job builds it instead and asserts the
+packaged harness still reproduces the committed golden byte-for-byte.
+
+`uv` left the Nix dev shell, but **only there**. It remains the supported path for
+contributors without Nix, and `ci.yml`/`nightly.yml` still drive the harness through it;
+`elaborate/uv.lock` stays the pin of record. Inside `nix develop` the interpreter also
+carries the harness's dependencies and `PYTHONPATH` points at `elaborate/`, so
+`python -m svxprobe_elaborate.<mod>` runs your **working tree**, while the
+`svxprobe-elaborate` on `PATH` is the fixed store build.
 
 ## CI workflows
 
@@ -115,9 +134,12 @@ so the PR-running jobs keep the workflow's default read token.
 
 ### `nightly.yml` — scheduled
 
-Three jobs, none of which gate a PR: `repro-tier1` (Verilator trace regeneration),
-`stress-tier2` (Ibex, `continue-on-error`), and `scale-bench` (the scalability collector,
-`continue-on-error`, uploading a `scale-bench-metrics` artifact). The benchmark job runs
+Four jobs, none of which gate a PR: `repro-tier1` (Verilator trace regeneration),
+`stress-tier2` (Ibex, `continue-on-error`), `scale-bench` (the scalability collector,
+`continue-on-error`, uploading a `scale-bench-metrics` artifact), and `nix-harness`
+(`continue-on-error`, #280 — builds `packages.svxprobe-elaborate` and asserts it still
+reproduces the committed golden byte-for-byte; it lives here rather than in `checks`
+because it compiles slang from source with no binary cache). The benchmark job runs
 `--online`, since CI's cold registry cache makes the default `--offline` fail.
 
 ### `nix.yml` — on `flake.*` / `core/**` changes (Ubuntu)
