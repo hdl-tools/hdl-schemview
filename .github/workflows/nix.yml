@@ -41,15 +41,23 @@ jobs:
       - name: nix flake check
         run: nix flake check -L
 
-      # The specific bug #243 fixes: nixpkgs 25.05 ships rustc 1.86 while
-      # core/rust-toolchain.toml pins 1.94, and with no rustup in the shell the
-      # pin was silently ignored. The flake now reads the channel out of that
-      # file, so the two cannot disagree — assert it rather than trust it.
+      # The specific bug #243 fixes: nixpkgs ships a rustc that is not the one
+      # core/rust-toolchain.toml pins, and with no rustup in the shell the pin
+      # was silently ignored. The drift has since reversed direction — 25.05 was
+      # behind at 1.86, 25.11 is ahead at 1.97.1 (#280) — which changes nothing:
+      # either way the shell must hand out the pinned 1.94. The flake reads the
+      # channel out of that file, so the two cannot disagree — assert it anyway.
+      #
+      # Asserted against `.#ci`, a toolchain-only shell, not the default one: the
+      # default shell carries the elaboration harness, so entering it builds
+      # pyslang from source (~11 min here, no binary cache) just to read a
+      # version string. Both shells share one `toolchain` binding, so what is
+      # pinned is the toolchain derivation itself and they cannot diverge on it.
       - name: Dev shell matches rust-toolchain.toml
         run: |
           set -euo pipefail
           pinned=$(grep -oP 'channel\s*=\s*"\K[^"]+' core/rust-toolchain.toml)
-          actual=$(nix develop --command rustc --version | cut -d' ' -f2)
+          actual=$(nix develop .#ci --command rustc --version | cut -d' ' -f2)
           echo "pinned=[$pinned] actual=[$actual]"
           # Without these two guards the comparison passes vacuously: if both
           # extractions fail, "" matches "" and the step reports success while
