@@ -1,7 +1,9 @@
 # ADR 0009 — Packaging for isolated environments
 
 - **Status:** Accepted — tier 1 shipped in `v0.1.0` (2026-08-01), pending offline-install
-  verification on real hardware (#240); tier 2 gated on the PyInstaller spike (#277)
+  verification on real hardware (#240); tier 2 gated on the PyInstaller spike (#277).
+  Amended 2026-08-17: pyslang builds hermetically under Nix (#280) — evidence for the
+  loop-back clause, but not a substitute for the #277 spike
 - **Date:** 2026-07-26
 - **Deciders:** project maintainers
 - **Relates to:** `app/src-tauri` (bundle config), `core/crates/gui` (`elaborate_and_load`),
@@ -146,3 +148,44 @@ If the PyInstaller spike fails on any target OS, tier 2 is not merely delayed �
 alternatives are a per-OS system Python requirement (which violates the constraint that
 motivated this ADR) or native bindings (option 4). Record the spike result here either
 way; a negative result is the input that promotes option 4 from "later" to "next".
+
+## Amendment — 2026-08-17: pyslang builds hermetically under Nix (#280)
+
+The Loop-back clause above asks for the spike result to be recorded "either way,"
+because a negative one promotes option 4 (native slang bindings) from *later* to
+*next*. #280 is a **different** spike — Nix, not PyInstaller — but it bears on the
+same underlying question, so the result belongs here.
+
+**Result: yes.** `pyslang==11.0.0` builds from the PyPI sdist inside a
+`sandbox = true` derivation, with no network and no patches, and the resulting
+harness reproduces the committed `picorv32_soc` golden byte-for-byte. It ships as
+`packages.svxprobe-elaborate`.
+
+The blocker was never "slang uses FetchContent". Modern slang declares every
+dependency as `FetchContent_Declare(... FIND_PACKAGE_ARGS <version>)`, and
+`FIND_PACKAGE_ARGS` (CMake >= 3.24) runs `find_package` **first** — the git clone
+is only a fallback. Supplying `fmt >= 12.1` and `pybind11 >= 3.0` is the whole
+mechanism; neither existed in `nixos-25.05`, which is why the flake now tracks
+`nixos-25.11`. Boost is optional behind a vendored single header, and
+mimalloc/cpptrace/Catch2 never fire for a pylib build.
+
+Two consequences worth recording:
+
+- **This does not close #277, and does not by itself change option 4's standing.**
+  The two spikes fail for different reasons: Nix *builds* the extension from source
+  in a controlled environment, whereas PyInstaller must *relocate* an already-built
+  `.so` onto a machine with no Python at all. A hermetic source build lowers the
+  prior that the extension is intractable to package, but it does not demonstrate
+  the property tier 2 actually needs. #277 still has to be run on all three OSes.
+- **It does not serve the isolated machine either.** #243 already recorded that a
+  machine which cannot install libraries cannot install Nix; this is a
+  reproducible-dev-and-CI channel, not a second attempt at tier 1. The workflow
+  `harness_missing_message()` names — elaborate elsewhere, copy the JSON across —
+  remains the answer for the isolated case until tier 2 lands.
+
+A third, incidental finding: packaging is what exposed `validate.py` resolving
+`model.schema.json` as a *sibling* of its package directory, so the schema was
+absent from every wheel ever built and a non-editable `pip install .` produced a
+harness that raised on any validation call. Fixed in #306. This is the ordinary
+value of packaging something — it exercises the install path that day-to-day
+`uv run` never touches.
