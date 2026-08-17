@@ -34,3 +34,9 @@ fixtures/**/*.json text eol=lf
 # `#!/usr/bin/env bash`, which dies as "bad interpreter" — so these must be LF
 # on every platform regardless of core.autocrlf (#261).
 *.sh   text eol=lf
+
+# Same hazard, one level in: Nix expressions embed shell (devShells' shellHook,
+# the checks' buildPhase), and Nix copies those strings into a script verbatim.
+# A CRLF checkout yields `$'\r': command not found` at every embedded line end —
+# the shell still starts, so this fails quietly rather than loudly (#280).
+*.nix  text eol=lf

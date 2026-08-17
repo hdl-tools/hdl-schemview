@@ -41,6 +41,13 @@
         root = ./.;
         fileset = lib.fileset.unions [ ./core ./fixtures ];
       };
+      # Also rooted at ./. — see nix/svxprobe-elaborate.nix: the harness tests
+      # reach fixtures/ via parents[2], so elaborate/ and fixtures/ have to stay
+      # siblings at the same depth they occupy in the repo.
+      elaborateSrc = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [ ./elaborate ./fixtures ];
+      };
 
       cargoCommon = {
         version = "0.0.0"; # core/Cargo.toml [workspace.package]
@@ -91,6 +98,17 @@
           doCheck = false;
           inherit meta;
         });
+
+      # pyslang is not in nixpkgs, so it is built here and threaded into the
+      # harness. Parameterized on pkgs for the same reason svxprobeFor is: one
+      # definition serves both `packages.*` and `overlays.default`.
+      pyslangFor = pkgs: pkgs.python3Packages.callPackage ./nix/pyslang.nix { };
+
+      harnessFor = pkgs:
+        pkgs.python3Packages.callPackage ./nix/svxprobe-elaborate.nix {
+          pyslang = pyslangFor pkgs;
+          src = elaborateSrc;
+        };
     in
     {
       # System-independent, so it lives outside eachDefaultSystem. It composes
@@ -99,6 +117,11 @@
       overlays.default = lib.composeExtensions rust-overlay.overlays.default
         (final: _prev: {
           svxprobe = svxprobeFor final;
+          svxprobe-elaborate = harnessFor final;
+          # Exposed on its own because it is useful independently of this repo —
+          # pyslang is absent from nixpkgs, and a downstream flake wanting the
+          # slang bindings should not have to vendor this derivation.
+          pyslang = pyslangFor final;
         });
     }
     // flake-utils.lib.eachDefaultSystem (system:
@@ -109,6 +132,7 @@
         };
         toolchain = toolchainFor pkgs;
         rustPlatform = rustPlatformFor pkgs;
+        harness = harnessFor pkgs;
 
         # One derivation per PR gate, each mirroring the command ci.yml runs.
         # They deliberately duplicate ci.yml: what they prove is that *the
@@ -136,11 +160,16 @@
       {
         packages = {
           svxprobe = svxprobeFor pkgs;
+          svxprobe-elaborate = harness;
+          pyslang = pyslangFor pkgs;
           default = self.packages.${system}.svxprobe;
         };
 
         apps = {
           svxprobe = flake-utils.lib.mkApp { drv = self.packages.${system}.svxprobe; };
+          svxprobe-elaborate = flake-utils.lib.mkApp {
+            drv = self.packages.${system}.svxprobe-elaborate;
+          };
           default = self.apps.${system}.svxprobe;
         };
 
@@ -164,14 +193,29 @@
             # works — so `nix develop .#verilator`, which docs/fixtures.md names as
             # the pinned-Verilator path, could never actually rebuild the FST. #280.
             pkgs.zlib
-            # The Python side is deliberately impure: `uv sync` fetches pyslang
-            # from PyPI at run time. Packaging the harness as a derivation is
-            # blocked on pyslang building offline under Nix — tracked separately
-            # (tier B of #243).
-            pkgs.python311
-            pkgs.uv
+            # The harness, built from source including pyslang — no `uv sync`, no
+            # PyPI fetch at run time. `svxprobe-elaborate` on PATH is also what
+            # Session::elaborate_and_load looks for (core/crates/gui/src/lib.rs),
+            # so designlist loading works inside `nix develop`. #280 closed the
+            # tier-B gap that made this impure.
+            harness
+            # An interpreter carrying the same dependency set, for running the
+            # *working tree* (`python -m svxprobe_elaborate.validate ...`). The
+            # harness above is a fixed store build and cannot see your edits; both
+            # are useful and they are deliberately different things.
+            (pkgs.python3.withPackages (ps: [
+              (pyslangFor pkgs)
+              ps.jsonschema
+              ps.pytest
+            ]))
+            pkgs.ruff # elaborate/pyproject.toml [dependency-groups] dev
             pkgs.jq # golden-reproducibility diff, see ci.yml
           ];
+          # Makes the working tree importable, so `python -m svxprobe_elaborate.x`
+          # runs your edits against Nix-provided dependencies.
+          shellHook = ''
+            export PYTHONPATH="$PWD/elaborate''${PYTHONPATH:+:$PYTHONPATH}"
+          '';
         };
 
         # Minimal shell for just regenerating traces: `nix develop .#verilator`
