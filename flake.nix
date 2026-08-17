@@ -48,6 +48,23 @@
         root = ./.;
         fileset = lib.fileset.unions [ ./elaborate ./fixtures ];
       };
+      # The app crate path-depends on core/crates/{gui,wave,schematic}, and its
+      # default `bench` feature pulls scale-bench, whose `golden` feature
+      # include_bytes!'s the committed fixture — so all three trees are required.
+      # Keeping the default features on means this binary matches the released
+      # one, `--bench` included.
+      appSrc = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [ ./app ./core ./fixtures ];
+      };
+
+      # tauri.conf.json is the manifest the release machinery treats as
+      # authoritative — a tag/tauri.conf.json mismatch fails the bundle job, while
+      # the other two version fields are cosmetic. Reading it here means the flake
+      # cannot report a version the release does not have. Note this makes the app
+      # the first flake output whose version tracks a real release number; core's
+      # crates are all 0.0.0, so `packages.svxprobe` says 0.0.0 whatever the tag.
+      appVersion = (lib.importJSON ./app/src-tauri/tauri.conf.json).version;
 
       cargoCommon = {
         version = "0.0.0"; # core/Cargo.toml [workspace.package]
@@ -134,6 +151,15 @@
         rustPlatform = rustPlatformFor pkgs;
         harness = harnessFor pkgs;
 
+        frontend = pkgs.callPackage ./nix/frontend.nix { version = appVersion; };
+        hdlSchemviewApp = pkgs.callPackage ./nix/app.nix {
+          rustPlatform = rustPlatformFor pkgs;
+          src = appSrc;
+          version = appVersion;
+          svxprobe-elaborate = harness;
+          inherit frontend;
+        };
+
         # One derivation per PR gate, each mirroring the command ci.yml runs.
         # They deliberately duplicate ci.yml: what they prove is that *the
         # flake* can still run the gate, which is the thing that rots.
@@ -163,6 +189,15 @@
           svxprobe-elaborate = harness;
           pyslang = pyslangFor pkgs;
           default = self.packages.${system}.svxprobe;
+        }
+        # Linux only, expressed as attribute *presence* rather than
+        # meta.platforms: a meta restriction still leaves the attribute in
+        # packages.aarch64-darwin, where `nix flake check` would evaluate it and
+        # hit webkitgtk. Not offering what cannot be built is the honest shape.
+        # Deliberately absent from `checks` and from overlays.default — ADR 0012.
+        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          hdl-schemview-app = hdlSchemviewApp;
+          hdl-schemview-frontend = frontend;
         };
 
         apps = {

@@ -120,3 +120,43 @@ jobs:
             --gate-level --name-refs -o /tmp/hierarchy.json
           cmp /tmp/hierarchy.json fixtures/picorv32_soc/golden/hierarchy.json
 
+  nix-app:
+    name: Nix desktop app build (non-blocking)
+    runs-on: ubuntu-latest
+    # Deliberately not a PR gate (ADR 0012): `app/**` is not in nix.yml's path
+    # filter and this output is not in `checks`, so no PR pays for a webkit-linked
+    # Tauri build in a repo with no binary cache. app.yml already gates the app
+    # itself on every PR through `cargo build` and a real `tauri build`; what rots
+    # here is the *packaging*. The failure modes are a stale npmDepsHash after
+    # app/package-lock.json moves, a nixpkgs webkitgtk/gtk bump, and core/ path-dep
+    # drift — none of which need same-PR feedback, but all of which a consumer
+    # would hit before we did. See #279.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Build the app
+        run: nix build .#hdl-schemview-app -L
+      # Headless: a hosted runner has no display, and the GUI cannot be exercised
+      # here. This proves the binary links and runs, and that the #275 rename held
+      # (cargo emits hdl-schemview-app; the bundler's mainBinaryName does not apply
+      # to a plain cargo build, so the derivation renames it itself).
+      - name: Binary runs and carries the release name
+        run: |
+          set -euo pipefail
+          test -x result/bin/hdl-schemview
+          ./result/bin/hdl-schemview --bench --help | head -1
+      # The wrapper is where a GUI packaging bug actually lands: `nix shell` sets
+      # no GTK environment, so anything missing here is simply absent for a
+      # consumer, and shows up as a blank window rather than a build failure.
+      - name: Wrapper carries the GTK runtime environment
+        run: |
+          set -euo pipefail
+          for v in XDG_DATA_DIRS GIO_EXTRA_MODULES GDK_PIXBUF_MODULE_FILE SVXPROBE_ELABORATE; do
+            strings result/bin/hdl-schemview | grep -qx "$v" \
+              || { echo "::error::wrapper is missing $v"; exit 1; }
+          done
+
