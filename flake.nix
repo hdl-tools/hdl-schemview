@@ -218,6 +218,21 @@
           '';
         };
 
+        # Toolchain only, for nix.yml's rustc-pin assertion: `nix develop .#ci`.
+        #
+        # It exists purely for cost. `devShells.default` now carries the harness,
+        # so entering it builds pyslang from source — ~11 min on a hosted runner
+        # with no binary cache, which took nix.yml from 2m33s to 13m39s just to
+        # read `rustc --version`.
+        #
+        # What is asserted is not weakened by this: `toolchain` is the same
+        # binding both shells use, so the assertion still pins the toolchain
+        # derivation itself. The two shells cannot disagree on rustc without
+        # `toolchainFor` changing, which would move both. What CI no longer
+        # exercises is that `devShells.default` *evaluates and builds* — the
+        # nightly nix-harness job covers that, since it builds the same closure.
+        devShells.ci = pkgs.mkShell { packages = [ toolchain ]; };
+
         # Minimal shell for just regenerating traces: `nix develop .#verilator`
         devShells.verilator = pkgs.mkShell {
           packages = [ pkgs.verilator pkgs.zlib ]; # zlib: see the note above
