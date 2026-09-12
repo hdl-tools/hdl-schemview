@@ -78,6 +78,15 @@ rustPlatform.buildRustPackage {
     openssl
   ];
 
+  # Without this the binary is a *dev* build: tauri-build aliases `cfg(dev)` to
+  # "the custom-protocol feature is off", and a dev-cfg app loads
+  # tauri.conf.json's `devUrl` (http://localhost:5173) instead of the dist
+  # embedded by generate_context!. It still builds, still launches, still opens a
+  # window — and renders "Could not connect to localhost: Connection refused".
+  # `npm run tauri build` passes this feature itself, so the .deb/.rpm/AppImage
+  # never showed the fault; nix/app.nix drives cargo directly and has to pass it.
+  buildFeatures = [ "tauri/custom-protocol" ];
+
   # The app crate is a thin shell over svxprobe-gui, which core's `checks.test`
   # already covers; there are no tests here to run.
   doCheck = false;

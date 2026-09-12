@@ -83,6 +83,19 @@ libayatana-appindicator3-dev`).
 Released Linux bundles are built on Ubuntu 22.04, so they need **glibc ≥ 2.35** (Ubuntu 22.04
 or newer, Debian 12 or newer). A locally built binary inherits your own host's glibc instead.
 
+`nix build .#hdl-schemview-app` takes glibc out of the picture — the binary links the flake's
+own glibc and WebKitGTK, whatever the host ships. One caveat on a non-NixOS host: the closure
+carries libglvnd but no Mesa EGL driver, so WebKit's web process aborts with
+`Could not create default EGL display: EGL_BAD_PARAMETER` and the window renders blank. Launch
+it through [nixGL](https://github.com/nix-community/nixGL), which supplies the GL/EGL stack:
+
+```bash
+nix run --impure github:nix-community/nixGL#nixGLIntel -- ./result/bin/hdl-schemview
+```
+
+(`nixGLIntel` is the Mesa wrapper — it covers Intel *and* AMD; use `nixGLNvidia` on the
+proprietary NVIDIA driver.) On NixOS, run `./result/bin/hdl-schemview` directly.
+
 ```bash
 cd app
 npm install
