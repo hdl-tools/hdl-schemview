@@ -81,7 +81,9 @@ Prereqs: Rust, Node 20+, and on Linux the Tauri deps
 libayatana-appindicator3-dev`).
 
 Released Linux bundles are built on Ubuntu 22.04, so they need **glibc ≥ 2.35** (Ubuntu 22.04
-or newer, Debian 12 or newer). A locally built binary inherits your own host's glibc instead.
+or newer, Debian 12 or newer). A locally built binary inherits your own host's glibc instead —
+[docs/building-from-source.md](../docs/building-from-source.md) is the full walkthrough for
+building and installing it yourself, with a troubleshooting table.
 
 ```bash
 cd app

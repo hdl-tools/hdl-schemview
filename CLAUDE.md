@@ -60,6 +60,7 @@ SystemVerilog RTL
 | Node model, `NodeKind`, schematic DTOs, the wire format | [`docs/data-model.md`](docs/data-model.md) |
 | `app/src` internals — panes, bus, ELK, waveform, source | [`docs/frontend.md`](docs/frontend.md) |
 | Running the app, launch flags, bundling | [`app/README.md`](app/README.md) |
+| Building/installing from source on an unsupported host | [`docs/building-from-source.md`](docs/building-from-source.md) |
 | Harness flags (`--gate-level`, `--name-refs`, `--hls-*`) | [`elaborate/README.md`](elaborate/README.md) |
 | Commands, PR gates, CI workflows | [`docs/development.md`](docs/development.md) + [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Why something is the way it is | [`docs/decisions/`](docs/decisions/) (indexed) |

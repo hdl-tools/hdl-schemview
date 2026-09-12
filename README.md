@@ -74,6 +74,7 @@ the `svxprobe` CLI), and `app/` (the Tauri desktop app). Committed fixtures live
 | [docs/data-model.md](docs/data-model.md) | The elaborated node model, the schematic DTOs, and the three-way wire-format sync rule |
 | [docs/frontend.md](docs/frontend.md) | `app/src` internals — panes, the selection bus, ELK layout, waveform lanes, source tokenizing |
 | [docs/development.md](docs/development.md) | Where every command lives, the toolchain pins, and what each CI workflow runs |
+| [docs/building-from-source.md](docs/building-from-source.md) | Building and **installing** it yourself when the released artifacts do not fit your machine — glibc floor, per-path prerequisites, troubleshooting |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | The phased execution plan, gates, non-goals and risk register |
 | [docs/benchmarking.md](docs/benchmarking.md) | The scalability runbook and the measured findings that gate the open Phase-4 decisions |
 | [docs/fixtures.md](docs/fixtures.md) | The two-tier fixture policy, regeneration, and the pinned tool versions |
@@ -120,6 +121,13 @@ cargo run $C -- $P --source picorv32_soc.sv:27:29 --context picorv32_soc.g_lane[
 The project is polyglot: a Rust core, a Python (pyslang) elaboration harness, and
 Verilator for generating fixture traces.
 
+> Just want it **running on your machine** — because the released `.deb`/AppImage
+> refuses to load on your glibc, or there is no artifact for your platform? That is a
+> different job from setting up to contribute:
+> **[docs/building-from-source.md](docs/building-from-source.md)** covers it end to end,
+> including which prerequisites each build path actually needs and how to install what
+> you built.
+
 ### Option A — Nix (most reproducible)
 
 A flake provides a dev shell with a pinned Verilator plus the Rust and Python
@@ -140,10 +148,11 @@ nix build .#svxprobe && ./result/bin/svxprobe --help
 nix flake check        # mirrors the Rust PR gate: fmt + clippy + test
 ```
 
-Downstream flakes can consume the package via `overlays.default`. The Python
-harness is **not** packaged — the dev shell's `uv sync` fetches `pyslang` from
-PyPI, which is deliberately impure; see
-[#243](https://github.com/chuanseng-ng/hdl-schemview/issues/243).
+Downstream flakes can consume the package via `overlays.default`. The Python harness
+**is** packaged too (`packages.svxprobe-elaborate`, built from source including `pyslang`),
+so the dev shell is self-contained — no `uv sync`, no PyPI fetch at run time (#280). `uv`
+remains the supported path for contributors without Nix. See
+[docs/development.md](docs/development.md) §Toolchain pins.
 
 ### Option B — per-language tools
 
