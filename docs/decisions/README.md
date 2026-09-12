@@ -17,6 +17,7 @@ add an ADR, add its row here rather than starting a second list elsewhere.
 | [0010](0010-schematic-trace-mode.md) | Schematic trace mode | Tracing is a **seeded, boundary-crossing projection** with visible level-of-detail caps |
 | [0011](0011-rkyv-cache-validation-policy.md) | rkyv cache validation policy | **Proposed:** gate unchecked access behind a cheap checksum, with the JSON as fallback — bytecheck costs 294 ms at 1M |
 | [0012](0012-nix-outputs-are-a-build-channel.md) | Nix outputs are a build channel | `checks` is the supported surface; the harness and desktop app are best-effort packages, watched nightly, never release artifacts |
+| [0013](0013-glibc-floor-of-linux-artifacts.md) | glibc floor of Linux artifacts | The Linux bundle runner is **pinned to `ubuntu-22.04`** because it sets the glibc floor (2.35) of everything shipped |
 
 ## Writing a new one
 

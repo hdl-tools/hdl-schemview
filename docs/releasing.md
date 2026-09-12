@@ -246,7 +246,7 @@ change can only be proven by dispatching the workflow on its branch — so
 `workflow_dispatch` takes a `bundle_os` input that narrows the matrix (#260):
 
 ```bash
-gh workflow run app.yml --ref feat/my-packaging-branch -f bundle_os=ubuntu-latest
+gh workflow run app.yml --ref feat/my-packaging-branch -f bundle_os=ubuntu-22.04
 ```
 
 That is ~5 billed minutes instead of ~49. The input affects **dispatch only** — a

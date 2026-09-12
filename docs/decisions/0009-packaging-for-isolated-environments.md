@@ -122,8 +122,11 @@ When this ADR was written the table above named `.deb`/`.rpm` together, but CI b
 only the `.deb`: `app.yml` excluded `.rpm` on the theory that bundling it on Ubuntu
 "can fail and take the job down". That premise did not hold. Tauri 2 writes the RPM
 itself through the pure-Rust `rpm` crate — the pinned `@tauri-apps/cli` 2.11.3 carries
-a full `RpmConfig` and its native binary contains no `rpmbuild` string — so
-`ubuntu-latest` needs no extra toolchain. The Linux leg now builds `appimage,deb,rpm`.
+a full `RpmConfig` and its native binary contains no `rpmbuild` string — so the Ubuntu
+runner needs no extra toolchain. The Linux leg now builds `appimage,deb,rpm`.
+
+> Later note: that runner is now pinned to `ubuntu-22.04` rather than `ubuntu-latest`, because
+> it sets the glibc floor of all three Linux artifacts. See `docs/development.md` §CI.
 
 What this amendment does **not** change: **AppImage remains the supported
 isolated-machine artifact.** `.deb` and `.rpm` are one tier — *"Linux (connected)"* —

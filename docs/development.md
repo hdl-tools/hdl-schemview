@@ -95,10 +95,19 @@ packaging change is proven by dispatching the workflow on its branch instead;
 minutes instead of ~49). It applies to dispatch only, so pushes and tags always build all
 three.
 
+The Linux legs run on **`ubuntu-22.04`, not `ubuntu-latest`** — that runner sets the glibc
+floor of every Linux artifact the project ships, and glibc is backward- but not
+forward-compatible. Built on `ubuntu-latest` (24.04) the binary carries a `GLIBC_2.39`
+dependency (Rust std reaches for `pidfd_spawnp` when glibc ≥ 2.39 is present at compile time)
+and the loader rejects it outright on 22.04. 22.04 yields a 2.35 floor and runs everywhere
+24.04 does. A `glibc floor` step in the `bundle` job asserts this on the release binary so a
+runner-image bump cannot raise it silently.
+
 The Linux leg builds `appimage,deb,rpm`. Both Linux packages are smoke-tested by
 `.github/scripts/linux-package-smoke.sh <deb|rpm>`, which installs each in a **clean
-container** — Ubuntu 24.04 to match the build host's glibc, Fedora unpinned so a package
-rename surfaces here — and asserts four things: the package declares WebKitGTK, it
+container** — Ubuntu 22.04, the *oldest supported target* rather than a match for the build
+host, so a raised glibc floor actually fails here; Fedora unpinned so a package rename
+surfaces here — and asserts four things: the package declares WebKitGTK, it
 installs, the launcher runs headlessly (`--bench`), and its `.desktop`/icons land where a
 launcher finds them.
 
