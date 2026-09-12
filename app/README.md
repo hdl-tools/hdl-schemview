@@ -81,7 +81,9 @@ Prereqs: Rust, Node 20+, and on Linux the Tauri deps
 libayatana-appindicator3-dev`).
 
 Released Linux bundles are built on Ubuntu 22.04, so they need **glibc ≥ 2.35** (Ubuntu 22.04
-or newer, Debian 12 or newer). A locally built binary inherits your own host's glibc instead.
+or newer, Debian 12 or newer). A locally built binary inherits your own host's glibc instead —
+[docs/building-from-source.md](../docs/building-from-source.md) is the full walkthrough for
+building and installing it yourself, with a troubleshooting table.
 
 `nix build .#hdl-schemview-app` takes glibc out of the picture — the binary links the flake's
 own glibc and WebKitGTK, whatever the host ships. One caveat on a non-NixOS host: the closure
@@ -228,8 +230,12 @@ supported install, use the bundles below.
 > under [nixGL](https://github.com/nix-community/nixGL):
 >
 > ```bash
-> nix run --impure github:nix-community/nixGL -- hdl-schemview
+> nix run --impure github:nix-community/nixGL#nixGLIntel -- ./result/bin/hdl-schemview
 > ```
+>
+> `nixGLIntel` is the **Mesa** wrapper — it covers AMD as well as Intel; use `nixGLNvidia`
+> on the proprietary NVIDIA driver. Name the binary by path: nixGL runs the command you
+> hand it, and `./result/bin/hdl-schemview` is not on `PATH` after a bare `nix build`.
 >
 > These variables are deliberately **not** baked into the wrapper — hard-setting them
 > would degrade rendering on hosts that do not need them. Note WSL/WSLg is not a
