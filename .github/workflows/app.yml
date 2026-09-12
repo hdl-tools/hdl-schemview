@@ -29,7 +29,7 @@ on:
         description: "Limit the bundle matrix (verification runs only)"
         default: all
         type: choice
-        options: [all, ubuntu-latest, windows-latest, macos-latest]
+        options: [all, ubuntu-22.04, windows-latest, macos-latest]
 
 permissions:
   contents: read
@@ -40,7 +40,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # ubuntu-22.04, not ubuntu-latest: see the bundle matrix below.
+        # Held in lockstep with it so the compile-only leg exercises the same
+        # glibc as the artifacts users actually install.
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -119,7 +122,17 @@ jobs:
         # truthy, so every non-dispatch event — push, tag — short-circuits to
         # the full list. Do not reorder the operands: putting the fallback
         # first makes it win unconditionally.
-        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.bundle_os != 'all' && format('["{0}"]', inputs.bundle_os) || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+        #
+        # The Linux leg is pinned to ubuntu-22.04, NOT ubuntu-latest, because
+        # this runner sets the glibc floor of every Linux artifact we ship and
+        # glibc is backward- but not forward-compatible. Built on ubuntu-latest
+        # (24.04) the binary carries a DT_VERNEED on GLIBC_2.39 — Rust std
+        # picks up pidfd_spawnp/pidfd_getpid when glibc >= 2.39 is present at
+        # compile time — and the loader rejects it outright on 22.04, which is
+        # still in LTS support. 22.04 gives a 2.35 floor and runs everywhere
+        # 24.04 does. Do not "modernise" this back to ubuntu-latest; the
+        # glibc floor assertion in the Bundle step exists to catch that.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.bundle_os != 'all' && format('["{0}"]', inputs.bundle_os) || '["ubuntu-22.04","windows-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -259,6 +272,33 @@ jobs:
             macOS)   npm run tauri build -- --bundles app,dmg ;;
           esac
 
+      # The whole point of pinning the Linux runner (see the bundle matrix): a
+      # runner-image bump that raises the glibc floor is invisible in every other
+      # check — the bundle builds, the container smokes pass, and the breakage
+      # only shows up in a user's `dpkg -i`. Assert the floor here instead, on the
+      # binary that goes into all three Linux bundles. 2.35 is Ubuntu 22.04's.
+      - name: glibc floor
+        if: runner.os == 'Linux'
+        run: |
+          # mainBinaryName (tauri.conf.json) and the cargo package name have
+          # differed across releases; take whichever this build produced.
+          bin=
+          for c in hdl-schemview hdl-schemview-app; do
+            if [ -f "app/src-tauri/target/release/$c" ]; then
+              bin="app/src-tauri/target/release/$c"
+              break
+            fi
+          done
+          test -n "$bin" || { echo "::error::no release binary to check"; exit 1; }
+          floor=$(objdump -T "$bin" | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1)
+          echo "$bin requires at most $floor"
+          if [ "$(printf '%s\nGLIBC_2.35\n' "$floor" | sort -V | tail -1)" != "GLIBC_2.35" ]; then
+            echo "::error::$bin needs $floor, above the GLIBC_2.35 (Ubuntu 22.04) floor."
+            echo "::error::The Linux runner was probably bumped off ubuntu-22.04."
+            objdump -T "$bin" | grep -E 'GLIBC_2\.3[6-9]|GLIBC_2\.[4-9][0-9]' || true
+            exit 1
+          fi
+
       # Tier 1's exit criterion, against the real artifact: copy one file to a
       # machine with no toolchain and produce a metrics file. `--bench` is
       # headless, so it needs no display here.
@@ -272,7 +312,8 @@ jobs:
       - name: AppImage self re-exec smoke
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install -y libfuse2t64
+          # libfuse2 on 22.04; the package was renamed libfuse2t64 in 24.04.
+          sudo apt-get install -y libfuse2
           app=$(find app/src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
           test -n "$app" || { echo "::error::no AppImage was produced"; exit 1; }
           chmod +x "$app"

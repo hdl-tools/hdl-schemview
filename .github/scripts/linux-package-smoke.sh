@@ -39,10 +39,13 @@ fmt=${1:?usage: linux-package-smoke.sh <deb|rpm>}
 bundle="$PWD/app/src-tauri/target/release/bundle"
 
 case "$fmt" in
-  # Matched to the build host's glibc. The binary is compiled on ubuntu-latest,
-  # so an older base (Debian 12) could fail on glibc for reasons that have
-  # nothing to do with packaging, and report a packaging bug that is not there.
-  deb) dir="$bundle/deb"; image="ubuntu:24.04" ;;
+  # The OLDEST supported target, not the build host — those are now the same
+  # release (app.yml pins the Linux runner to ubuntu-22.04), and that is the
+  # point. Smoking on a base that matches or exceeds the build host can never
+  # catch a raised glibc floor: it was ubuntu:24.04 here while the 0.2.0 .deb
+  # shipped a GLIBC_2.39 dependency that no 22.04 machine could load. Do not
+  # raise this above the runner in app.yml.
+  deb) dir="$bundle/deb"; image="ubuntu:22.04" ;;
   # Deliberately unpinned: a Fedora package rename should surface here rather
   # than in a user's install.
   rpm) dir="$bundle/rpm"; image="fedora:latest" ;;
